@@ -1,0 +1,431 @@
+//! What the views and `update` decide without touching iced: how tasks are grouped, which
+//! decisions are legal, which local sessions a room sees, and how numbers are shown.
+
+use std::path::{Path, PathBuf};
+
+use schwitzer_proto::{
+    ClaimToken, Decision, Member, MemberId, RoomState, SessionInfo, Stage, Task, Work, caps,
+};
+
+use crate::sessions::LocalSession;
+
+/// A local session counts as idle when its files were last written this long ago.
+pub const IDLE_AFTER_MS: u64 = 2 * 60 * 1000;
+
+/// The sections of the task list, in display order: what runs, what can be picked, what is
+/// being planned, what waits for a decision, what is closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Group {
+    InProgress,
+    Pickable,
+    Planning,
+    Proposals,
+    Closed,
+}
+
+impl Group {
+    pub const ALL: [Self; 5] = [
+        Self::InProgress,
+        Self::Pickable,
+        Self::Planning,
+        Self::Proposals,
+        Self::Closed,
+    ];
+
+    pub fn of(task: &Task) -> Self {
+        match (task.stage, &task.claim) {
+            (Stage::Proposed, _) => Self::Proposals,
+            (Stage::Ready, Some(_)) => Self::InProgress,
+            (Stage::Ready, None) => Self::Pickable,
+            (Stage::Planned, None) if !task.plan.trim().is_empty() => Self::Pickable,
+            (Stage::Accepted | Stage::Planned, _) => Self::Planning,
+            (Stage::Done | Stage::Rejected, _) => Self::Closed,
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::InProgress => "In progress",
+            Self::Pickable => "Ready to pick",
+            Self::Planning => "Planning",
+            Self::Proposals => "Proposals",
+            Self::Closed => "Done",
+        }
+    }
+
+    /// A stable widget id fragment.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::InProgress => "in-progress",
+            Self::Pickable => "pickable",
+            Self::Planning => "planning",
+            Self::Proposals => "proposals",
+            Self::Closed => "closed",
+        }
+    }
+}
+
+/// Whether the task has a finished plan nobody builds yet: picking it approves the plan (when
+/// still `Planned`) and claims the build for the picker.
+pub fn pickable(task: &Task) -> bool {
+    Group::of(task) == Group::Pickable
+}
+
+/// The tasks of `group`, high priority first, then by number.
+pub fn tasks_in(state: &RoomState, group: Group) -> Vec<&Task> {
+    let mut tasks: Vec<&Task> = state
+        .tasks
+        .iter()
+        .filter(|t| Group::of(t) == group)
+        .collect();
+    tasks.sort_by_key(|t| (t.priority, t.number));
+    tasks
+}
+
+/// The decisions the server accepts for `task` right now (plan §3, `Decide`), in button order.
+pub fn legal_decisions(task: &Task) -> Vec<Decision> {
+    match task.stage {
+        Stage::Proposed => vec![Decision::Accept, Decision::Reject],
+        Stage::Accepted => vec![Decision::Reject],
+        Stage::Planned if task.plan.trim().is_empty() => vec![Decision::Replan, Decision::Reject],
+        Stage::Planned => vec![Decision::Approve, Decision::Replan, Decision::Reject],
+        Stage::Ready if task.claim.is_none() => vec![Decision::Replan],
+        Stage::Ready => Vec::new(),
+        Stage::Done | Stage::Rejected => vec![Decision::Reopen],
+    }
+}
+
+/// Whether `EditTask` is allowed for the task.
+pub fn editable(task: &Task) -> bool {
+    !matches!(task.stage, Stage::Done | Stage::Rejected)
+}
+
+/// The label of a stage as shown next to a task.
+pub fn stage_label(task: &Task) -> &'static str {
+    match (task.stage, task.claim.as_ref().map(|c| c.work)) {
+        (Stage::Proposed, _) => "Proposed",
+        (Stage::Accepted, Some(Work::Plan)) => "Being planned",
+        (Stage::Accepted, _) => "Accepted",
+        (Stage::Planned, _) if task.plan.trim().is_empty() => "Planned",
+        (Stage::Planned, _) => "Plan ready",
+        (Stage::Ready, Some(_)) => "In progress",
+        (Stage::Ready, None) => "Approved",
+        (Stage::Done, _) => "Done",
+        (Stage::Rejected, _) => "Rejected",
+    }
+}
+
+pub fn work_label(work: Work) -> &'static str {
+    match work {
+        Work::Plan => "planning",
+        Work::Build => "building",
+    }
+}
+
+/// The name of a member, or the start of the id when the member is unknown.
+pub fn member_name(members: &[Member], id: &MemberId) -> String {
+    members
+        .iter()
+        .find(|m| &m.id == id)
+        .map_or_else(|| id.to_hex()[..8].to_owned(), |m| m.name.clone())
+}
+
+/// Which of the six tag colours a member wears: fixed per member, the same for everyone.
+pub fn member_hue(id: &MemberId) -> usize {
+    usize::from(id.0[0] ^ id.0[31]) % 6
+}
+
+/// The sessions of `local` the room sees: those whose working directory lies in one of
+/// `repos`. A session that holds a claim of `me` on a task of the room (its latest such marker)
+/// is linked to that task.
+pub fn shared_sessions(
+    local: &[LocalSession],
+    room: &RoomState,
+    me: MemberId,
+    repos: &[PathBuf],
+) -> Vec<SessionInfo> {
+    let mut shared: Vec<SessionInfo> = local
+        .iter()
+        .filter(|session| in_repos(&session.cwd, repos))
+        .map(|session| {
+            let task = session.markers.iter().rev().find_map(|marker| {
+                room.tasks.iter().find(|t| {
+                    t.claim
+                        .as_ref()
+                        .is_some_and(|c| &c.token == marker && c.member == me)
+                })
+            });
+            SessionInfo {
+                id: session.id.clone(),
+                title: truncate(&session.title, caps::SESSION_TITLE),
+                project: session.project.clone(),
+                model: session.model.clone(),
+                started_ms: session.started_ms,
+                active_ms: session.active_ms,
+                tokens: session.tokens,
+                task: task.map(|t| t.number),
+            }
+        })
+        .collect();
+    shared.sort_by(|a, b| a.id.cmp(&b.id));
+    shared.truncate(caps::SESSIONS_PER_PUBLISH);
+    shared
+}
+
+/// Whether `cwd` is one of `repos` or lies below one, compared by path components.
+fn in_repos(cwd: &Path, repos: &[PathBuf]) -> bool {
+    !cwd.as_os_str().is_empty() && repos.iter().any(|repo| cwd.starts_with(repo))
+}
+
+/// What the picker pastes into their agent: the task, the claim marker that links the agent's
+/// session to the task, and the MCP calls that finish it.
+pub fn pick_prompt(room: &str, task: &Task, token: &ClaimToken) -> String {
+    format!(
+        "Work on schwitzer task #{number} in room \"{room}\": {title}\n\
+         schwitzer-claim: {token}\n\
+         The build is claimed for you. Read the task and its approved plan with the schwitzer \
+         MCP tool get_task (room \"{room}\", task {number}), implement the plan, then call \
+         finish with a short note, or release if you stop.",
+        number = task.number,
+        title = task.title,
+        token = token.to_hex(),
+    )
+}
+
+/// `text` cut to at most `max` bytes at a character boundary.
+pub fn truncate(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    let end = (0..=max)
+        .rev()
+        .find(|&i| text.is_char_boundary(i))
+        .unwrap_or(0);
+    text[..end].to_owned()
+}
+
+/// A token count: `812`, `1.2k`, `12.3k`, `1.2M`.
+pub fn tokens(count: u64) -> String {
+    let value = count as f64;
+    if count < 1_000 {
+        count.to_string()
+    } else if count < 999_950 {
+        format!("{:.1}k", value / 1_000.0)
+    } else {
+        format!("{:.1}M", value / 1_000_000.0)
+    }
+}
+
+/// A runtime as `h:mm`.
+pub fn runtime(ms: u64) -> String {
+    let minutes = ms / 60_000;
+    format!("{}:{:02}", minutes / 60, minutes % 60)
+}
+
+/// How long ago something was: `<1m`, `5m`, `2h 05m`, `3d`.
+pub fn ago(ms: u64) -> String {
+    let minutes = ms / 60_000;
+    match minutes {
+        0 => "<1m".to_owned(),
+        1..=59 => format!("{minutes}m"),
+        60..=1_439 => format!("{}h {:02}m", minutes / 60, minutes % 60),
+        _ => format!("{}d", minutes / 1_440),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use schwitzer_proto::{Claim, Priority};
+
+    use super::*;
+
+    fn member(byte: u8) -> MemberId {
+        MemberId([byte; 32])
+    }
+
+    fn task(number: u64, stage: Stage, claim: Option<Claim>) -> Task {
+        Task {
+            number,
+            title: format!("task {number}"),
+            body: String::new(),
+            plan: String::new(),
+            stage,
+            priority: Priority::Normal,
+            author: member(1),
+            created_ms: 0,
+            updated_ms: 0,
+            claim,
+            notes: Vec::new(),
+        }
+    }
+
+    fn claim(work: Work, token: ClaimToken) -> Claim {
+        Claim {
+            member: member(1),
+            agent: "agent".to_owned(),
+            work,
+            since_ms: 0,
+            token,
+        }
+    }
+
+    fn room(tasks: Vec<Task>) -> RoomState {
+        RoomState {
+            id: schwitzer_proto::RoomId([0; 32]),
+            name: "room".to_owned(),
+            members: Vec::new(),
+            tasks,
+            sessions: Vec::new(),
+        }
+    }
+
+    fn local(id: &str, cwd: &str, markers: Vec<ClaimToken>) -> LocalSession {
+        LocalSession {
+            id: id.to_owned(),
+            title: "title".to_owned(),
+            cwd: PathBuf::from(cwd),
+            project: "proj".to_owned(),
+            model: "model".to_owned(),
+            started_ms: 10,
+            active_ms: 20,
+            tokens: 30,
+            markers,
+        }
+    }
+
+    #[test]
+    fn groups_follow_stage_claim_and_plan() {
+        let token = ClaimToken([1; 16]);
+        assert_eq!(Group::of(&task(1, Stage::Proposed, None)), Group::Proposals);
+        assert_eq!(
+            Group::of(&task(1, Stage::Accepted, Some(claim(Work::Plan, token)))),
+            Group::Planning
+        );
+        // A planned task without plan text cannot be approved, so it is not pickable.
+        let mut planned = task(1, Stage::Planned, None);
+        assert_eq!(Group::of(&planned), Group::Planning);
+        planned.plan = "Do it".to_owned();
+        assert_eq!(Group::of(&planned), Group::Pickable);
+        assert!(pickable(&planned));
+        assert_eq!(Group::of(&task(1, Stage::Ready, None)), Group::Pickable);
+        let building = task(1, Stage::Ready, Some(claim(Work::Build, token)));
+        assert_eq!(Group::of(&building), Group::InProgress);
+        assert!(!pickable(&building));
+        assert_eq!(Group::of(&task(1, Stage::Done, None)), Group::Closed);
+        assert_eq!(Group::of(&task(1, Stage::Rejected, None)), Group::Closed);
+    }
+
+    #[test]
+    fn rows_sort_by_priority_then_number() {
+        let mut low = task(1, Stage::Proposed, None);
+        low.priority = Priority::Low;
+        let mut high = task(3, Stage::Proposed, None);
+        high.priority = Priority::High;
+        let normal = task(2, Stage::Proposed, None);
+        let state = room(vec![low, normal, high]);
+        let numbers: Vec<u64> = tasks_in(&state, Group::Proposals)
+            .iter()
+            .map(|t| t.number)
+            .collect();
+        assert_eq!(numbers, [3, 2, 1]);
+    }
+
+    #[test]
+    fn decisions_match_the_server_table() {
+        let token = ClaimToken([1; 16]);
+        assert_eq!(
+            legal_decisions(&task(1, Stage::Proposed, None)),
+            [Decision::Accept, Decision::Reject]
+        );
+        assert_eq!(
+            legal_decisions(&task(1, Stage::Accepted, None)),
+            [Decision::Reject]
+        );
+        let mut planned = task(1, Stage::Planned, None);
+        assert_eq!(
+            legal_decisions(&planned),
+            [Decision::Replan, Decision::Reject]
+        );
+        planned.plan = "Do it".to_owned();
+        assert_eq!(
+            legal_decisions(&planned),
+            [Decision::Approve, Decision::Replan, Decision::Reject]
+        );
+        assert_eq!(
+            legal_decisions(&task(1, Stage::Ready, None)),
+            [Decision::Replan]
+        );
+        assert!(
+            legal_decisions(&task(1, Stage::Ready, Some(claim(Work::Build, token)))).is_empty()
+        );
+        assert_eq!(
+            legal_decisions(&task(1, Stage::Done, None)),
+            [Decision::Reopen]
+        );
+        assert_eq!(
+            legal_decisions(&task(1, Stage::Rejected, None)),
+            [Decision::Reopen]
+        );
+    }
+
+    #[test]
+    fn rooms_see_the_sessions_of_their_repos() {
+        let first = ClaimToken([1; 16]);
+        let second = ClaimToken([2; 16]);
+        let stale = ClaimToken([3; 16]);
+        let state = room(vec![
+            task(1, Stage::Ready, Some(claim(Work::Build, first))),
+            task(2, Stage::Ready, Some(claim(Work::Build, second))),
+        ]);
+        let repos = [PathBuf::from("/code/app")];
+        let sessions = [
+            local("b", "/code/app/crates/x", vec![first, second, stale]),
+            local("a", "/code/app", vec![stale]),
+            local("c", "/code/app", vec![second, first]),
+            // A sibling directory with the repo's name as prefix is another repository.
+            local("d", "/code/app-old", vec![first]),
+            local("e", "/home/me", Vec::new()),
+        ];
+        let shared = shared_sessions(&sessions, &state, member(1), &repos);
+        let pairs: Vec<(&str, Option<u64>)> =
+            shared.iter().map(|s| (s.id.as_str(), s.task)).collect();
+        // `stale` matches no claimed task, so the latest marker of "b" that matches is `second`.
+        assert_eq!(pairs, [("a", None), ("b", Some(2)), ("c", Some(1))]);
+        assert_eq!(shared[0].tokens, 30);
+        // Another member's claim tokens in a local log link nothing, but the session is shared.
+        let other = shared_sessions(&sessions, &state, member(2), &repos);
+        assert!(other.iter().all(|s| s.task.is_none()));
+        assert_eq!(other.len(), 3);
+        // A room without repos sees nothing.
+        assert!(shared_sessions(&sessions, &state, member(1), &[]).is_empty());
+    }
+
+    #[test]
+    fn the_pick_prompt_carries_a_marker_the_scanner_finds() {
+        let token = ClaimToken([0xab; 16]);
+        let prompt = pick_prompt("room", &task(7, Stage::Ready, None), &token);
+        assert!(prompt.contains(&format!("\nschwitzer-claim: {}\n", token.to_hex())));
+        assert!(prompt.starts_with("Work on schwitzer task #7"));
+    }
+
+    #[test]
+    fn titles_are_cut_at_a_character_boundary() {
+        assert_eq!(truncate("abc", 5), "abc");
+        assert_eq!(truncate("äbc", 1), "");
+        assert_eq!(truncate("äbc", 2), "ä");
+    }
+
+    #[test]
+    fn numbers_are_compact() {
+        assert_eq!(tokens(812), "812");
+        assert_eq!(tokens(1234), "1.2k");
+        assert_eq!(tokens(12_345), "12.3k");
+        assert_eq!(tokens(1_234_567), "1.2M");
+        assert_eq!(runtime(0), "0:00");
+        assert_eq!(runtime(75 * 60_000), "1:15");
+        assert_eq!(ago(30_000), "<1m");
+        assert_eq!(ago(5 * 60_000), "5m");
+        assert_eq!(ago(125 * 60_000), "2h 05m");
+        assert_eq!(ago(3 * 24 * 60 * 60_000), "3d");
+    }
+}

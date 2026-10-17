@@ -1,0 +1,319 @@
+//! The schwitzer client library: runs on its own runtime, keeps one connection per server
+//! the user's rooms live on, mirrors the room states and routes requests to the right
+//! server.
+
+mod backoff;
+mod conn;
+mod sync;
+
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
+
+use schwitzer_proto::{
+    ApiError, MemberId, Request, Response, RoomId, RoomKey, RoomState, ServerAddr,
+};
+use tokio::sync::broadcast;
+use weida::{FilesOptions, IdentitySource, ReconnectPolicy, RuntimeConfig};
+
+use crate::conn::ServerConn;
+
+/// Longest wait of weida's own redial of a dropped connection.
+const REDIAL_MAX: Duration = Duration::from_secs(5);
+/// Capacity of the event channel.
+const EVENT_CAPACITY: usize = 1024;
+
+/// Errors of the client library.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ClientError {
+    /// There is no connection to the server.
+    #[error("server is offline")]
+    Offline,
+    /// The server did not answer in time.
+    #[error("timed out")]
+    Timeout,
+    /// The server refused the request.
+    #[error("{0}")]
+    Api(ApiError),
+    /// The network or the local identity failed.
+    #[error("network: {0}")]
+    Net(String),
+    /// A message could not be encoded or decoded.
+    #[error("protocol: {0}")]
+    Proto(String),
+}
+
+impl From<ApiError> for ClientError {
+    fn from(e: ApiError) -> Self {
+        Self::Api(e)
+    }
+}
+
+impl From<weida::Error> for ClientError {
+    fn from(e: weida::Error) -> Self {
+        Self::Net(e.to_string())
+    }
+}
+
+impl From<schwitzer_proto::ProtoError> for ClientError {
+    fn from(e: schwitzer_proto::ProtoError) -> Self {
+        Self::Proto(e.to_string())
+    }
+}
+
+impl From<schwitzer_proto::FrameError> for ClientError {
+    fn from(e: schwitzer_proto::FrameError) -> Self {
+        Self::Proto(e.to_string())
+    }
+}
+
+/// What the client tells the application.
+#[derive(Debug, Clone)]
+pub enum ClientEvent {
+    /// A server came online or went offline, or has something to report about its rooms.
+    Status {
+        server: ServerAddr,
+        online: bool,
+        error: Option<String>,
+    },
+    /// A room has a new state.
+    Room(Box<RoomState>),
+    /// The user is no longer in the room.
+    RoomRemoved(RoomId),
+}
+
+/// The state of a room and the server it lives on.
+struct Entry {
+    server: ServerAddr,
+    state: RoomState,
+}
+
+struct Inner {
+    member: MemberId,
+    name: Mutex<String>,
+    identity: IdentitySource,
+    handle: tokio::runtime::Handle,
+    rt: Mutex<Option<tokio::runtime::Runtime>>,
+    wrt: weida::Runtime,
+    events: broadcast::Sender<ClientEvent>,
+    /// The rooms the user keeps, in the order they were added.
+    keys: Mutex<Vec<RoomKey>>,
+    rooms: Mutex<HashMap<RoomId, Entry>>,
+    servers: Mutex<HashMap<ServerAddr, Arc<ServerConn>>>,
+    closed: AtomicBool,
+}
+
+/// A schwitzer client; clones share one connection set.
+#[derive(Clone)]
+pub struct Client(Arc<Inner>);
+
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl Client {
+    /// Starts a client on its own runtime, with the identity in `identity_dir` (created on
+    /// first use) and `name` as its display name. It connects to servers as rooms are
+    /// added.
+    pub fn start(identity_dir: &Path, name: String) -> Result<Self, ClientError> {
+        let identity = IdentitySource::files(identity_dir, FilesOptions::default())?;
+        let member = MemberId(*identity.fingerprint()?.as_bytes());
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_name("schwitzer-net")
+            .enable_all()
+            .build()
+            .map_err(|e| ClientError::Net(e.to_string()))?;
+        let handle = rt.handle().clone();
+        let wrt = weida::Runtime::with_handle(
+            handle.clone(),
+            RuntimeConfig {
+                reconnect: ReconnectPolicy {
+                    max: REDIAL_MAX,
+                    ..ReconnectPolicy::default()
+                },
+                ..RuntimeConfig::default()
+            },
+        );
+        Ok(Self(Arc::new(Inner {
+            member,
+            name: Mutex::new(name),
+            identity,
+            handle,
+            rt: Mutex::new(Some(rt)),
+            wrt,
+            events: broadcast::channel(EVENT_CAPACITY).0,
+            keys: Mutex::default(),
+            rooms: Mutex::default(),
+            servers: Mutex::default(),
+            closed: AtomicBool::new(false),
+        })))
+    }
+
+    /// The identity of this client on every server.
+    pub fn member(&self) -> MemberId {
+        self.0.member
+    }
+
+    /// The events from now on. A receiver that lags loses events: resync from
+    /// [`Client::rooms`].
+    pub fn subscribe(&self) -> broadcast::Receiver<ClientEvent> {
+        self.0.events.subscribe()
+    }
+
+    /// The rooms the user keeps with their last known state.
+    pub fn rooms(&self) -> Vec<(RoomKey, Option<RoomState>)> {
+        let keys = lock(&self.0.keys).clone();
+        let rooms = lock(&self.0.rooms);
+        keys.into_iter()
+            .map(|key| {
+                let state = rooms
+                    .get(&RoomId::of(&key.token))
+                    .map(|entry| entry.state.clone());
+                (key, state)
+            })
+            .collect()
+    }
+
+    /// Keeps `key`: its server is connected and the room joined, now and after every
+    /// reconnect.
+    pub fn add_room(&self, key: RoomKey) {
+        let conn = self.remember(key.clone());
+        if conn.session_now().is_some() {
+            let client = self.clone();
+            self.0
+                .handle
+                .spawn(async move { client.join_late(&conn).await });
+        }
+    }
+
+    /// Creates a room on `server` and keeps its key.
+    pub async fn create_room(
+        &self,
+        server: ServerAddr,
+        name: String,
+    ) -> Result<RoomKey, ClientError> {
+        let conn = self.connection(&server)?;
+        match conn.rpc(&Request::CreateRoom { name }).await? {
+            Response::Room { token, .. } => {
+                let key = RoomKey { server, token };
+                self.remember(key.clone()).mark_joined(key.token);
+                Ok(key)
+            }
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// Joins the room of `key` and keeps the key.
+    pub async fn join_room(&self, key: RoomKey) -> Result<RoomId, ClientError> {
+        let conn = self.connection(&key.server)?;
+        match conn.rpc(&Request::JoinRoom { token: key.token }).await? {
+            Response::Room { id, .. } => {
+                self.remember(key.clone()).mark_joined(key.token);
+                Ok(id)
+            }
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// Leaves the room and forgets its key. A room the server no longer knows is
+    /// forgotten as well.
+    pub async fn leave_room(&self, room: RoomId) -> Result<(), ClientError> {
+        match self.request(room, Request::LeaveRoom { room }).await {
+            Ok(_) | Err(ClientError::Api(ApiError::NotMember | ApiError::NoSuchRoom)) => {
+                self.forget_room(room);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Sends `req` to the server `room` lives on and waits for the reply, for up to 10 s
+    /// for a connection and then `RPC_TIMEOUT` for the answer.
+    pub async fn request(&self, room: RoomId, req: Request) -> Result<Response, ClientError> {
+        let server = lock(&self.0.keys)
+            .iter()
+            .find(|key| RoomId::of(&key.token) == room)
+            .map(|key| key.server.clone())
+            .ok_or(ClientError::Api(ApiError::NoSuchRoom))?;
+        self.connection(&server)?.rpc(&req).await
+    }
+
+    /// Changes the display name, on every server that is online now and on every later
+    /// connection.
+    pub async fn set_name(&self, name: String) {
+        name.clone_into(&mut lock(&self.0.name));
+        let sessions: Vec<_> = lock(&self.0.servers)
+            .values()
+            .filter_map(|conn| conn.session_now())
+            .collect();
+        let req = Request::SetName { name };
+        let sent = sessions.iter().map(|session| session.call(&req));
+        for result in futures::future::join_all(sent).await {
+            if let Err(e) = result {
+                tracing::warn!("setting the name failed: {e}");
+            }
+        }
+    }
+
+    /// Stops every connection and the runtime. The client is unusable afterwards.
+    pub fn shutdown(&self) {
+        if self.0.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        for conn in lock(&self.0.servers).values() {
+            conn.stop();
+        }
+        if let Some(rt) = lock(&self.0.rt).take() {
+            rt.shutdown_background();
+        }
+    }
+
+    pub(crate) fn emit(&self, event: ClientEvent) {
+        let _ = self.0.events.send(event);
+    }
+
+    fn name(&self) -> String {
+        lock(&self.0.name).clone()
+    }
+
+    /// Keeps `key` once and makes sure its server is connected.
+    fn remember(&self, key: RoomKey) -> Arc<ServerConn> {
+        let server = key.server.clone();
+        {
+            let mut keys = lock(&self.0.keys);
+            if !keys.iter().any(|k| k.token == key.token) {
+                keys.push(key);
+            }
+        }
+        self.ensure_server(&server)
+    }
+
+    /// The connection to `server`, started if need be; `Offline` after shutdown.
+    fn connection(&self, server: &ServerAddr) -> Result<Arc<ServerConn>, ClientError> {
+        if self.0.closed.load(Ordering::SeqCst) {
+            return Err(ClientError::Offline);
+        }
+        Ok(self.ensure_server(server))
+    }
+
+    /// Forgets the room: its key and its state. Tells the application if anything changed.
+    pub(crate) fn forget_room(&self, room: RoomId) {
+        let key_gone = {
+            let mut keys = lock(&self.0.keys);
+            let before = keys.len();
+            keys.retain(|key| RoomId::of(&key.token) != room);
+            keys.len() != before
+        };
+        let state_gone = lock(&self.0.rooms).remove(&room).is_some();
+        if key_gone || state_gone {
+            self.emit(ClientEvent::RoomRemoved(room));
+        }
+    }
+}
+
+fn unexpected(response: &Response) -> ClientError {
+    ClientError::Proto(format!("unexpected reply {response:?}"))
+}

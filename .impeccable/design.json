@@ -1,0 +1,1554 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-17T23:17:15Z",
+  "title": "Design System: Schwitzer",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Paper White",
+        "theme": "Daylight",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 90)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ],
+        "themeField": "Daylight: Tokens.ground (Palette.background)"
+      },
+      "chrome": {
+        "role": "neutral",
+        "displayName": "Mint Chrome",
+        "theme": "Daylight",
+        "canonical": "#edf5ee",
+        "oklch": "oklch(96.2% 0.013 149)",
+        "tonalRamp": [
+          "#080d08",
+          "#212722",
+          "#3e443e",
+          "#5c635d",
+          "#7d857e",
+          "#a0a7a1",
+          "#c4cbc5",
+          "#e9f1ea"
+        ],
+        "themeField": "Daylight: Tokens.chrome"
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "Raised White",
+        "theme": "Daylight",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 90)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ],
+        "themeField": "Daylight: Tokens.raised"
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "Mint Breath",
+        "theme": "Daylight",
+        "canonical": "#f2f8f3",
+        "oklch": "oklch(97.3% 0.009 151)",
+        "tonalRamp": [
+          "#080c09",
+          "#222623",
+          "#3f433f",
+          "#5e635f",
+          "#7f847f",
+          "#a1a7a2",
+          "#c5cbc6",
+          "#eaf0eb"
+        ],
+        "themeField": "Daylight: Tokens.hover"
+      },
+      "selected": {
+        "role": "neutral",
+        "displayName": "Mint Pressed",
+        "theme": "Daylight",
+        "canonical": "#e2f1e5",
+        "oklch": "oklch(94.4% 0.022 152)",
+        "tonalRamp": [
+          "#050e07",
+          "#1d2820",
+          "#39463c",
+          "#58655b",
+          "#79867c",
+          "#9ba99e",
+          "#bfcec2",
+          "#e4f3e7"
+        ],
+        "themeField": "Daylight: Tokens.selected"
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Mint Hairline",
+        "theme": "Daylight",
+        "canonical": "#d9e5db",
+        "oklch": "oklch(91.0% 0.019 151)",
+        "tonalRamp": [
+          "#060d07",
+          "#1f2820",
+          "#3b453d",
+          "#5a645c",
+          "#7b867d",
+          "#9da99f",
+          "#c1cdc3",
+          "#e6f2e8"
+        ],
+        "themeField": "Daylight: Tokens.line"
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Sage Edge",
+        "theme": "Daylight",
+        "canonical": "#8fa394",
+        "oklch": "oklch(69.5% 0.031 153)",
+        "tonalRamp": [
+          "#020f05",
+          "#192a1e",
+          "#35473a",
+          "#546759",
+          "#75887a",
+          "#97ab9c",
+          "#bbcfc0",
+          "#e0f5e5"
+        ],
+        "themeField": "Daylight: Tokens.line_strong"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Green-Black Ink",
+        "theme": "Daylight",
+        "canonical": "#142019",
+        "oklch": "oklch(23.0% 0.022 159)",
+        "tonalRamp": [
+          "#040e08",
+          "#1c2821",
+          "#39463e",
+          "#57655d",
+          "#78877d",
+          "#9aa9a0",
+          "#becec4",
+          "#e3f3e9"
+        ],
+        "themeField": "Daylight: Tokens.text (Palette.text)"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Moss Grey",
+        "theme": "Daylight",
+        "canonical": "#56665a",
+        "oklch": "oklch(49.3% 0.027 153)",
+        "tonalRamp": [
+          "#030e06",
+          "#1b291f",
+          "#37463b",
+          "#56665a",
+          "#77877b",
+          "#99aa9d",
+          "#bdcfc1",
+          "#e2f4e6"
+        ],
+        "themeField": "Daylight: Tokens.muted"
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "ICQ Green",
+        "theme": "Daylight",
+        "canonical": "#2db34a",
+        "oklch": "oklch(67.4% 0.184 147)",
+        "tonalRamp": [
+          "#001002",
+          "#012e0a",
+          "#015118",
+          "#0a7628",
+          "#0e9d38",
+          "#41c259",
+          "#6be87d",
+          "#c9ffcd"
+        ],
+        "themeField": "Daylight: Tokens.primary (Palette.primary / extended.primary.base.color)"
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "ICQ Green, Hovered",
+        "theme": "Daylight",
+        "canonical": "#27a142",
+        "oklch": "oklch(62.3% 0.170 147)",
+        "tonalRamp": [
+          "#001002",
+          "#002f0a",
+          "#045119",
+          "#047627",
+          "#1f9c3d",
+          "#4ec160",
+          "#75e684",
+          "#caffce"
+        ],
+        "themeField": "Daylight: Tokens.primary_hover"
+      },
+      "on-primary": {
+        "role": "primary",
+        "displayName": "Deep Green Ink",
+        "theme": "Daylight",
+        "canonical": "#04210c",
+        "oklch": "oklch(21.9% 0.053 150)",
+        "tonalRamp": [
+          "#001003",
+          "#0f2c16",
+          "#2d4a33",
+          "#4b6a51",
+          "#6c8c71",
+          "#8eaf93",
+          "#b2d3b7",
+          "#d6f9dc"
+        ],
+        "themeField": "Daylight: Tokens.on_primary (extended.primary.base.text)"
+      },
+      "ink": {
+        "role": "primary",
+        "displayName": "Leaf Ink",
+        "theme": "Daylight",
+        "canonical": "#1a7f35",
+        "oklch": "oklch(52.4% 0.142 148)",
+        "tonalRamp": [
+          "#001002",
+          "#002e0c",
+          "#05501c",
+          "#07762c",
+          "#3a994d",
+          "#60bd70",
+          "#85e293",
+          "#c9ffce"
+        ],
+        "themeField": "Daylight: Tokens.ink"
+      },
+      "danger": {
+        "role": "secondary",
+        "displayName": "Alarm Red",
+        "theme": "Daylight",
+        "canonical": "#c53a35",
+        "oklch": "oklch(55.4% 0.177 27)",
+        "tonalRamp": [
+          "#1f0001",
+          "#4c0204",
+          "#80030c",
+          "#b02323",
+          "#d84c45",
+          "#fe7469",
+          "#ffb3aa",
+          "#ffe9e6"
+        ],
+        "themeField": "Daylight: Tokens.danger (Palette.danger / extended.danger.base.color)"
+      },
+      "danger-soft": {
+        "role": "secondary",
+        "displayName": "Alarm Wash",
+        "theme": "Daylight",
+        "canonical": "#fbe9e7",
+        "oklch": "oklch(94.8% 0.020 25)",
+        "tonalRamp": [
+          "#130807",
+          "#2e2120",
+          "#4c3e3d",
+          "#6c5d5b",
+          "#8e7e7c",
+          "#b1a19f",
+          "#d6c5c3",
+          "#fceae8"
+        ],
+        "themeField": "Daylight: Tokens.danger_soft"
+      },
+      "on-danger": {
+        "role": "secondary",
+        "displayName": "On Alarm",
+        "theme": "Daylight",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 90)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ],
+        "themeField": "Daylight: Tokens.on_danger (extended.danger.base.text)"
+      },
+      "scrim": {
+        "role": "neutral",
+        "displayName": "Scrim",
+        "theme": "Daylight",
+        "canonical": "rgba(12, 28, 17, 0.36)",
+        "tonalRamp": [
+          "#020f05",
+          "#192a1e",
+          "#36473a",
+          "#546759",
+          "#75887a",
+          "#97ab9c",
+          "#bbcfc0",
+          "#e0f5e5"
+        ],
+        "themeField": "Daylight: Tokens.scrim"
+      },
+      "shadow": {
+        "role": "neutral",
+        "displayName": "Shadow",
+        "theme": "Daylight",
+        "canonical": "rgba(12, 28, 17, 0.18)",
+        "tonalRamp": [
+          "#020f05",
+          "#192a1e",
+          "#36473a",
+          "#546759",
+          "#75887a",
+          "#97ab9c",
+          "#bbcfc0",
+          "#e0f5e5"
+        ],
+        "themeField": "Daylight: Tokens.shadow"
+      },
+      "stage-new": {
+        "role": "secondary",
+        "displayName": "New, Outline Grey",
+        "theme": "Daylight",
+        "canonical": "#7d8c80",
+        "oklch": "oklch(62.4% 0.025 151)",
+        "tonalRamp": [
+          "#040e06",
+          "#1c291f",
+          "#39463b",
+          "#57655a",
+          "#78877b",
+          "#9aaa9d",
+          "#becec1",
+          "#e3f4e6"
+        ],
+        "themeField": "Daylight: Tokens.stage_new"
+      },
+      "stage-planning": {
+        "role": "secondary",
+        "displayName": "Planning Amber",
+        "theme": "Daylight",
+        "canonical": "#c98410",
+        "oklch": "oklch(66.8% 0.140 72)",
+        "tonalRamp": [
+          "#140800",
+          "#362000",
+          "#5c3901",
+          "#855607",
+          "#b1730a",
+          "#db942d",
+          "#feba61",
+          "#ffebd4"
+        ],
+        "themeField": "Daylight: Tokens.stage_planning (Palette.warning)"
+      },
+      "stage-pickable": {
+        "role": "secondary",
+        "displayName": "Pickable Blue",
+        "theme": "Daylight",
+        "canonical": "#2f7fd6",
+        "oklch": "oklch(59.2% 0.154 253)",
+        "tonalRamp": [
+          "#000b1f",
+          "#01254b",
+          "#02427e",
+          "#0161b5",
+          "#3484db",
+          "#5fa8fd",
+          "#a3cdff",
+          "#e4f0ff"
+        ],
+        "themeField": "Daylight: Tokens.stage_pickable"
+      },
+      "stage-running": {
+        "role": "secondary",
+        "displayName": "Running Green",
+        "theme": "Daylight",
+        "canonical": "#22a340",
+        "oklch": "oklch(62.7% 0.176 147)",
+        "tonalRamp": [
+          "#001002",
+          "#002f0a",
+          "#045119",
+          "#057627",
+          "#169d3a",
+          "#49c15d",
+          "#72e781",
+          "#caffcd"
+        ],
+        "themeField": "Daylight: Tokens.stage_running (Palette.success)"
+      },
+      "stage-closed": {
+        "role": "secondary",
+        "displayName": "Closed Muted",
+        "theme": "Daylight",
+        "canonical": "#9aa89d",
+        "oklch": "oklch(71.7% 0.022 152)",
+        "tonalRamp": [
+          "#050e07",
+          "#1d2820",
+          "#39463c",
+          "#58655b",
+          "#79867c",
+          "#9ba99e",
+          "#bfcec2",
+          "#e4f3e7"
+        ],
+        "themeField": "Daylight: Tokens.stage_closed"
+      },
+      "stage-rejected": {
+        "role": "secondary",
+        "displayName": "Rejected Red",
+        "theme": "Daylight",
+        "canonical": "#d9473f",
+        "oklch": "oklch(60.3% 0.184 27)",
+        "tonalRamp": [
+          "#1f0000",
+          "#4d0103",
+          "#800209",
+          "#b21d1d",
+          "#db4840",
+          "#ff7367",
+          "#feb3aa",
+          "#ffe9e6"
+        ],
+        "themeField": "Daylight: Tokens.stage_rejected"
+      },
+      "tag-green-fill": {
+        "role": "tertiary",
+        "displayName": "Tag Green Fill",
+        "theme": "Daylight",
+        "canonical": "#d8f3dc",
+        "oklch": "oklch(93.8% 0.042 150)",
+        "tonalRamp": [
+          "#001003",
+          "#152b1a",
+          "#324836",
+          "#516855",
+          "#718a75",
+          "#93ad97",
+          "#b7d1bb",
+          "#dcf7e0"
+        ],
+        "themeField": "Daylight: Tokens.tags[0].fill"
+      },
+      "tag-green-text": {
+        "role": "tertiary",
+        "displayName": "Tag Green Text",
+        "theme": "Daylight",
+        "canonical": "#14532d",
+        "oklch": "oklch(39.3% 0.090 153)",
+        "tonalRamp": [
+          "#001004",
+          "#002e14",
+          "#0f4f29",
+          "#347048",
+          "#569268",
+          "#79b68a",
+          "#9cdbad",
+          "#c7ffd5"
+        ],
+        "themeField": "Daylight: Tokens.tags[0].text"
+      },
+      "tag-blue-fill": {
+        "role": "tertiary",
+        "displayName": "Tag Blue Fill",
+        "theme": "Daylight",
+        "canonical": "#dbeafe",
+        "oklch": "oklch(93.2% 0.032 256)",
+        "tonalRamp": [
+          "#030b18",
+          "#1b2634",
+          "#374353",
+          "#566273",
+          "#768496",
+          "#98a6b9",
+          "#bccbde",
+          "#e4f0ff"
+        ],
+        "themeField": "Daylight: Tokens.tags[1].fill"
+      },
+      "tag-blue-text": {
+        "role": "tertiary",
+        "displayName": "Tag Blue Text",
+        "theme": "Daylight",
+        "canonical": "#1e3a8a",
+        "oklch": "oklch(37.9% 0.138 266)",
+        "tonalRamp": [
+          "#010035",
+          "#061766",
+          "#1e3a8a",
+          "#3b5caf",
+          "#5a7ed4",
+          "#7ba2fb",
+          "#b0c9fe",
+          "#e7efff"
+        ],
+        "themeField": "Daylight: Tokens.tags[1].text"
+      },
+      "tag-violet-fill": {
+        "role": "tertiary",
+        "displayName": "Tag Violet Fill",
+        "theme": "Daylight",
+        "canonical": "#ede4fd",
+        "oklch": "oklch(93.3% 0.035 302)",
+        "tonalRamp": [
+          "#0e0717",
+          "#282133",
+          "#453e52",
+          "#655d72",
+          "#867e94",
+          "#a9a0b8",
+          "#cdc4dd",
+          "#f2eaff"
+        ],
+        "themeField": "Daylight: Tokens.tags[2].fill"
+      },
+      "tag-violet-text": {
+        "role": "tertiary",
+        "displayName": "Tag Violet Text",
+        "theme": "Daylight",
+        "canonical": "#4c1d95",
+        "oklch": "oklch(38.0% 0.178 294)",
+        "tonalRamp": [
+          "#0f002a",
+          "#2d0162",
+          "#4c1d95",
+          "#6a43ba",
+          "#8a67e1",
+          "#ab8ffd",
+          "#ccbffe",
+          "#efecff"
+        ],
+        "themeField": "Daylight: Tokens.tags[2].text"
+      },
+      "tag-orange-fill": {
+        "role": "tertiary",
+        "displayName": "Tag Orange Fill",
+        "theme": "Daylight",
+        "canonical": "#ffe8cc",
+        "oklch": "oklch(94.2% 0.045 73)",
+        "tonalRamp": [
+          "#130900",
+          "#32210a",
+          "#513e27",
+          "#715d45",
+          "#937f65",
+          "#b7a187",
+          "#dcc5aa",
+          "#ffebd3"
+        ],
+        "themeField": "Daylight: Tokens.tags[3].fill"
+      },
+      "tag-orange-text": {
+        "role": "tertiary",
+        "displayName": "Tag Orange Text",
+        "theme": "Daylight",
+        "canonical": "#7c2d12",
+        "oklch": "oklch(40.8% 0.116 38)",
+        "tonalRamp": [
+          "#1b0300",
+          "#451000",
+          "#732407",
+          "#97462c",
+          "#bd674d",
+          "#e38a6e",
+          "#feb59e",
+          "#ffe9e2"
+        ],
+        "themeField": "Daylight: Tokens.tags[3].text"
+      },
+      "tag-pink-fill": {
+        "role": "tertiary",
+        "displayName": "Tag Pink Fill",
+        "theme": "Daylight",
+        "canonical": "#fde2ef",
+        "oklch": "oklch(93.8% 0.034 347)",
+        "tonalRamp": [
+          "#15050e",
+          "#311e28",
+          "#503b45",
+          "#705a65",
+          "#927a86",
+          "#b69da9",
+          "#dbc1cd",
+          "#ffe7f2"
+        ],
+        "themeField": "Daylight: Tokens.tags[4].fill"
+      },
+      "tag-pink-text": {
+        "role": "tertiary",
+        "displayName": "Tag Pink Text",
+        "theme": "Daylight",
+        "canonical": "#831843",
+        "oklch": "oklch(40.8% 0.144 2)",
+        "tonalRamp": [
+          "#1e0009",
+          "#4a0021",
+          "#790b3b",
+          "#9f355a",
+          "#c6587b",
+          "#ed7b9d",
+          "#feb0c4",
+          "#ffe8ed"
+        ],
+        "themeField": "Daylight: Tokens.tags[4].text"
+      },
+      "tag-teal-fill": {
+        "role": "tertiary",
+        "displayName": "Tag Teal Fill",
+        "theme": "Daylight",
+        "canonical": "#d5f2f0",
+        "oklch": "oklch(94.0% 0.030 192)",
+        "tonalRamp": [
+          "#000f0e",
+          "#122a29",
+          "#2f4746",
+          "#4d6765",
+          "#6e8887",
+          "#90abaa",
+          "#b4d0ce",
+          "#d8f5f3"
+        ],
+        "themeField": "Daylight: Tokens.tags[5].fill"
+      },
+      "tag-teal-text": {
+        "role": "tertiary",
+        "displayName": "Tag Teal Text",
+        "theme": "Daylight",
+        "canonical": "#134e4a",
+        "oklch": "oklch(38.6% 0.059 188)",
+        "tonalRamp": [
+          "#000f0d",
+          "#012c29",
+          "#104c48",
+          "#356c68",
+          "#578e89",
+          "#79b1ac",
+          "#9dd6d0",
+          "#c2fcf6"
+        ],
+        "themeField": "Daylight: Tokens.tags[5].text"
+      },
+      "night-ground": {
+        "role": "neutral",
+        "displayName": "Night Paper White",
+        "theme": "Night",
+        "canonical": "#121915",
+        "oklch": "oklch(20.5% 0.013 160)",
+        "tonalRamp": [
+          "#070d09",
+          "#202723",
+          "#3c4440",
+          "#5b645f",
+          "#7c8580",
+          "#9ea8a2",
+          "#c2ccc6",
+          "#e7f1eb"
+        ],
+        "themeField": "Night: Tokens.ground (Palette.background)"
+      },
+      "night-chrome": {
+        "role": "neutral",
+        "displayName": "Night Mint Chrome",
+        "theme": "Night",
+        "canonical": "#0c110e",
+        "oklch": "oklch(17.1% 0.010 159)",
+        "tonalRamp": [
+          "#080c0a",
+          "#212723",
+          "#3e4440",
+          "#5d635f",
+          "#7e8480",
+          "#a0a7a3",
+          "#c4cbc7",
+          "#e9f1ec"
+        ],
+        "themeField": "Night: Tokens.chrome"
+      },
+      "night-raised": {
+        "role": "neutral",
+        "displayName": "Night Raised White",
+        "theme": "Night",
+        "canonical": "#1a231e",
+        "oklch": "oklch(24.6% 0.016 161)",
+        "tonalRamp": [
+          "#060d09",
+          "#1e2822",
+          "#3b453f",
+          "#5a645e",
+          "#7a857f",
+          "#9da8a2",
+          "#c1cdc6",
+          "#e6f2eb"
+        ],
+        "themeField": "Night: Tokens.raised"
+      },
+      "night-hover": {
+        "role": "neutral",
+        "displayName": "Night Mint Breath",
+        "theme": "Night",
+        "canonical": "#1b2620",
+        "oklch": "oklch(25.6% 0.019 161)",
+        "tonalRamp": [
+          "#050e09",
+          "#1d2822",
+          "#39453f",
+          "#58655e",
+          "#79867f",
+          "#9ba9a1",
+          "#bfcdc5",
+          "#e4f3ea"
+        ],
+        "themeField": "Night: Tokens.hover"
+      },
+      "night-selected": {
+        "role": "neutral",
+        "displayName": "Night Mint Pressed",
+        "theme": "Night",
+        "canonical": "#213629",
+        "oklch": "oklch(31.1% 0.036 156)",
+        "tonalRamp": [
+          "#000f05",
+          "#162a1e",
+          "#32483a",
+          "#516859",
+          "#71897a",
+          "#94ac9c",
+          "#b7d1c0",
+          "#dcf6e5"
+        ],
+        "themeField": "Night: Tokens.selected"
+      },
+      "night-line": {
+        "role": "neutral",
+        "displayName": "Night Mint Hairline",
+        "theme": "Night",
+        "canonical": "#2a3a30",
+        "oklch": "oklch(33.1% 0.027 157)",
+        "tonalRamp": [
+          "#020f07",
+          "#1a2920",
+          "#36473c",
+          "#55665b",
+          "#75887c",
+          "#98ab9e",
+          "#bbcfc2",
+          "#e0f4e7"
+        ],
+        "themeField": "Night: Tokens.line"
+      },
+      "night-line-strong": {
+        "role": "neutral",
+        "displayName": "Night Sage Edge",
+        "theme": "Night",
+        "canonical": "#627568",
+        "oklch": "oklch(54.3% 0.030 155)",
+        "tonalRamp": [
+          "#020f06",
+          "#19291f",
+          "#35473b",
+          "#54675a",
+          "#75887b",
+          "#97ab9d",
+          "#bacfc1",
+          "#dff5e6"
+        ],
+        "themeField": "Night: Tokens.line_strong"
+      },
+      "night-text": {
+        "role": "neutral",
+        "displayName": "Night Green-Black Ink",
+        "theme": "Night",
+        "canonical": "#e4eee6",
+        "oklch": "oklch(93.9% 0.015 152)",
+        "tonalRamp": [
+          "#070d08",
+          "#202721",
+          "#3c443e",
+          "#5b645d",
+          "#7c857e",
+          "#9ea8a0",
+          "#c2ccc4",
+          "#e8f2ea"
+        ],
+        "themeField": "Night: Tokens.text (Palette.text)"
+      },
+      "night-muted": {
+        "role": "neutral",
+        "displayName": "Night Moss Grey",
+        "theme": "Night",
+        "canonical": "#93a597",
+        "oklch": "oklch(70.4% 0.029 152)",
+        "tonalRamp": [
+          "#030f06",
+          "#1a291e",
+          "#37473b",
+          "#566659",
+          "#76887a",
+          "#98ab9c",
+          "#bccfc0",
+          "#e1f4e5"
+        ],
+        "themeField": "Night: Tokens.muted"
+      },
+      "night-primary": {
+        "role": "primary",
+        "displayName": "Night ICQ Green",
+        "theme": "Night",
+        "canonical": "#3dcb5c",
+        "oklch": "oklch(74.3% 0.194 147)",
+        "tonalRamp": [
+          "#001002",
+          "#002e0b",
+          "#005119",
+          "#08762a",
+          "#0c9d3a",
+          "#33c455",
+          "#61ea7a",
+          "#c9ffce"
+        ],
+        "themeField": "Night: Tokens.primary (Palette.primary / extended.primary.base.color)"
+      },
+      "night-primary-hover": {
+        "role": "primary",
+        "displayName": "Night ICQ Green, Hovered",
+        "theme": "Night",
+        "canonical": "#5ad876",
+        "oklch": "oklch(78.8% 0.177 148)",
+        "tonalRamp": [
+          "#001002",
+          "#002e0e",
+          "#00511d",
+          "#08752f",
+          "#0c9d41",
+          "#41c261",
+          "#6be885",
+          "#c9ffd0"
+        ],
+        "themeField": "Night: Tokens.primary_hover"
+      },
+      "night-on-primary": {
+        "role": "primary",
+        "displayName": "Night Deep Green Ink",
+        "theme": "Night",
+        "canonical": "#03200b",
+        "oklch": "oklch(21.5% 0.054 150)",
+        "tonalRamp": [
+          "#001003",
+          "#0f2c16",
+          "#2c4a33",
+          "#4b6a51",
+          "#6c8c71",
+          "#8eaf93",
+          "#b1d4b7",
+          "#d6f9dc"
+        ],
+        "themeField": "Night: Tokens.on_primary (extended.primary.base.text)"
+      },
+      "night-ink": {
+        "role": "primary",
+        "displayName": "Night Leaf Ink",
+        "theme": "Night",
+        "canonical": "#5ed77a",
+        "oklch": "oklch(78.8% 0.170 149)",
+        "tonalRamp": [
+          "#001003",
+          "#002e0e",
+          "#00511e",
+          "#077530",
+          "#0a9d43",
+          "#46c166",
+          "#6fe789",
+          "#c8ffd0"
+        ],
+        "themeField": "Night: Tokens.ink"
+      },
+      "night-danger": {
+        "role": "secondary",
+        "displayName": "Night Alarm Red",
+        "theme": "Night",
+        "canonical": "#f06a62",
+        "oklch": "oklch(68.7% 0.167 26)",
+        "tonalRamp": [
+          "#1f0001",
+          "#4c0105",
+          "#80020e",
+          "#ac2a2a",
+          "#d4504b",
+          "#fc756c",
+          "#feb3ab",
+          "#ffe9e6"
+        ],
+        "themeField": "Night: Tokens.danger (Palette.danger / extended.danger.base.color)"
+      },
+      "night-danger-soft": {
+        "role": "secondary",
+        "displayName": "Night Alarm Wash",
+        "theme": "Night",
+        "canonical": "#3a1a19",
+        "oklch": "oklch(26.4% 0.051 23)",
+        "tonalRamp": [
+          "#1c0203",
+          "#3a1a19",
+          "#5a3735",
+          "#7c5654",
+          "#9f7774",
+          "#c39996",
+          "#e9bdba",
+          "#ffe9e7"
+        ],
+        "themeField": "Night: Tokens.danger_soft"
+      },
+      "night-on-danger": {
+        "role": "secondary",
+        "displayName": "Night On Alarm",
+        "theme": "Night",
+        "canonical": "#2a0605",
+        "oklch": "oklch(19.2% 0.061 27)",
+        "tonalRamp": [
+          "#1f0001",
+          "#3e1814",
+          "#5e3530",
+          "#80544f",
+          "#a4756f",
+          "#c99791",
+          "#eebbb4",
+          "#ffe9e6"
+        ],
+        "themeField": "Night: Tokens.on_danger (extended.danger.base.text)"
+      },
+      "night-scrim": {
+        "role": "neutral",
+        "displayName": "Night Scrim",
+        "theme": "Night",
+        "canonical": "rgba(0, 0, 0, 0.55)",
+        "tonalRamp": [
+          "#262626",
+          "#3a3a3a",
+          "#4f4f4f",
+          "#656565",
+          "#7c7c7c",
+          "#949494",
+          "#adadad",
+          "#c7c7c7"
+        ],
+        "themeField": "Night: Tokens.scrim"
+      },
+      "night-shadow": {
+        "role": "neutral",
+        "displayName": "Night Shadow",
+        "theme": "Night",
+        "canonical": "rgba(0, 0, 0, 0.45)",
+        "tonalRamp": [
+          "#262626",
+          "#3a3a3a",
+          "#4f4f4f",
+          "#656565",
+          "#7c7c7c",
+          "#949494",
+          "#adadad",
+          "#c7c7c7"
+        ],
+        "themeField": "Night: Tokens.shadow"
+      },
+      "night-stage-new": {
+        "role": "secondary",
+        "displayName": "Night New, Outline Grey",
+        "theme": "Night",
+        "canonical": "#7d9182",
+        "oklch": "oklch(63.6% 0.032 153)",
+        "tonalRamp": [
+          "#020f05",
+          "#192a1e",
+          "#35473a",
+          "#546759",
+          "#748879",
+          "#97ab9c",
+          "#bad0bf",
+          "#dff5e5"
+        ],
+        "themeField": "Night: Tokens.stage_new"
+      },
+      "night-stage-planning": {
+        "role": "secondary",
+        "displayName": "Night Planning Amber",
+        "theme": "Night",
+        "canonical": "#f0a630",
+        "oklch": "oklch(77.9% 0.151 74)",
+        "tonalRamp": [
+          "#130900",
+          "#352001",
+          "#5b3a01",
+          "#845600",
+          "#af750d",
+          "#dd940c",
+          "#ffba59",
+          "#ffebd3"
+        ],
+        "themeField": "Night: Tokens.stage_planning (Palette.warning)"
+      },
+      "night-stage-pickable": {
+        "role": "secondary",
+        "displayName": "Night Pickable Blue",
+        "theme": "Night",
+        "canonical": "#5aa6f5",
+        "oklch": "oklch(71.1% 0.139 251)",
+        "tonalRamp": [
+          "#000b1d",
+          "#012648",
+          "#024379",
+          "#0b63ac",
+          "#3985d2",
+          "#5da9f9",
+          "#a1cefe",
+          "#e3f0ff"
+        ],
+        "themeField": "Night: Tokens.stage_pickable"
+      },
+      "night-stage-running": {
+        "role": "secondary",
+        "displayName": "Night Running Green",
+        "theme": "Night",
+        "canonical": "#3dcb5c",
+        "oklch": "oklch(74.3% 0.194 147)",
+        "tonalRamp": [
+          "#001002",
+          "#002e0b",
+          "#005119",
+          "#08762a",
+          "#0c9d3a",
+          "#33c455",
+          "#61ea7a",
+          "#c9ffce"
+        ],
+        "themeField": "Night: Tokens.stage_running (Palette.success)"
+      },
+      "night-stage-closed": {
+        "role": "secondary",
+        "displayName": "Night Closed Muted",
+        "theme": "Night",
+        "canonical": "#5f7064",
+        "oklch": "oklch(52.7% 0.028 155)",
+        "tonalRamp": [
+          "#030f06",
+          "#1a291f",
+          "#37473b",
+          "#55665a",
+          "#76877b",
+          "#98aa9d",
+          "#bccfc1",
+          "#e1f4e6"
+        ],
+        "themeField": "Night: Tokens.stage_closed"
+      },
+      "night-stage-rejected": {
+        "role": "secondary",
+        "displayName": "Night Rejected Red",
+        "theme": "Night",
+        "canonical": "#f06a62",
+        "oklch": "oklch(68.7% 0.167 26)",
+        "tonalRamp": [
+          "#1f0001",
+          "#4c0105",
+          "#80020e",
+          "#ac2a2a",
+          "#d4504b",
+          "#fc756c",
+          "#feb3ab",
+          "#ffe9e6"
+        ],
+        "themeField": "Night: Tokens.stage_rejected"
+      },
+      "night-tag-green-fill": {
+        "role": "tertiary",
+        "displayName": "Night Tag Green Fill",
+        "theme": "Night",
+        "canonical": "#1d4a2a",
+        "oklch": "oklch(36.8% 0.074 151)",
+        "tonalRamp": [
+          "#001003",
+          "#002e11",
+          "#204d2d",
+          "#406d4b",
+          "#618f6b",
+          "#83b38d",
+          "#a7d7b1",
+          "#cbfdd5"
+        ],
+        "themeField": "Night: Tokens.tags[0].fill"
+      },
+      "night-tag-green-text": {
+        "role": "tertiary",
+        "displayName": "Night Tag Green Text",
+        "theme": "Night",
+        "canonical": "#c6f6d0",
+        "oklch": "oklch(93.0% 0.071 151)",
+        "tonalRamp": [
+          "#001003",
+          "#002e12",
+          "#224d2e",
+          "#416d4c",
+          "#628f6d",
+          "#84b28f",
+          "#a8d7b2",
+          "#cdfdd7"
+        ],
+        "themeField": "Night: Tokens.tags[0].text"
+      },
+      "night-tag-blue-fill": {
+        "role": "tertiary",
+        "displayName": "Night Tag Blue Fill",
+        "theme": "Night",
+        "canonical": "#1e3a6b",
+        "oklch": "oklch(35.4% 0.092 261)",
+        "tonalRamp": [
+          "#000826",
+          "#072251",
+          "#244172",
+          "#426195",
+          "#6283ba",
+          "#84a6df",
+          "#abcaff",
+          "#e6efff"
+        ],
+        "themeField": "Night: Tokens.tags[1].fill"
+      },
+      "night-tag-blue-text": {
+        "role": "tertiary",
+        "displayName": "Night Tag Blue Text",
+        "theme": "Night",
+        "canonical": "#d3e4ff",
+        "oklch": "oklch(91.5% 0.041 260)",
+        "tonalRamp": [
+          "#030b1c",
+          "#192539",
+          "#354358",
+          "#536279",
+          "#74839c",
+          "#96a6bf",
+          "#bacae5",
+          "#e6efff"
+        ],
+        "themeField": "Night: Tokens.tags[1].text"
+      },
+      "night-tag-violet-fill": {
+        "role": "tertiary",
+        "displayName": "Night Tag Violet Fill",
+        "theme": "Night",
+        "canonical": "#3b2a6b",
+        "oklch": "oklch(34.2% 0.109 292)",
+        "tonalRamp": [
+          "#0e002b",
+          "#281454",
+          "#443476",
+          "#635499",
+          "#8476be",
+          "#a698e4",
+          "#c9bffe",
+          "#eeecff"
+        ],
+        "themeField": "Night: Tokens.tags[2].fill"
+      },
+      "night-tag-violet-text": {
+        "role": "tertiary",
+        "displayName": "Night Tag Violet Text",
+        "theme": "Night",
+        "canonical": "#e6dcff",
+        "oklch": "oklch(91.3% 0.048 298)",
+        "tonalRamp": [
+          "#0e061c",
+          "#281f39",
+          "#453c58",
+          "#655b79",
+          "#867c9c",
+          "#a99fc0",
+          "#cdc3e5",
+          "#f0ebff"
+        ],
+        "themeField": "Night: Tokens.tags[2].text"
+      },
+      "night-tag-orange-fill": {
+        "role": "tertiary",
+        "displayName": "Night Tag Orange Fill",
+        "theme": "Night",
+        "canonical": "#5a3416",
+        "oklch": "oklch(36.6% 0.070 56)",
+        "tonalRamp": [
+          "#170600",
+          "#3b1b01",
+          "#5e371a",
+          "#805739",
+          "#a37859",
+          "#c79a7b",
+          "#edbe9e",
+          "#ffeadc"
+        ],
+        "themeField": "Night: Tokens.tags[3].fill"
+      },
+      "night-tag-orange-text": {
+        "role": "tertiary",
+        "displayName": "Night Tag Orange Text",
+        "theme": "Night",
+        "canonical": "#ffe2c4",
+        "oklch": "oklch(92.9% 0.051 68)",
+        "tonalRamp": [
+          "#140800",
+          "#352005",
+          "#543d23",
+          "#755c42",
+          "#977d62",
+          "#bba083",
+          "#e0c4a6",
+          "#ffebd6"
+        ],
+        "themeField": "Night: Tokens.tags[3].text"
+      },
+      "night-tag-pink-fill": {
+        "role": "tertiary",
+        "displayName": "Night Tag Pink Fill",
+        "theme": "Night",
+        "canonical": "#5c1f3d",
+        "oklch": "oklch(34.3% 0.096 353)",
+        "tonalRamp": [
+          "#1d000d",
+          "#450829",
+          "#672947",
+          "#8a4966",
+          "#af6987",
+          "#d48caa",
+          "#fbafcf",
+          "#ffe7f0"
+        ],
+        "themeField": "Night: Tokens.tags[4].fill"
+      },
+      "night-tag-pink-text": {
+        "role": "tertiary",
+        "displayName": "Night Tag Pink Text",
+        "theme": "Night",
+        "canonical": "#ffd9ea",
+        "oklch": "oklch(92.2% 0.047 349)",
+        "tonalRamp": [
+          "#19030e",
+          "#361b29",
+          "#553846",
+          "#765665",
+          "#997787",
+          "#bd99aa",
+          "#e2bdce",
+          "#ffe7f1"
+        ],
+        "themeField": "Night: Tokens.tags[4].text"
+      },
+      "night-tag-teal-fill": {
+        "role": "tertiary",
+        "displayName": "Night Tag Teal Fill",
+        "theme": "Night",
+        "canonical": "#16494a",
+        "oklch": "oklch(37.3% 0.053 197)",
+        "tonalRamp": [
+          "#000e0f",
+          "#012b2c",
+          "#184b4c",
+          "#3a6b6c",
+          "#5b8c8d",
+          "#7eb0b0",
+          "#a1d4d5",
+          "#c6fafb"
+        ],
+        "themeField": "Night: Tokens.tags[5].fill"
+      },
+      "night-tag-teal-text": {
+        "role": "tertiary",
+        "displayName": "Night Tag Teal Text",
+        "theme": "Night",
+        "canonical": "#cdf5f2",
+        "oklch": "oklch(94.1% 0.041 191)",
+        "tonalRamp": [
+          "#000f0e",
+          "#052b2a",
+          "#264947",
+          "#456967",
+          "#668b88",
+          "#88aeab",
+          "#abd2cf",
+          "#d0f8f5"
+        ],
+        "themeField": "Night: Tokens.tags[5].text"
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Title",
+        "purpose": "Dialog titles and plan h1 (Figtree SemiBold 20)."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The task title in the task dialog (Figtree Bold 20)."
+      },
+      "heading": {
+        "displayName": "Heading",
+        "purpose": "Block headings inside dialogs (Figtree SemiBold 14)."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Task titles, dialog text, inputs, plan text (Figtree Regular 14)."
+      },
+      "body-medium": {
+        "displayName": "Body Medium",
+        "purpose": "Button labels (Figtree Medium 14)."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Group headers, name tags, Pick, status-bar name (Figtree SemiBold 12)."
+      },
+      "caption-medium": {
+        "displayName": "Caption Medium",
+        "purpose": "Task numbers, pills, runtimes, segment labels (Figtree Medium 12)."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Counts, hints, project names, tooltips (Figtree Regular 12, Moss Grey)."
+      }
+    },
+    "shadows": [
+      {
+        "name": "dialog",
+        "value": "Shadow { color: shadow, offset: (0, 8), blur_radius: 28 }",
+        "purpose": "Modal dialog card above the scrim."
+      },
+      {
+        "name": "menu",
+        "value": "Shadow { color: shadow, offset: (0, 4), blur_radius: 16 }",
+        "purpose": "Room-switcher pick-list menu."
+      },
+      {
+        "name": "tooltip",
+        "value": "Shadow { color: shadow, offset: (0, 2), blur_radius: 8 }",
+        "purpose": "Hover tooltips, 4px above the control."
+      }
+    ],
+    "motion": [
+      {
+        "name": "none",
+        "value": "no animation",
+        "purpose": "Motionless by design: hover, press and focus are instant colour swaps; dialogs appear without transition. The only moving content is the once-per-second runtime text."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "default",
+        "value": "400x780"
+      },
+      {
+        "name": "min",
+        "value": "340x520"
+      },
+      {
+        "name": "dialog-max-width",
+        "value": "560px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one call to action of a view: ICQ Green fill, 32px tall, 8px radius.",
+      "html": "text_button(\"propose\", \"Propose\", filled.then_some(Message::Propose), theme::button_primary)\n// icon + label: icon_text_button(\"new-task\", Icon::Plus, Tone::OnPrimary, \"New task\", Some(Message::OpenNewTask), theme::button_primary)\n// text_button = id_button(id, container(text(label).size(TS_14).font(MEDIUM)).padding([6.0, SP_3]), on_press, style, Length::Shrink)",
+      "css": "let t = tokens(theme);\nmatch status {\n    button::Status::Active   => face(Some(t.primary),       t.on_primary, rounded()),\n    button::Status::Hovered  => face(Some(t.primary_hover), t.on_primary, rounded()),\n    button::Status::Pressed  => face(Some(t.ink),           t.on_primary, rounded()),\n    button::Status::Disabled => face(Some(t.line),          t.muted,      rounded()),\n}\n// rounded() = Border { radius: RADIUS.into(), ..Border::default() }  (RADIUS = 8.0)"
+    },
+    {
+      "name": "Pick Button",
+      "kind": "button",
+      "refersTo": "button-pick",
+      "description": "Compact primary at the right edge of a row whose plan is ready; claims the task and copies the prompt.",
+      "html": "id_button(\n    format!(\"pick-{}\", task.number),\n    container(row![icon(Icon::Pick, 14.0, Tone::OnPrimary), text(\"Pick\").size(TS_12).font(SEMIBOLD)]\n        .spacing(SP_1).align_y(Alignment::Center)).padding([SP_1, 10.0]),\n    (!busy && app.picking.is_none()).then_some(Message::Pick(task.number)),\n    theme::button_primary,\n    Length::Shrink,\n)\n// wrapped: with_tip(.., \"Claim it and copy a prompt for your agent\")",
+      "css": "// same style function as Primary Button: theme::button_primary\nmatch status {\n    Active   => face(Some(t.primary),       t.on_primary, rounded()),\n    Hovered  => face(Some(t.primary_hover), t.on_primary, rounded()),\n    Pressed  => face(Some(t.ink),           t.on_primary, rounded()),\n    Disabled => face(Some(t.line),          t.muted,      rounded()),\n}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Bordered raised button for the non-primary choice next to a primary (Cancel, Replan, Add).",
+      "html": "text_button(\"cancel-new-task\", \"Cancel\", Some(Message::CloseDialog), theme::button_secondary)",
+      "css": "let t = tokens(theme);\nlet border = |color| Border { color, width: 1.0, radius: RADIUS.into() };\nmatch status {\n    Active   => face(Some(t.raised),   t.text,  border(t.line)),\n    Hovered  => face(Some(t.hover),    t.text,  border(t.line_strong)),\n    Pressed  => face(Some(t.selected), t.text,  border(t.line_strong)),\n    Disabled => face(None,             t.muted, border(t.line)),\n}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive decision (Reject): red text and outline, red fill only while pressed.",
+      "html": "text_button(id, \"Reject\", message, theme::button_danger)",
+      "css": "let t = tokens(theme);\nlet border = Border { color: t.danger, width: 1.0, radius: RADIUS.into() };\nmatch status {\n    Active   => face(None,                 t.danger,    border),\n    Hovered  => face(Some(t.danger_soft),  t.danger,    border),\n    Pressed  => face(Some(t.danger),       t.on_danger, border),\n    Disabled => face(None,                 t.muted,     rounded()),\n}"
+    },
+    {
+      "name": "Icon Button (ghost)",
+      "kind": "button",
+      "refersTo": "button-icon",
+      "description": "Borderless 32x32 icon button with a tooltip; toolbar, dialog headers, edit pencils.",
+      "html": "icon_button(\"settings\", Icon::Settings, Tone::Text, \"Settings  (Ctrl+,)\", Some(Message::OpenSettings), theme::button_ghost)\n// icon_button = with_tip(id_button(id, container(icon(glyph, 16.0, tone)).padding(SP_2), on_press, style, Length::Shrink), tip)",
+      "css": "let t = tokens(theme);\nmatch status {\n    Active   => face(None,                t.text,  rounded()),\n    Hovered  => face(Some(t.hover),       t.text,  rounded()),\n    Pressed  => face(Some(t.selected),    t.text,  rounded()),\n    Disabled => face(None,                t.muted, rounded()),\n}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Raised field with a hairline border, Sage Edge on hover, 2px Leaf Ink focus ring; Enter submits.",
+      "html": "text_input(\"What should be done?\", &app.forms.proposal_title)\n    .id(\"proposal-title\")\n    .on_input(Message::ProposalTitle)\n    .on_submit(Message::Propose)\n    .padding(SP_2)\n    .size(TS_14)\n    .style(theme::input)",
+      "css": "let t = tokens(theme);\nlet (border, width) = match status {\n    Active   => (t.line, 1.0),\n    Hovered  => (t.line_strong, 1.0),\n    Focused { .. } => (t.ink, 2.0),   // focus ring\n    Disabled => (t.line, 1.0),\n};\ntext_input::Style {\n    background: if Disabled { t.chrome.into() } else { t.raised.into() },\n    border: Border { color: border, width, radius: RADIUS.into() },\n    icon: t.muted, placeholder: t.muted, value: t.text, selection: t.selected,\n}"
+    },
+    {
+      "name": "Task Row",
+      "kind": "custom",
+      "refersTo": "list-row",
+      "description": "One-line buddy-list row: stage flower, #number, title, priority arrow, member tag, Pick button.",
+      "html": "id_button(\n    format!(\"task-{}\", task.number),\n    container(row![\n        flower(task, 16.0),\n        text(format!(\"#{}\", task.number)).size(TS_12).font(MEDIUM).style(theme::text_muted),\n        text(&task.title).size(TS_14).width(Length::Fill),\n        // priority arrow, member_tag(name, hue), Pick button\n    ].spacing(SP_2).align_y(Alignment::Center)).padding([6.0, SP_2]),\n    Some(Message::OpenTask(task.number)),\n    theme::button_row,\n    Length::Fill,\n)",
+      "css": "let t = tokens(theme);\nmatch status {\n    Active | Disabled => face(None,             t.text, rounded()),\n    Hovered           => face(Some(t.hover),    t.text, rounded()),\n    Pressed           => face(Some(t.selected), t.text, rounded()),\n}"
+    },
+    {
+      "name": "Group Header",
+      "kind": "nav",
+      "refersTo": "group-header",
+      "description": "Foldable group title with chevron and count (In progress, Ready to pick, Planning, Proposals, Done).",
+      "html": "id_button(\n    format!(\"group-{}\", group.slug()),\n    container(row![\n        icon(chevron, 14.0, Tone::Muted),\n        text(group.title()).size(TS_12).font(SEMIBOLD),\n        muted(count.to_string()),\n    ].spacing(6).align_y(Alignment::Center)).padding([SP_1, SP_1]),\n    Some(Message::ToggleGroup(group)),\n    theme::button_row,\n    Length::Fill,\n)",
+      "css": "// theme::button_row (same as Task Row)"
+    },
+    {
+      "name": "Member Tag",
+      "kind": "chip",
+      "refersTo": "member-tag",
+      "description": "Fully round name tag in the member's fixed hue (one of six); light fill / dark text by day, inverted by night.",
+      "html": "container(text(name).size(TS_12).font(SEMIBOLD)).padding([2.0, SP_2]).style(theme::tag(hue))",
+      "css": "let tag = tokens(theme).tags[hue % 6];\ncontainer::Style {\n    text_color: Some(tag.text),\n    background: Some(tag.fill.into()),\n    border: Border { radius: Radius::new(999.0), ..Border::default() },\n    ..container::Style::default()\n}"
+    },
+    {
+      "name": "Pill",
+      "kind": "chip",
+      "refersTo": "pill",
+      "description": "Quiet round label for counters and stage labels (idle, Plan ready).",
+      "html": "container(text(label).size(TS_12).font(MEDIUM)).padding([1.0, SP_2]).style(theme::pill)",
+      "css": "let t = tokens(theme);\ncontainer::Style {\n    text_color: Some(t.muted),\n    background: Some(t.chrome.into()),\n    border: Border { color: t.line, width: 1.0, radius: Radius::new(999.0) },\n    ..container::Style::default()\n}"
+    },
+    {
+      "name": "Status Flower",
+      "kind": "custom",
+      "refersTo": "status-flower",
+      "description": "The signature: an eight-petal flower tinted by stage; outline while only proposed, filled afterwards.",
+      "html": "let glyph = if bloom(task) == Bloom::New { Icon::FlowerOutline } else { Icon::Flower };\nicon(glyph, 16.0, Tone::Bloom(bloom(task)))\n// stage -> Bloom: Proposed=New, Ready+claim=Running, Done=Closed, Rejected=Rejected, pickable=Pickable, else Planning",
+      "css": "svg::Style { color: Some(match tone {\n    Tone::Bloom(Bloom::New)      => t.stage_new,\n    Tone::Bloom(Bloom::Planning) => t.stage_planning,\n    Tone::Bloom(Bloom::Pickable) => t.stage_pickable,\n    Tone::Bloom(Bloom::Running)  => t.stage_running,\n    Tone::Bloom(Bloom::Closed)   => t.stage_closed,\n    Tone::Bloom(Bloom::Rejected) => t.stage_rejected,\n    /* Text, Muted, Ink, OnPrimary, Danger map to t.text, t.muted, t.ink, t.on_primary, t.danger */\n}) }"
+    },
+    {
+      "name": "Status Bar",
+      "kind": "nav",
+      "refersTo": "status-bar",
+      "description": "32px mint bar: server flower, my name, room switcher, server and MCP dots.",
+      "html": "container(row![\n    icon(Icon::Flower, 14.0, Tone::Bloom(bloom)),\n    text(&app.settings.name).size(TS_12).font(SEMIBOLD),\n    pick_list(choices, selected, |c| Message::SelectRoom(c.id))\n        .text_size(TS_12).padding([2.0, SP_2]).style(theme::picker).menu_style(theme::picker_menu),\n    Space::new().width(Length::Fill),\n    with_tip(row![dot(server), muted(server_label)].spacing(SP_1), server_tip),\n    with_tip(row![dot(mcp_state), muted(\"MCP\")].spacing(SP_1), mcp_tip),\n].spacing(SP_2).align_y(Alignment::Center))\n.padding([SP_1, SP_2]).height(32).align_y(Alignment::Center).width(Length::Fill).style(theme::chrome)",
+      "css": "// container: theme::chrome = surface(t.chrome, t.text)\n// picker (room switcher), flat until hovered:\nlet (background, border) = match status {\n    Active          => (t.chrome,   t.chrome),\n    Hovered         => (t.hover,    t.line_strong),\n    Opened { .. }   => (t.selected, t.ink),\n};\npick_list::Style { text_color: t.text, placeholder_color: t.muted, handle_color: t.muted,\n    background: background.into(),\n    border: Border { color: border, width: 1.0, radius: RADIUS.into() } }"
+    },
+    {
+      "name": "Dialog Frame",
+      "kind": "card",
+      "refersTo": "dialog",
+      "description": "Modal card over the scrim: header with close, scrolling body, pinned footer; max 560px wide.",
+      "html": "stack![base, opaque(mouse_area(container(opaque(dialog)).center(Length::Fill).padding(SP_3).style(theme::scrim)).on_press(Message::CloseDialog))]\n// frame(id, header, body, footer, tall) = container(column![header_row, scrollable(body), footer]).max_width(560.0).width(Length::Fill).style(theme::dialog)",
+      "css": "let t = tokens(theme);\ncontainer::Style {\n    text_color: Some(t.text),\n    background: Some(t.raised.into()),\n    border: Border { color: t.line, width: 1.0, radius: RADIUS_DIALOG.into() },   // 14.0\n    shadow: Shadow { color: t.shadow, offset: Vector::new(0.0, 8.0), blur_radius: 28.0 },\n    snap: true,\n}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Buddy List",
+    "overview": "The room is a buddy list. Tasks are contacts, each with a status flower; groups fold like ICQ groups; whoever works on a task wears a coloured name tag. The look is a modern, fresh ICQ: ICQ green on white by day, deep green-black by night, mint-tinted chrome, Figtree type, rounded 8px rows. It lives as a narrow window (400x780) beside the editor and terminal and is read in a glance, so everything is quiet, flat and tinted toward green; the only saturated things on screen are the flowers, the name tags and the green action fills.\n\nThe system is flat and calm. Depth is tonal (ground white, chrome mint, raised cards) with soft shadows only on things that float: dialogs, tooltips, the room-switcher menu. There is no motion by design: state changes are instant colour swaps, nothing animates, nothing blurs. Two themes, Daylight and Night, follow the system appearance (no preference means Night); every colour comes from the active theme's token set.\n\nThe signature is the stage-coloured eight-petal flower on every task row and in the status bar. It is the one status device: colour is the stage, outline-versus-filled marks the very first stage. It refuses the Kanban board and the wide three-pane admin layout.",
+    "keyCharacteristics": [
+      "Buddy-list structure: foldable groups of one-line rows, pick button at the right edge of finished plans.",
+      "One saturated green for actions (`ICQ Green`), a separate leaf green for ink and focus, a separate running green for the flower.",
+      "Every neutral leans mint-green; no cool or pure greys.",
+      "Six member tag hues, fixed per member, identical for everyone; light fills with dark text by day, dark fills with light text by night.",
+      "Figtree only, four weights (400 / 500 / 600 / 700), three sizes in practice (12 / 14 / 20).",
+      "Flat rows, 1px hairlines, modal dialogs over a green-black scrim."
+    ],
+    "rules": [
+      {
+        "name": "The Flower Carries Status Rule",
+        "body": "Stage is shown by the flower colour and nowhere else on a row: no row backgrounds, side stripes or coloured titles. A stage colour is never used for anything but a stage (and the server state mapped onto the same flower in the status bar).",
+        "section": "colors"
+      },
+      {
+        "name": "The Three Greens Rule",
+        "body": "Green means three different things and they do not swap: *ICQ Green* fills actions, *Leaf Ink* writes text and the focus ring, *Running Green* marks a running agent or a live connection. An action never takes the running hue and a flower never takes the action hue.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mint Neutrals Rule",
+        "body": "Every neutral is tinted toward the green hue; chrome is mint, lines are mint, text is green-black. No pure grey, no blue-grey.",
+        "section": "colors"
+      },
+      {
+        "name": "The Colour Plus Form Rule",
+        "body": "Colour is never the only carrier. The flower sits next to a group title and, in the task dialog, next to a stage pill (\"Plan ready\", \"In progress\"); New is outline, not just grey. Name tags carry the member's name.",
+        "section": "colors"
+      },
+      {
+        "name": "The Three Sizes Rule",
+        "body": "12 for captions, tags and counters; 14 for anything read as content; 20 for titles. Plan markdown steps `h2` 17 and `h3` 15 between them; nothing else invents a size.",
+        "section": "typography"
+      },
+      {
+        "name": "The Weight Does the Work Rule",
+        "body": "Emphasis is a weight step (400, 500, 600, 700), never a size jump, an underline or tracking.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-At-Rest Rule",
+        "body": "Anything inside the window is flat; only a surface that floats above it (dialog, menu, tooltip) may cast a shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Scrim Rule",
+        "body": "A dialog dims everything behind it with the scrim colour; the base takes no input and a click on the scrim closes the dialog.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** express stage only with the flower colour from the six stage tokens (`stage-new` outline, `stage-planning`, `stage-pickable`, `stage-running`, `stage-closed`, `stage-rejected`).",
+      "**Do** use `primary` for exactly the main action of a view and `ink` for green text, links and the focus ring.",
+      "**Do** keep every neutral mint-tinted: chrome `#edf5ee` / `#0c110e`, lines `#d9e5db` / `#2a3a30`, text `#142019` / `#e4eee6`.",
+      "**Do** read colours from the active theme's tokens through the style functions in `theme.rs`; add a new colour as a token pair (Daylight and Night) first.",
+      "**Do** keep controls at 32px height and rows at 8px radius, 6px 8px padding, 2px apart.",
+      "**Do** put a tooltip on every icon-only button and name the shortcut where one exists (`Settings  (Ctrl+,)`, `Close  (Esc)`).",
+      "**Do** keep dialogs modal with the scrim, max 560px wide, footer pinned with Cancel then the primary action.",
+      "**Do** write weight, not size, to emphasise: 400 / 500 / 600 / 700 in 12 / 14 / 20."
+    ],
+    "donts": [
+      "**Don't** recolour rows, tint backgrounds or add side stripes to show status; the flower is the status.",
+      "**Don't** introduce a Kanban board, a wide multi-pane layout or any pane beside the list; new surfaces are dialogs.",
+      "**Don't** use ICQ Green for decoration, or Running Green for a button.",
+      "**Don't** add shadows to anything that does not float; no gradients, blur or glass.",
+      "**Don't** add animation or transitions; the product is motionless by design.",
+      "**Don't** use pure grey, pure black or a cool grey; Night ground is green-black `#121915`, not `#000000`.",
+      "**Don't** use a second typeface, tracking, or sizes beyond 12 / 14 / 20 (plus plan headings 15 / 17).",
+      "**Don't** rely on colour alone: a stage needs the flower form (outline for New) and a label; a person needs a named tag.",
+      "**Don't** assume buttons are keyboard focusable in iced 0.14; every action reachable only by button needs a shortcut or an obvious pointer path."
+    ]
+  }
+}

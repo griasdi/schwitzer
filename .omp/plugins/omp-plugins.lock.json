@@ -1,0 +1,10 @@
+{
+  "plugins": {
+    "iced-impeccable": {
+      "version": "0.2.0",
+      "enabledFeatures": null,
+      "enabled": true
+    }
+  },
+  "settings": {}
+}

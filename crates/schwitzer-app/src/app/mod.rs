@@ -1,0 +1,1140 @@
+//! The application: state, messages and `update`. The views live in the submodules.
+
+mod chrome;
+mod dialogs;
+mod icons;
+mod list;
+mod live;
+pub mod logic;
+mod settings_view;
+mod task_view;
+mod widgets;
+
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use iced::keyboard::{self, Key, key::Named};
+use iced::widget::{column, container, markdown, operation, text_editor};
+use iced::{Element, Length, Subscription, Task, Theme};
+use schwitzer_client::{Client, ClientError, ClientEvent};
+use schwitzer_proto::{
+    Decision, Priority, Request, Response, RoomId, RoomKey, RoomState, ServerAddr, SessionInfo,
+    Stage, Task as RoomTask, Work, caps, now_ms,
+};
+
+use self::chrome::RoomChoice;
+use self::icons::{Icon, Tone};
+use self::logic::Group;
+use crate::bridge::{self, ClientKey, call, fire};
+use crate::mcp::{self, McpStatus};
+use crate::sessions::{self, LocalSession};
+use crate::settings::{self, Settings};
+use crate::theme::{self, SP_2};
+
+/// The agent name a pick claims the build with; the picker's own agent finishes it.
+const PICK_AGENT: &str = "omp";
+
+/// How long a status-bar notice stays.
+const NOTICE_MS: u64 = 5_000;
+
+/// Everything the user and the outside world can make the app do.
+#[derive(Debug, Clone)]
+pub enum Message {
+    /// The one-second clock behind the runtimes.
+    Tick,
+    /// The system switched between light and dark.
+    SystemMode(iced::theme::Mode),
+    Client(ClientEvent),
+    /// The event stream lagged: reload the rooms from the client.
+    Resync,
+    LocalSessions(Vec<LocalSession>),
+    Mcp(McpStatus),
+    Noop,
+    /// A call failed; the text goes into the banner.
+    Failed(String),
+    DismissBanner,
+    FocusNext,
+    FocusPrevious,
+
+    OpenNewTask,
+    OpenSettings,
+    OpenTask(u64),
+    CloseDialog,
+    ToggleGroup(Group),
+
+    SelectRoom(RoomId),
+    ServerUrl(String),
+    RoomName(String),
+    RoomKeyInput(String),
+    SubmitCreate,
+    Created(Result<RoomKey, String>),
+    SubmitJoin,
+    Joined(Result<RoomId, String>),
+    CopyKey,
+    LeaveRoom,
+    Left(Result<(), String>),
+    NameInput(String),
+    SubmitName,
+    CopyMcpConfig,
+    RepoInput(String),
+    AddRepo,
+    RemoveRepo(usize),
+
+    ProposalTitle(String),
+    ProposalBody(text_editor::Action),
+    Propose,
+    Proposed(Result<Response, String>),
+    Pick(u64),
+    Picked(Result<(String, RoomTask), String>),
+
+    EditTask,
+    CancelEditTask,
+    EditTitle(String),
+    EditBody(text_editor::Action),
+    SaveTask,
+    TaskSaved(Result<Response, String>),
+    EditPlan,
+    CancelEditPlan,
+    PlanAction(text_editor::Action),
+    SavePlan,
+    PlanSaved(Result<Response, String>),
+    SetPriority(Priority),
+    Decide(Decision),
+    Release,
+    NoteInput(String),
+    AddNote,
+    NoteAdded(Result<Response, String>),
+    Published(RoomId, Result<(), String>),
+}
+
+/// Whether a server answers, with the reason when it does not.
+#[derive(Debug, Clone, Default)]
+struct ServerStatus {
+    online: bool,
+    error: Option<String>,
+}
+
+/// The dialog over the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dialog {
+    NewTask,
+    Task(u64),
+    Settings,
+}
+
+/// A short confirmation in the status bar.
+struct Notice {
+    text: String,
+    until_ms: u64,
+}
+
+/// The inputs of the dialogs.
+struct Forms {
+    server_url: String,
+    room_name: String,
+    room_key: String,
+    name: String,
+    repo: String,
+    proposal_title: String,
+    proposal_body: text_editor::Content,
+    note: String,
+}
+
+/// The unsaved title and body of the task being edited.
+struct TaskDraft {
+    title: String,
+    body: text_editor::Content,
+}
+
+pub struct App {
+    client: Client,
+    data_dir: PathBuf,
+    settings: Settings,
+    /// The settings as last written (or read), to save only real changes.
+    saved: Settings,
+    theme: Theme,
+    /// The joined rooms in list order, with their last known state.
+    rooms: Vec<(RoomKey, Option<RoomState>)>,
+    servers: HashMap<ServerAddr, ServerStatus>,
+    selected: Option<RoomId>,
+    dialog: Option<Dialog>,
+    /// Folded groups of the list.
+    collapsed: HashSet<Group>,
+    /// The task whose pick is under way.
+    picking: Option<u64>,
+    forms: Forms,
+    task_draft: Option<TaskDraft>,
+    plan_draft: Option<text_editor::Content>,
+    /// The plan of the open task as rendered, and the text it was parsed from.
+    plan_md: markdown::Content,
+    plan_src: String,
+    banner: Option<String>,
+    notice: Option<Notice>,
+    local_sessions: Vec<LocalSession>,
+    /// What was last published to each room; a room missing here has had nothing published.
+    published: HashMap<RoomId, Vec<SessionInfo>>,
+    mcp: Option<McpStatus>,
+    mcp_token: Option<String>,
+    now_ms: u64,
+}
+
+impl App {
+    pub fn boot() -> (Self, Task<Message>) {
+        let data_dir = settings::data_dir();
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            fatal(&format!("cannot create {}: {e}", data_dir.display()));
+        }
+        let (settings, problem) = Settings::load(&data_dir);
+        let client = Client::start(&settings::identity_dir(&data_dir), settings.name.clone())
+            .unwrap_or_else(|e| fatal(&format!("cannot start the network client: {e}")));
+
+        let mut notices = Vec::new();
+        if let Some(problem) = problem {
+            notices.push(format!("Settings not read, using defaults: {problem}"));
+        }
+        for key in &settings.rooms {
+            match key.parse::<RoomKey>() {
+                Ok(key) => client.add_room(key),
+                Err(e) => notices.push(format!("Ignored room key in settings ({e}): {key}")),
+            }
+        }
+        let (mcp, mcp_token) = match mcp::load_or_create_token(&data_dir) {
+            Ok(token) => (None, Some(token)),
+            Err(e) => (
+                Some(McpStatus::Failed(format!("no access token: {e}"))),
+                None,
+            ),
+        };
+
+        let rooms = client.rooms();
+        let selected = rooms.first().map(|(key, _)| RoomId::of(&key.token));
+        let app = Self {
+            forms: Forms {
+                server_url: settings.last_server.clone().unwrap_or_default(),
+                room_name: String::new(),
+                room_key: String::new(),
+                name: settings.name.clone(),
+                repo: String::new(),
+                proposal_title: String::new(),
+                proposal_body: text_editor::Content::new(),
+                note: String::new(),
+            },
+            saved: settings.clone(),
+            settings,
+            theme: theme::for_mode(iced::theme::Mode::Dark),
+            client,
+            data_dir,
+            rooms,
+            servers: HashMap::new(),
+            selected,
+            dialog: None,
+            collapsed: HashSet::from([Group::Closed]),
+            picking: None,
+            task_draft: None,
+            plan_draft: None,
+            plan_md: markdown::Content::new(),
+            plan_src: String::new(),
+            banner: (!notices.is_empty()).then(|| notices.join("\n")),
+            notice: None,
+            local_sessions: Vec::new(),
+            published: HashMap::new(),
+            mcp,
+            mcp_token,
+            now_ms: now_ms(),
+        };
+        (app, iced::system::theme().map(Message::SystemMode))
+    }
+
+    pub fn title(&self) -> String {
+        match self.selected_state() {
+            Some(state) => format!("{} · Schwitzer", state.name),
+            None => "Schwitzer".to_owned(),
+        }
+    }
+
+    pub fn theme(&self) -> Theme {
+        self.theme.clone()
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        let mut subs = vec![
+            Subscription::run_with(ClientKey(self.client.clone()), bridge::client_events),
+            iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick),
+            iced::system::theme_changes().map(Message::SystemMode),
+            keyboard::listen().filter_map(key_message),
+            sessions::subscription(self.settings.omp_sessions_dir.clone())
+                .map(Message::LocalSessions),
+        ];
+        if let Some(token) = &self.mcp_token {
+            subs.push(
+                mcp::subscription(self.client.clone(), self.settings.mcp_port, token.clone())
+                    .map(Message::Mcp),
+            );
+        }
+        Subscription::batch(subs)
+    }
+
+    pub fn view(&self) -> Element<'_, Message> {
+        let main: Element<'_, Message> = match (self.selected_state(), self.selected) {
+            (Some(state), _) => column![
+                container(list::view(self, state)).height(Length::FillPortion(60)),
+                widgets::hrule(),
+                container(live::view(self, state)).height(Length::FillPortion(38)),
+            ]
+            .into(),
+            (None, Some(_)) => list::empty(
+                "Connecting…",
+                "The room shows up as soon as its server answers.",
+                widgets::icon_text_button(
+                    "empty-settings",
+                    Icon::Settings,
+                    Tone::Text,
+                    "Settings",
+                    Some(Message::OpenSettings),
+                    theme::button_secondary,
+                ),
+            ),
+            (None, None) => list::empty(
+                "Welcome to Schwitzer",
+                "Create a room on a server, or join one with the key someone shared.",
+                widgets::icon_text_button(
+                    "empty-rooms",
+                    Icon::Users,
+                    Tone::OnPrimary,
+                    "Create or join a room",
+                    Some(Message::OpenSettings),
+                    theme::button_primary,
+                ),
+            ),
+        };
+        let mut page = column![];
+        if let Some(banner) = &self.banner {
+            page = page.push(container(widgets::banner(banner)).padding(SP_2));
+        }
+        let page = container(
+            page.push(container(main).height(Length::Fill))
+                .push(widgets::hrule())
+                .push(chrome::toolbar(self))
+                .push(chrome::status_bar(self)),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::ground);
+
+        let dialog = match self.dialog {
+            Some(Dialog::NewTask) => Some(dialogs::new_task(self)),
+            Some(Dialog::Settings) => Some(settings_view::view(self)),
+            Some(Dialog::Task(_)) => self
+                .open()
+                .map(|(state, task)| task_view::view(self, state, task)),
+            None => None,
+        };
+        match dialog {
+            Some(dialog) => dialogs::modal(page, dialog),
+            None => page.into(),
+        }
+    }
+
+    pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.handle(message);
+        self.refresh_plan();
+        task
+    }
+
+    fn handle(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::Tick => {
+                self.now_ms = now_ms();
+                if self
+                    .notice
+                    .as_ref()
+                    .is_some_and(|n| n.until_ms <= self.now_ms)
+                {
+                    self.notice = None;
+                }
+                Task::none()
+            }
+            Message::SystemMode(mode) => {
+                self.theme = theme::for_mode(mode);
+                Task::none()
+            }
+            Message::Client(event) => self.on_client(event),
+            Message::Resync => {
+                self.sync_rooms();
+                self.publish()
+            }
+            Message::LocalSessions(sessions) => {
+                self.local_sessions = sessions;
+                self.publish()
+            }
+            Message::Mcp(status) => {
+                self.mcp = Some(status);
+                Task::none()
+            }
+            Message::Noop => Task::none(),
+            Message::Failed(e) => {
+                self.banner = Some(e);
+                Task::none()
+            }
+            Message::DismissBanner => {
+                self.banner = None;
+                Task::none()
+            }
+            Message::FocusNext => operation::focus_next(),
+            Message::FocusPrevious => operation::focus_previous(),
+            Message::Published(room, result) => {
+                if let Err(e) = result {
+                    tracing::debug!(%room, "publishing sessions failed: {e}");
+                    self.published.remove(&room);
+                }
+                Task::none()
+            }
+
+            Message::OpenNewTask => {
+                if self.selected_state().is_none() {
+                    return Task::none();
+                }
+                self.open_dialog(Dialog::NewTask);
+                operation::focus("proposal-title")
+            }
+            Message::OpenSettings => {
+                self.open_dialog(Dialog::Settings);
+                Task::none()
+            }
+            Message::OpenTask(number) => {
+                self.open_dialog(Dialog::Task(number));
+                Task::none()
+            }
+            Message::CloseDialog => {
+                self.dialog = None;
+                self.reset_drafts();
+                Task::none()
+            }
+            Message::ToggleGroup(group) => {
+                if !self.collapsed.remove(&group) {
+                    self.collapsed.insert(group);
+                }
+                Task::none()
+            }
+
+            Message::SelectRoom(id) => {
+                self.select(Some(id));
+                Task::none()
+            }
+            Message::ServerUrl(s) => {
+                self.forms.server_url = s;
+                Task::none()
+            }
+            Message::RoomName(s) => {
+                self.forms.room_name = s;
+                Task::none()
+            }
+            Message::RoomKeyInput(s) => {
+                self.forms.room_key = s;
+                Task::none()
+            }
+            Message::SubmitCreate => self.submit_create(),
+            Message::Created(result) => self.on_created(result),
+            Message::SubmitJoin => self.submit_join(),
+            Message::Joined(result) => self.on_joined(result),
+            Message::CopyKey => match self.selected_key() {
+                Some(key) => {
+                    let key = key.to_string();
+                    self.notify("Room key copied");
+                    iced::clipboard::write(key)
+                }
+                None => Task::none(),
+            },
+            Message::LeaveRoom => match self.selected {
+                Some(room) => {
+                    let client = self.client.clone();
+                    call(async move { client.leave_room(room).await }, Message::Left)
+                }
+                None => Task::none(),
+            },
+            Message::Left(result) => {
+                match result {
+                    Ok(()) => self.sync_rooms(),
+                    Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
+            Message::NameInput(s) => {
+                self.forms.name = s;
+                Task::none()
+            }
+            Message::SubmitName => self.submit_name(),
+            Message::CopyMcpConfig => match &self.mcp_token {
+                Some(token) => {
+                    let config = mcp::client_config(self.settings.mcp_port, token);
+                    self.notify("MCP config copied");
+                    iced::clipboard::write(config)
+                }
+                None => Task::none(),
+            },
+            Message::RepoInput(s) => {
+                self.forms.repo = s;
+                Task::none()
+            }
+            Message::AddRepo => self.add_repo(),
+            Message::RemoveRepo(index) => {
+                let Some(room) = self.selected else {
+                    return Task::none();
+                };
+                let key = room.to_hex();
+                if let Some(repos) = self.settings.repos.get_mut(&key) {
+                    if index < repos.len() {
+                        repos.remove(index);
+                    }
+                    if repos.is_empty() {
+                        self.settings.repos.remove(&key);
+                    }
+                }
+                self.save_settings();
+                self.publish()
+            }
+
+            Message::ProposalTitle(s) => {
+                self.forms.proposal_title = s;
+                Task::none()
+            }
+            Message::ProposalBody(action) => {
+                self.forms.proposal_body.perform(action);
+                Task::none()
+            }
+            Message::Propose => self.propose(),
+            Message::Proposed(result) => {
+                match result {
+                    Ok(_) => {
+                        self.forms.proposal_title.clear();
+                        self.forms.proposal_body = text_editor::Content::new();
+                        if self.dialog == Some(Dialog::NewTask) {
+                            self.dialog = None;
+                        }
+                        self.notify("Task proposed");
+                    }
+                    Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
+            Message::Pick(number) => self.pick(number),
+            Message::Picked(result) => {
+                self.picking = None;
+                match result {
+                    Ok((room, task)) => match &task.claim {
+                        Some(claim) => {
+                            let prompt = logic::pick_prompt(&room, &task, &claim.token);
+                            self.notify(&format!("#{} is yours, prompt copied", task.number));
+                            return iced::clipboard::write(prompt);
+                        }
+                        None => self.banner = Some("The claim came back empty".to_owned()),
+                    },
+                    Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
+
+            Message::EditTask => {
+                if let Some((_, task)) = self.open() {
+                    self.task_draft = Some(TaskDraft {
+                        title: task.title.clone(),
+                        body: text_editor::Content::with_text(&task.body),
+                    });
+                }
+                operation::focus("task-title")
+            }
+            Message::CancelEditTask => {
+                self.task_draft = None;
+                Task::none()
+            }
+            Message::EditTitle(s) => {
+                if let Some(draft) = &mut self.task_draft {
+                    draft.title = s;
+                }
+                Task::none()
+            }
+            Message::EditBody(action) => {
+                if let Some(draft) = &mut self.task_draft {
+                    draft.body.perform(action);
+                }
+                Task::none()
+            }
+            Message::SaveTask => self.save_task(),
+            Message::TaskSaved(result) => {
+                match result {
+                    Ok(_) => self.task_draft = None,
+                    Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
+            Message::EditPlan => {
+                if let Some((_, task)) = self.open() {
+                    self.plan_draft = Some(text_editor::Content::with_text(&task.plan));
+                }
+                Task::none()
+            }
+            Message::CancelEditPlan => {
+                self.plan_draft = None;
+                Task::none()
+            }
+            Message::PlanAction(action) => {
+                if let Some(draft) = &mut self.plan_draft {
+                    draft.perform(action);
+                }
+                Task::none()
+            }
+            Message::SavePlan => self.save_plan(),
+            Message::PlanSaved(result) => {
+                match result {
+                    Ok(_) => self.plan_draft = None,
+                    Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
+            Message::SetPriority(priority) => match self.open_ids() {
+                Some((room, task)) => fire(self.request(
+                    room,
+                    Request::SetPriority {
+                        room,
+                        task,
+                        priority,
+                    },
+                )),
+                None => Task::none(),
+            },
+            Message::Decide(decision) => match self.open_ids() {
+                Some((room, task)) => fire(self.request(
+                    room,
+                    Request::Decide {
+                        room,
+                        task,
+                        decision,
+                    },
+                )),
+                None => Task::none(),
+            },
+            Message::Release => match self.open_ids() {
+                Some((room, task)) => fire(self.request(
+                    room,
+                    Request::Release {
+                        room,
+                        task,
+                        note: String::new(),
+                    },
+                )),
+                None => Task::none(),
+            },
+            Message::NoteInput(s) => {
+                self.forms.note = s;
+                Task::none()
+            }
+            Message::AddNote => self.add_note(),
+            Message::NoteAdded(result) => {
+                match result {
+                    Ok(_) => self.forms.note.clear(),
+                    Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
+        }
+    }
+
+    // ---- lookups ------------------------------------------------------------------------
+
+    fn selected_state(&self) -> Option<&RoomState> {
+        let selected = self.selected?;
+        self.rooms
+            .iter()
+            .find(|(key, _)| RoomId::of(&key.token) == selected)
+            .and_then(|(_, state)| state.as_ref())
+    }
+
+    fn selected_key(&self) -> Option<&RoomKey> {
+        let selected = self.selected?;
+        self.rooms
+            .iter()
+            .map(|(key, _)| key)
+            .find(|key| RoomId::of(&key.token) == selected)
+    }
+
+    /// Whether the selected room's server answers; `None` before it said either.
+    fn selected_server_online(&self) -> Option<bool> {
+        let key = self.selected_key()?;
+        self.servers.get(&key.server).map(|s| s.online)
+    }
+
+    /// The status-bar tooltip of the selected room's server.
+    fn selected_server_tip(&self) -> String {
+        let Some(key) = self.selected_key() else {
+            return "No room selected".to_owned();
+        };
+        let server = format!("{}:{}", key.server.host, key.server.port);
+        match self.servers.get(&key.server) {
+            Some(ServerStatus { online: true, .. }) => format!("Server {server} online"),
+            Some(ServerStatus { error: Some(e), .. }) => format!("Server {server} offline: {e}"),
+            Some(_) => format!("Server {server} offline"),
+            None => format!("Connecting to {server}"),
+        }
+    }
+
+    /// The rooms for the switcher, in list order.
+    fn room_choices(&self) -> Vec<RoomChoice> {
+        self.rooms
+            .iter()
+            .map(|(key, state)| {
+                let id = RoomId::of(&key.token);
+                RoomChoice {
+                    id,
+                    name: state
+                        .as_ref()
+                        .map_or_else(|| format!("Room {}", &id.to_hex()[..8]), |s| s.name.clone()),
+                }
+            })
+            .collect()
+    }
+
+    /// The repos this member shares with the selected room.
+    fn room_repos(&self) -> &[PathBuf] {
+        self.selected
+            .and_then(|room| self.settings.repos.get(&room.to_hex()))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The selected room and the task of the open task dialog.
+    fn open(&self) -> Option<(&RoomState, &RoomTask)> {
+        let Some(Dialog::Task(number)) = self.dialog else {
+            return None;
+        };
+        let state = self.selected_state()?;
+        let task = state.tasks.iter().find(|t| t.number == number)?;
+        Some((state, task))
+    }
+
+    fn open_ids(&self) -> Option<(RoomId, u64)> {
+        self.open().map(|(state, task)| (state.id, task.number))
+    }
+
+    // ---- calls --------------------------------------------------------------------------
+
+    fn request(
+        &self,
+        room: RoomId,
+        req: Request,
+    ) -> impl Future<Output = Result<Response, ClientError>> + Send + 'static + use<> {
+        let client = self.client.clone();
+        async move { client.request(room, req).await }
+    }
+
+    fn submit_create(&mut self) -> Task<Message> {
+        let server = match self.forms.server_url.trim().parse::<ServerAddr>() {
+            Ok(server) => server,
+            Err(e) => {
+                self.banner = Some(format!("Server address: {e}"));
+                return Task::none();
+            }
+        };
+        let name = self.forms.room_name.trim();
+        if name.is_empty() {
+            self.banner = Some("Room name is empty".to_owned());
+            return Task::none();
+        }
+        let name = logic::truncate(name, caps::ROOM_NAME);
+        let client = self.client.clone();
+        call(
+            async move { client.create_room(server, name).await },
+            Message::Created,
+        )
+    }
+
+    fn on_created(&mut self, result: Result<RoomKey, String>) -> Task<Message> {
+        match result {
+            Ok(key) => {
+                self.settings.last_server = Some(key.server.to_string());
+                self.forms.room_name.clear();
+                self.sync_rooms();
+                self.select(Some(RoomId::of(&key.token)));
+                self.save_settings();
+                self.publish()
+            }
+            Err(e) => {
+                self.banner = Some(e);
+                Task::none()
+            }
+        }
+    }
+
+    fn submit_join(&mut self) -> Task<Message> {
+        let key = match self.forms.room_key.parse::<RoomKey>() {
+            Ok(key) => key,
+            Err(e) => {
+                self.banner = Some(format!("Room key: {e}"));
+                return Task::none();
+            }
+        };
+        let client = self.client.clone();
+        call(async move { client.join_room(key).await }, Message::Joined)
+    }
+
+    fn on_joined(&mut self, result: Result<RoomId, String>) -> Task<Message> {
+        match result {
+            Ok(room) => {
+                self.forms.room_key.clear();
+                self.sync_rooms();
+                self.select(Some(room));
+                self.save_settings();
+                self.publish()
+            }
+            Err(e) => {
+                self.banner = Some(e);
+                Task::none()
+            }
+        }
+    }
+
+    fn submit_name(&mut self) -> Task<Message> {
+        let name = logic::truncate(self.forms.name.trim(), caps::MEMBER_NAME);
+        if name.is_empty() {
+            self.banner = Some("Name is empty".to_owned());
+            return Task::none();
+        }
+        self.forms.name.clone_from(&name);
+        self.settings.name.clone_from(&name);
+        self.save_settings();
+        self.notify("Name saved");
+        let client = self.client.clone();
+        Task::perform(async move { client.set_name(name).await }, |()| {
+            Message::Noop
+        })
+    }
+
+    fn add_repo(&mut self) -> Task<Message> {
+        let Some(room) = self.selected else {
+            return Task::none();
+        };
+        let path = expand_home(self.forms.repo.trim());
+        if !path.is_absolute() || !path.is_dir() {
+            self.banner = Some(format!("Not a folder on this machine: {}", path.display()));
+            return Task::none();
+        }
+        let repos = self.settings.repos.entry(room.to_hex()).or_default();
+        if !repos.contains(&path) {
+            repos.push(path);
+        }
+        self.forms.repo.clear();
+        self.save_settings();
+        self.publish()
+    }
+
+    fn propose(&mut self) -> Task<Message> {
+        let (Some(room), title) = (self.selected, self.forms.proposal_title.trim()) else {
+            return Task::none();
+        };
+        if title.is_empty() {
+            return Task::none();
+        }
+        let req = Request::Propose {
+            room,
+            title: title.to_owned(),
+            body: self.forms.proposal_body.text(),
+        };
+        call(self.request(room, req), Message::Proposed)
+    }
+
+    /// Approves the plan when it still waits for that, claims the build for this member and
+    /// hands back the room name and the claimed task for the prompt.
+    fn pick(&mut self, number: u64) -> Task<Message> {
+        if self.picking.is_some() {
+            return Task::none();
+        }
+        let Some(state) = self.selected_state() else {
+            return Task::none();
+        };
+        let Some(task) = state.tasks.iter().find(|t| t.number == number) else {
+            return Task::none();
+        };
+        if !logic::pickable(task) {
+            return Task::none();
+        }
+        let (room, name, approve) = (state.id, state.name.clone(), task.stage == Stage::Planned);
+        self.picking = Some(number);
+        let client = self.client.clone();
+        call(
+            async move {
+                if approve {
+                    let decision = Decision::Approve;
+                    client
+                        .request(
+                            room,
+                            Request::Decide {
+                                room,
+                                task: number,
+                                decision,
+                            },
+                        )
+                        .await?;
+                }
+                let claim = Request::Claim {
+                    room,
+                    work: Work::Build,
+                    task: Some(number),
+                    agent: PICK_AGENT.to_owned(),
+                };
+                match client.request(room, claim).await? {
+                    Response::Claimed(Some(task)) => Ok((name, task)),
+                    other => Err(ClientError::Proto(format!("unexpected reply: {other:?}"))),
+                }
+            },
+            Message::Picked,
+        )
+    }
+
+    fn save_task(&mut self) -> Task<Message> {
+        let (Some((state, task)), Some(draft)) = (self.open(), &self.task_draft) else {
+            return Task::none();
+        };
+        if draft.title.trim().is_empty() {
+            return Task::none();
+        }
+        let room = state.id;
+        let req = Request::EditTask {
+            room,
+            task: task.number,
+            title: draft.title.clone(),
+            body: draft.body.text(),
+            plan: task.plan.clone(),
+        };
+        call(self.request(room, req), Message::TaskSaved)
+    }
+
+    fn save_plan(&self) -> Task<Message> {
+        let (Some((state, task)), Some(draft)) = (self.open(), &self.plan_draft) else {
+            return Task::none();
+        };
+        let room = state.id;
+        let req = Request::EditTask {
+            room,
+            task: task.number,
+            title: task.title.clone(),
+            body: task.body.clone(),
+            plan: draft.text(),
+        };
+        call(self.request(room, req), Message::PlanSaved)
+    }
+
+    fn add_note(&mut self) -> Task<Message> {
+        let Some((room, task)) = self.open_ids() else {
+            return Task::none();
+        };
+        let text = self.forms.note.trim();
+        if text.is_empty() {
+            return Task::none();
+        }
+        let req = Request::AddNote {
+            room,
+            task,
+            text: text.to_owned(),
+            agent: None,
+        };
+        call(self.request(room, req), Message::NoteAdded)
+    }
+
+    // ---- client events and rooms ----------------------------------------------------------
+
+    fn on_client(&mut self, event: ClientEvent) -> Task<Message> {
+        match event {
+            ClientEvent::Status {
+                server,
+                online,
+                error,
+            } => {
+                if online {
+                    if let Some(e) = &error {
+                        self.banner = Some(format!("{}:{}: {e}", server.host, server.port));
+                    }
+                    // A server that came back lost the sessions of this member.
+                    let stale: Vec<RoomId> = self
+                        .rooms
+                        .iter()
+                        .filter(|(key, _)| key.server == server)
+                        .map(|(key, _)| RoomId::of(&key.token))
+                        .collect();
+                    self.published.retain(|room, _| !stale.contains(room));
+                    self.servers.insert(
+                        server,
+                        ServerStatus {
+                            online,
+                            error: None,
+                        },
+                    );
+                    self.publish()
+                } else {
+                    self.servers.insert(server, ServerStatus { online, error });
+                    Task::none()
+                }
+            }
+            ClientEvent::Room(state) => {
+                let id = state.id;
+                match self
+                    .rooms
+                    .iter_mut()
+                    .find(|(key, _)| RoomId::of(&key.token) == id)
+                {
+                    Some(entry) => entry.1 = Some(*state),
+                    None => self.sync_rooms(),
+                }
+                if self.selected.is_none() {
+                    self.select(Some(id));
+                }
+                self.publish()
+            }
+            ClientEvent::RoomRemoved(_) => {
+                self.sync_rooms();
+                Task::none()
+            }
+        }
+    }
+
+    /// Takes the rooms from the client, keeps the selection valid and saves the room list.
+    fn sync_rooms(&mut self) {
+        self.rooms = self.client.rooms();
+        self.published.retain(|room, _| {
+            self.rooms
+                .iter()
+                .any(|(k, _)| RoomId::of(&k.token) == *room)
+        });
+        let selected_gone = self.selected.is_some_and(|selected| {
+            !self
+                .rooms
+                .iter()
+                .any(|(key, _)| RoomId::of(&key.token) == selected)
+        });
+        if selected_gone || self.selected.is_none() {
+            let first = self.rooms.first().map(|(key, _)| RoomId::of(&key.token));
+            self.select(first);
+        }
+        self.settings.rooms = self.rooms.iter().map(|(key, _)| key.to_string()).collect();
+        let joined: HashSet<String> = self
+            .rooms
+            .iter()
+            .map(|(key, _)| RoomId::of(&key.token).to_hex())
+            .collect();
+        self.settings.repos.retain(|room, _| joined.contains(room));
+        self.save_settings();
+    }
+
+    fn select(&mut self, room: Option<RoomId>) {
+        if self.selected != room {
+            self.selected = room;
+            if matches!(self.dialog, Some(Dialog::Task(_) | Dialog::NewTask)) {
+                self.dialog = None;
+            }
+            self.reset_drafts();
+        }
+    }
+
+    fn open_dialog(&mut self, dialog: Dialog) {
+        if self.dialog != Some(dialog) {
+            self.reset_drafts();
+        }
+        self.dialog = Some(dialog);
+    }
+
+    fn reset_drafts(&mut self) {
+        self.task_draft = None;
+        self.plan_draft = None;
+        self.forms.note.clear();
+    }
+
+    fn notify(&mut self, text: &str) {
+        self.notice = Some(Notice {
+            text: text.to_owned(),
+            until_ms: now_ms() + NOTICE_MS,
+        });
+    }
+
+    /// Writes `settings.toml` when something changed since it was last read or written.
+    fn save_settings(&mut self) {
+        if self.settings == self.saved {
+            return;
+        }
+        match self.settings.save(&self.data_dir) {
+            Ok(()) => self.saved = self.settings.clone(),
+            Err(e) => self.banner = Some(format!("Cannot save settings: {e}")),
+        }
+    }
+
+    /// Re-parses the plan of the open task when its text changed.
+    fn refresh_plan(&mut self) {
+        let plan = self.open().map_or("", |(_, task)| task.plan.as_str());
+        if plan != self.plan_src {
+            self.plan_src = plan.to_owned();
+            self.plan_md = markdown::Content::parse(&self.plan_src);
+        }
+    }
+
+    // ---- publishing -----------------------------------------------------------------------
+
+    /// Sends each room the local sessions running in the repos shared with it, when that list
+    /// changed since the last send. The first list per room (after start or reconnect) is sent
+    /// even when empty: the server may still hold sessions of an earlier run whose connection
+    /// has not timed out yet.
+    fn publish(&mut self) -> Task<Message> {
+        let mut calls = Vec::new();
+        for (key, state) in &self.rooms {
+            let Some(state) = state else { continue };
+            let room = RoomId::of(&key.token);
+            let repos = self
+                .settings
+                .repos
+                .get(&room.to_hex())
+                .map_or(&[][..], Vec::as_slice);
+            let sessions =
+                logic::shared_sessions(&self.local_sessions, state, self.client.member(), repos);
+            if self.published.get(&room) == Some(&sessions) {
+                continue;
+            }
+            self.published.insert(room, sessions.clone());
+            let client = self.client.clone();
+            calls.push(call(
+                async move {
+                    client
+                        .request(room, Request::PublishSessions { room, sessions })
+                        .await
+                },
+                move |result| Message::Published(room, result.map(|_| ())),
+            ));
+        }
+        Task::batch(calls)
+    }
+}
+
+/// The app's keyboard shortcuts, from key presses no widget took.
+fn key_message(event: keyboard::Event) -> Option<Message> {
+    let keyboard::Event::KeyPressed { key, modifiers, .. } = event else {
+        return None;
+    };
+    match key.as_ref() {
+        Key::Named(Named::Escape) => Some(Message::CloseDialog),
+        Key::Named(Named::Tab) if modifiers.shift() => Some(Message::FocusPrevious),
+        Key::Named(Named::Tab) => Some(Message::FocusNext),
+        Key::Character("n") if modifiers.command() => Some(Message::OpenNewTask),
+        Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
+        _ => None,
+    }
+}
+
+/// `~/x` as a path under the home directory; anything else as given.
+fn expand_home(path: &str) -> PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => directories::BaseDirs::new()
+            .map_or_else(|| PathBuf::from(path), |dirs| dirs.home_dir().join(rest)),
+        None => Path::new(path).to_path_buf(),
+    }
+}
+
+/// A start that cannot continue: no data directory, no identity.
+fn fatal(message: &str) -> ! {
+    eprintln!("schwitzer: {message}");
+    std::process::exit(1)
+}

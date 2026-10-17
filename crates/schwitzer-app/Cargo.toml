@@ -1,0 +1,40 @@
+[package]
+name = "schwitzer-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "schwitzer"
+path = "src/main.rs"
+
+[features]
+# Headless remote control (iced_impeccable): `schwitzer --headless --control <sock>`.
+remote = ["dep:iced_impeccable"]
+
+[dependencies]
+schwitzer-proto.workspace = true
+schwitzer-client.workspace = true
+iced.workspace = true
+iced_impeccable = { workspace = true, optional = true }
+tokio.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+directories.workspace = true
+rmcp.workspace = true
+axum.workspace = true
+tokio-util.workspace = true
+blake3.workspace = true
+rand.workspace = true
+hex.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

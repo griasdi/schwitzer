@@ -1,0 +1,12 @@
+{"type":"session","version":3,"id":"01a14ba1-e453-72dd-bd68-19fe59ca8bd1","timestamp":"2026-10-17T20:51:03.379Z","cwd":"/home/felix/code/griasdi"}
+{"type":"model_change","id":"4d6f2a76","parentId":null,"timestamp":"2026-10-17T20:51:03.462Z","model":"anthropic/claude-opus-5-5"}
+{"type":"title","v":1,"title":"First title","source":"auto","updatedAt":"2026-10-17T20:51:10.000Z"}
+{"type":"message","id":"a1","message":{"role":"user","content":[{"type":"text","text":"claim a task"}]}}
+{"type":"message","id":"a2","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input":4,"output":405,"totalTokens":1000}}}
+{"type":"message","id":"a3","message":{"role":"toolResult","content":[{"type":"text","text":"schwitzer-claim: 0123456789abcdef0123456789abcdef\nWrite a plan for this task and call submit_plan.\n{}"}]}}
+this line is not json
+{"type":"message","id":"a4","message":{"role":"toolResult","content":[{"type":"text","text":"schwitzer-claim: 0123456789abcdef0123456789abcde"},{"type":"image","data":"x"},{"type":"text","text":"nothing here"}]}}
+{"type":"title_change","id":"8d7b2845","parentId":"a4","timestamp":"2026-10-17T20:53:22.123Z","title":"Second title","source":"auto"}
+{"type":"model_change","id":"4d6f2a77","parentId":"8d7b2845","timestamp":"2026-10-17T20:53:23.000Z","model":"anthropic/claude-sonnet-5-5"}
+{"type":"message","id":"a5","message":{"role":"assistant","content":[],"usage":{"totalTokens":234}}}
+{"type":"message","id":"a6","message":{"role":"toolResult","content":[{"type":"text","text":"done\nschwitzer-claim: FEDCBA9876543210fedcba9876543210 and more"}]}}

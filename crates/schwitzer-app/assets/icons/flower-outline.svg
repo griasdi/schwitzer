@@ -1,0 +1,12 @@
+<!-- Schwitzer status flower, outline, authored for this app. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <circle cx="12.00" cy="4.40" r="2.5" fill="none" stroke="#000" stroke-width="1.5"/>
+  <circle cx="17.37" cy="6.63" r="2.5" fill="none" stroke="#000" stroke-width="1.5"/>
+  <circle cx="19.60" cy="12.00" r="2.5" fill="none" stroke="#000" stroke-width="1.5"/>
+  <circle cx="17.37" cy="17.37" r="2.5" fill="none" stroke="#000" stroke-width="1.5"/>
+  <circle cx="12.00" cy="19.60" r="2.5" fill="none" stroke="#000" stroke-width="1.5"/>
+  <circle cx="6.63" cy="17.37" r="2.5" fill="none" stroke="#000" stroke-width="1.5"/>
+  <circle cx="4.40" cy="12.00" r="2.5" fill="none" stroke="#000" stroke-width="1.5"/>
+  <circle cx="6.63" cy="6.63" r="2.5" fill="none" stroke="#000" stroke-width="1.5"/>
+  <circle cx="12" cy="12" r="2.2" fill="none" stroke="#000" stroke-width="1.5"/>
+</svg>

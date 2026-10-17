@@ -1,0 +1,25 @@
+[package]
+name = "schwitzer-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "schwitzer-server"
+path = "src/main.rs"
+
+[dependencies]
+schwitzer-proto.workspace = true
+weida.workspace = true
+tokio.workspace = true
+rusqlite.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rand.workspace = true
+blake3.workspace = true
+
+[lints]
+workspace = true

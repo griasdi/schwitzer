@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"01a14ba2-0000-70ce-9b91-8552f651202e","timestamp":"2026-10-17T20:55:00.000Z","cwd":"/elsewhere/other","title":"Subagent title"}
+{"type":"model_change","model":"subagent-model"}
+{"type":"title_change","title":"Subagent title change"}
+{"type":"message","id":"b1","message":{"role":"assistant","usage":{"totalTokens":500}}}
+{"type":"message","id":"b2","message":{"role":"toolResult","content":[{"type":"text","text":"schwitzer-claim: 99999999999999999999999999999999"}]}}
+{"type":"message","id":"b3","message":{"role":"assistant","usage":{"totalTokens":66}}}
