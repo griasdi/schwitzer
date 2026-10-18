@@ -10,7 +10,7 @@ use super::icons::{Icon, Tone, icon};
 use super::logic;
 use super::pages::{frame, section};
 use super::widgets::{
-    dot, heading, icon_button, icon_text_button, id_button, input, muted, text_button,
+    dot, heading, icon_button, icon_text_button, id_button, input, muted, path_text, text_button,
 };
 use super::{App, FolderFor, Message, tilde};
 use crate::mcp::McpStatus;
@@ -67,7 +67,7 @@ fn projects_folders(app: &App) -> Element<'_, Message> {
         rows = rows.push(
             row![
                 icon(Icon::Folder, 16.0, Tone::Muted),
-                text(tilde(path)).size(TS_14).width(Length::Fill),
+                path_text(&tilde(path)),
                 icon_button(
                     format!("projects-dir-remove-{index}"),
                     Icon::Trash,
@@ -246,7 +246,7 @@ fn this_project(app: &App) -> Element<'_, Message> {
         let mut line = row![
             icon(Icon::Folder, 16.0, Tone::Muted),
             column![
-                text(repo.display().to_string()).size(TS_14),
+                path_text(&repo.display().to_string()),
                 muted(match state {
                     Some(PluginState::Current) => "omp plugin installed",
                     Some(PluginState::Outdated) => "omp plugin out of date",
@@ -305,9 +305,7 @@ fn this_project(app: &App) -> Element<'_, Message> {
         repos = repos.push(
             row![
                 icon(Icon::Folder, 16.0, Tone::Muted),
-                text(path.display().to_string())
-                    .size(TS_14)
-                    .width(Length::Fill),
+                path_text(&path.display().to_string()),
                 text_button(
                     format!("repo-suggest-{index}"),
                     "Link",
@@ -492,12 +490,13 @@ fn agents(app: &App) -> Element<'_, Message> {
             "omp sessions are read from {}",
             app.sessions_dirs()
                 .iter()
-                .map(|dir| dir.path.display().to_string())
+                .map(|dir| logic::breakable_path(&dir.path.display().to_string()))
                 .collect::<Vec<_>>()
                 .join(", ")
         ))
         .size(TS_12)
-        .style(theme::text_muted),
+        .style(theme::text_muted)
+        .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
         plugins(app),
     ]
     .spacing(SP_3)

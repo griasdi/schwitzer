@@ -578,10 +578,7 @@ impl App {
             col = col.push(
                 iced::widget::row![
                     icons::icon(Icon::Folder, 16.0, Tone::Muted),
-                    iced::widget::text(path.display().to_string())
-                        .size(theme::TS_14)
-                        .width(Length::Fill)
-                        .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+                    widgets::path_text(&path.display().to_string()),
                     widgets::text_button(
                         format!("link-suggested-{index}"),
                         "Link",
@@ -629,7 +626,10 @@ impl App {
         let hint = if searched.is_empty() {
             "No projects folder yet. Add one to get matching repos suggested.".to_owned()
         } else {
-            let names: Vec<String> = searched.iter().map(|dir| tilde(dir)).collect();
+            let names: Vec<String> = searched
+                .iter()
+                .map(|dir| logic::breakable_path(&tilde(dir)))
+                .collect();
             format!("Searched in {}.", names.join(", "))
         };
         col = col.push(

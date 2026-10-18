@@ -261,6 +261,32 @@ pub fn truncate(text: &str, max: usize) -> String {
     text[..end].to_owned()
 }
 
+/// The break opportunity [`breakable_path`] puts after a separator: a zero-width space, which
+/// allows a line break after it and none before it.
+const PATH_BREAK: char = '\u{200B}';
+
+/// `path` with a zero-width space after each separator that sits between two names, so text
+/// wraps there: `C:\a\b` and `/a/b` break after their inner separators. A separator run, such as
+/// the leading `\\` of `\\server\share`, stays together, and a leading or trailing separator
+/// gets none.
+pub fn breakable_path(path: &str) -> String {
+    let is_separator = |c: char| matches!(c, '/' | '\\');
+    let mut out = String::with_capacity(path.len() + path.len() / 4);
+    let mut previous: Option<char> = None;
+    let mut chars = path.chars().peekable();
+    while let Some(c) = chars.next() {
+        out.push(c);
+        if is_separator(c)
+            && previous.is_some_and(|p| !is_separator(p))
+            && chars.peek().is_some_and(|&n| !is_separator(n))
+        {
+            out.push(PATH_BREAK);
+        }
+        previous = Some(c);
+    }
+    out
+}
+
 /// A token count: `812`, `1.2k`, `12.3k`, `1.2M`.
 pub fn tokens(count: u64) -> String {
     let value = count as f64;
@@ -527,5 +553,24 @@ mod tests {
         assert_eq!(ago(5 * 60_000), "5m");
         assert_eq!(ago(125 * 60_000), "2h 05m");
         assert_eq!(ago(3 * 24 * 60 * 60_000), "3d");
+    }
+
+    #[test]
+    fn paths_break_after_inner_separators_only() {
+        let expect = |s: &str| s.replace('|', &PATH_BREAK.to_string());
+        assert_eq!(
+            breakable_path(r"\\wsl.localhost\Ubuntu\home\felix\code\griasdi"),
+            expect(r"\\wsl.localhost\|Ubuntu\|home\|felix\|code\|griasdi"),
+        );
+        assert_eq!(
+            breakable_path(r"C:\Users\felix\code\griasdi-runner"),
+            expect(r"C:\|Users\|felix\|code\|griasdi-runner"),
+        );
+        assert_eq!(
+            breakable_path("/tmp/sw/code/demo/"),
+            expect("/tmp/|sw/|code/|demo/"),
+        );
+        assert_eq!(breakable_path("~"), "~");
+        assert_eq!(breakable_path(""), "");
     }
 }

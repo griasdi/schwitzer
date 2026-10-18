@@ -249,6 +249,15 @@ pub fn muted<'a>(label: impl text::IntoFragment<'a>) -> iced::widget::Text<'a> {
     text(label).size(TS_12).style(theme::text_muted)
 }
 
+/// A path in body text: fills its row and wraps after its separators, inside a name only
+/// when the name alone is wider than the line.
+pub fn path_text<'a>(path: &str) -> iced::widget::Text<'a> {
+    text(logic::breakable_path(path))
+        .size(TS_14)
+        .width(Length::Fill)
+        .wrapping(text::Wrapping::WordOrGlyph)
+}
+
 /// The heading of a block in a page section or in the open task.
 pub fn heading<'a>(label: impl text::IntoFragment<'a>) -> iced::widget::Text<'a> {
     text(label).size(TS_14).font(SEMIBOLD)
