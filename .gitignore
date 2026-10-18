@@ -1,7 +1,6 @@
 /target
 /.omp/mcp.json
 /.omp/skills/impeccable/scripts/bin/
-/.omp/plugins/node_modules/
 
 # Local planning files, never committed.
 /SCHWITZER_PLAN.md
