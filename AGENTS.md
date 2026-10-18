@@ -10,7 +10,7 @@ target/debug/schwitzer-server --listen 127.0.0.1:7454 --data-dir /tmp/sw/server 
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-deploy/deploy.sh stkn    # build HEAD, run it on stkn.org (ssh felix@stkn.org) as the systemd user service schwitzer-server, UDP 7444
+deploy/deploy.sh stkn    # build HEAD, run it on stkn.org (ssh stkn.org) as the systemd user service schwitzer-server, UDP 7444
 deploy/release.sh 0.2.0   # on main, pushed: set the version, tag v0.2.0; .github/workflows/release.yml builds and publishes the desktop app
 deploy/changelog.sh v0.1.0..HEAD   # release notes from the Changelog: trailers
 cargo run -p schwitzer-app --example licenses   # rewrite assets/licenses/third-party.json after Cargo.lock changed (needs cargo-about 0.9.2)
@@ -44,7 +44,7 @@ A change is finished when its gate passed, it is committed and pushed to `origin
 - Commit messages follow CONTRIBUTING.md: no prefix, a `Changelog:` trailer for user-visible changes.
 - Before pushing, `git pull --rebase origin main`; if that brought new commits, run the gate again. Push only to `origin`.
 - A change without code skips `deploy.sh` as well.
-- stkn.org is the shared server (`weida://…@stkn.org:7444`), which other people use: a change that breaks the protocol or migrates the schema cuts off their older apps until they update, so say so in the report. Logs: `ssh felix@stkn.org journalctl --user -u schwitzer-server`.
+- stkn.org is the shared server (`weida://…@stkn.org:7444`), which other people use: a change that breaks the protocol or migrates the schema cuts off their older apps until they update, so say so in the report. Logs: `ssh stkn.org journalctl --user -u schwitzer-server`.
 
 ## Running headless
 

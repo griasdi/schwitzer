@@ -1,7 +1,7 @@
 #!/bin/sh
 # Deploys the committed HEAD of this checkout as a systemd user service:
 #
-#   stkn     on stkn.org, over ssh as felix: `schwitzer-server` on UDP 7444
+#   stkn     on stkn.org, over ssh with your ssh user: `schwitzer-server` on UDP 7444
 #            (IPv4 and IPv6), public host stkn.org. Enables lingering there,
 #            so the service runs without a login and starts at boot.
 #
@@ -19,7 +19,7 @@ set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/schwitzer-deploy
-stkn_ssh=felix@stkn.org
+stkn_ssh=stkn.org
 # Where `stkn` uploads binary and unit template, relative to the remote home.
 stkn_stage=.cache/schwitzer-server-deploy
 
