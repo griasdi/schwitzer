@@ -71,6 +71,22 @@ pub fn default_projects_dirs(home: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The visible subfolders of `dir`, sorted. Errors give none: a missing folder only means no
+/// suggestions.
+pub fn subdirs(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
 impl Settings {
     /// Reads `settings.toml` from `dir`. A missing file gives the defaults; a file that cannot
     /// be read or parsed gives the defaults and the reason. The file is left alone: only

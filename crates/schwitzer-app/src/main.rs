@@ -16,6 +16,7 @@ mod sessions;
 mod settings;
 mod theme;
 mod update;
+mod wsl;
 
 use app::App;
 #[cfg(feature = "remote")]

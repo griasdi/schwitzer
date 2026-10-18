@@ -474,7 +474,11 @@ fn agents(app: &App) -> Element<'_, Message> {
         ),
         text(format!(
             "omp sessions are read from {}",
-            app.settings.omp_sessions_dir.display()
+            app.sessions_dirs()
+                .iter()
+                .map(|dir| dir.path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         ))
         .size(TS_12)
         .style(theme::text_muted),

@@ -37,6 +37,7 @@ use crate::sessions::{self, LocalSession};
 use crate::settings::{self, Settings};
 use crate::theme::{self, SP_2};
 use crate::update::{self, UpdateState};
+use crate::wsl;
 
 /// The agent name a pick claims the build with; the picker's own agent finishes it.
 const PICK_AGENT: &str = "omp";
@@ -57,6 +58,8 @@ pub enum Message {
     /// The event stream lagged: reload the rooms from the client.
     Resync,
     LocalSessions(Vec<LocalSession>),
+    /// The running WSL distros changed.
+    Wsl(Vec<wsl::Distro>),
     Mcp(McpStatus),
     Noop,
     /// A call failed; the text goes into the banner.
@@ -265,6 +268,9 @@ pub struct App {
     banner: Option<String>,
     notice: Option<Notice>,
     local_sessions: Vec<LocalSession>,
+    /// The running WSL distros (Windows only): their projects folders are searched, their omp
+    /// sessions read and their linked repos checked.
+    wsl: Vec<wsl::Distro>,
     /// What was last published to each room; a room missing here has had nothing published.
     published: HashMap<RoomId, Vec<SessionInfo>>,
     mcp: Option<McpStatus>,
@@ -370,6 +376,7 @@ impl App {
             banner: (!notices.is_empty()).then(|| notices.join("\n")),
             notice: None,
             local_sessions: Vec::new(),
+            wsl: Vec::new(),
             published: HashMap::new(),
             mcp,
             mcp_token,
@@ -423,8 +430,8 @@ impl App {
             iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick),
             iced::system::theme_changes().map(Message::SystemMode),
             keyboard::listen().filter_map(key_message),
-            sessions::subscription(self.settings.omp_sessions_dir.clone())
-                .map(Message::LocalSessions),
+            sessions::subscription(self.sessions_dirs()).map(Message::LocalSessions),
+            wsl::subscription().map(Message::Wsl),
         ];
         if let Some(token) = &self.mcp_token {
             subs.push(
@@ -556,7 +563,8 @@ impl App {
                     icons::icon(Icon::Folder, 16.0, Tone::Muted),
                     iced::widget::text(path.display().to_string())
                         .size(theme::TS_14)
-                        .width(Length::Fill),
+                        .width(Length::Fill)
+                        .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
                     widgets::text_button(
                         format!("link-suggested-{index}"),
                         "Link",
@@ -592,7 +600,7 @@ impl App {
             .spacing(SP_2)
             .align_y(iced::Alignment::Center),
         );
-        let searched = self.settings.projects_dirs.as_deref().unwrap_or_default();
+        let searched = self.searched_dirs();
         let hint = if searched.is_empty() {
             "No projects folder yet. Add one to get matching repos suggested.".to_owned()
         } else {
@@ -601,7 +609,9 @@ impl App {
         };
         col = col.push(
             iced::widget::row![
-                widgets::muted(hint).width(Length::Fill),
+                widgets::muted(hint)
+                    .width(Length::Fill)
+                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
                 widgets::text_button(
                     "change-projects-dirs",
                     "Change",
@@ -656,6 +666,11 @@ impl App {
             Message::LocalSessions(sessions) => {
                 self.local_sessions = sessions;
                 self.publish()
+            }
+            Message::Wsl(distros) => {
+                self.wsl = distros;
+                self.read_project_dirs();
+                Task::none()
             }
             Message::Mcp(status) => {
                 self.mcp = Some(status);
@@ -1039,7 +1054,7 @@ impl App {
                 if input.is_empty() {
                     return Task::none();
                 }
-                let path = expand_home(input);
+                let path = wsl::canonical(expand_home(input));
                 if !path.is_absolute() || !path.is_dir() {
                     self.banner = Some(format!("Not a folder on this machine: {}", path.display()));
                     return Task::none();
@@ -1322,11 +1337,40 @@ impl App {
             .projects_dirs
             .iter()
             .flatten()
-            .flat_map(|root| subdirs(root))
+            .flat_map(|root| settings::subdirs(root))
+            .chain(self.wsl.iter().flat_map(|d| d.candidates.iter().cloned()))
             .collect();
         dirs.sort();
         dirs.dedup();
         self.project_dirs = dirs;
+    }
+
+    /// The directories omp sessions are read from: the configured one, then the one under
+    /// every home of every running WSL distro.
+    fn sessions_dirs(&self) -> Vec<sessions::SessionsDir> {
+        let configured = sessions::SessionsDir {
+            path: self.settings.omp_sessions_dir.clone(),
+            distro: None,
+        };
+        let in_wsl = self.wsl.iter().flat_map(|d| {
+            d.homes.iter().map(|home| sessions::SessionsDir {
+                path: home.join(".omp").join("agent").join("sessions"),
+                distro: Some(d.name.clone()),
+            })
+        });
+        std::iter::once(configured).chain(in_wsl).collect()
+    }
+
+    /// The folders whose subfolders are suggested as repos: the configured projects folders,
+    /// then those of the running WSL distros.
+    fn searched_dirs(&self) -> Vec<&Path> {
+        self.settings
+            .projects_dirs
+            .iter()
+            .flatten()
+            .chain(self.wsl.iter().flat_map(|d| &d.projects_dirs))
+            .map(PathBuf::as_path)
+            .collect()
     }
 
     /// The selected room and the open task.
@@ -1443,6 +1487,7 @@ impl App {
 
     /// Links `path` to the selected project; `None` when nothing was linked.
     fn link_repo(&mut self, path: PathBuf) -> Option<Task<Message>> {
+        let path = wsl::canonical(path);
         let room = self.selected?;
         let project = self.selected_project()?.id;
         if !path.is_absolute() || !path.is_dir() {
@@ -1499,9 +1544,13 @@ impl App {
         Task::none()
     }
 
-    fn plugin_config(&self, projects: Vec<omp_plugin::PluginProject>) -> omp_plugin::PluginConfig {
+    fn plugin_config(
+        &self,
+        repo: &Path,
+        projects: Vec<omp_plugin::PluginProject>,
+    ) -> omp_plugin::PluginConfig {
         omp_plugin::PluginConfig {
-            data_dir: self.data_dir.clone(),
+            data_dir: wsl::data_dir_for(repo, &self.data_dir),
             mcp_url: mcp::url(self.settings.mcp_port),
             projects,
         }
@@ -1510,7 +1559,7 @@ impl App {
     /// Writes the plugin into `repo` for the projects it is linked to and marks it current.
     fn update_plugin(&mut self, repo: &Path) -> std::io::Result<()> {
         let projects = omp_plugin::projects_of(&self.settings.repos, repo);
-        omp_plugin::install(repo, &self.plugin_config(projects))?;
+        omp_plugin::install(repo, &self.plugin_config(repo, projects))?;
         self.plugins.insert(repo.to_owned(), PluginState::Current);
         self.auto_failed.remove(repo);
         Ok(())
@@ -1550,8 +1599,14 @@ impl App {
         self.plugins_checked_ms = now_ms();
         let shared: BTreeSet<PathBuf> = self.settings.repos.values().flatten().cloned().collect();
         for repo in &shared {
+            // A repo in a stopped distro is not read: that would start the distro.
+            if wsl::distro_of(repo)
+                .is_some_and(|name| !self.wsl.iter().any(|d| d.name.eq_ignore_ascii_case(name)))
+            {
+                continue;
+            }
             let projects = omp_plugin::projects_of(&self.settings.repos, repo);
-            match omp_plugin::state(repo, &self.plugin_config(projects)) {
+            match omp_plugin::state(repo, &self.plugin_config(repo, projects)) {
                 Some(state) => {
                     self.plugins.insert(repo.clone(), state);
                 }
@@ -2141,22 +2196,6 @@ fn tilde(path: &Path) -> String {
         Some(rest) => format!("~/{}", rest.display()),
         None => path.display().to_string(),
     }
-}
-
-/// The visible subfolders of `dir`, sorted. Errors give none: a missing folder only means no
-/// suggestions.
-fn subdirs(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut dirs: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect();
-    dirs.sort();
-    dirs
 }
 
 /// The banner text for a plugin update that failed.

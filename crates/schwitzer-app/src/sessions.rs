@@ -4,6 +4,10 @@
 //! `<session>/<agent>.jsonl` next to it. A session is *active* when its file or one of its
 //! subagent files changed in the last ten minutes. Only active sessions are parsed, and every
 //! file incrementally: the scanner remembers the byte offset it has read up to.
+//!
+//! Several sessions directories are read: the configured one and, on Windows, the one of every
+//! running WSL distro. The working directories of a WSL session are Linux paths; they are
+//! mapped to the Windows paths that reach them, so they match the linked repos.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
@@ -37,7 +41,8 @@ pub struct LocalSession {
     pub id: String,
     /// Latest title; empty until omp has named the session.
     pub title: String,
-    /// The session's working directory, as omp recorded it.
+    /// The session's working directory, as omp recorded it; for a session in WSL, the Windows
+    /// path to it.
     pub cwd: PathBuf,
     /// Last component of the session's working directory.
     pub project: String,
@@ -53,9 +58,17 @@ pub struct LocalSession {
     pub markers: Vec<ClaimToken>,
 }
 
-/// Identity of the watcher: another directory restarts it.
+/// A directory omp writes sessions into.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SessionsDir {
+    pub path: PathBuf,
+    /// The WSL distro whose omp writes here; its working directories are Linux paths in it.
+    pub distro: Option<String>,
+}
+
+/// Identity of the watcher: other directories restart it.
 #[derive(Clone)]
-struct SessionsKey(PathBuf);
+struct SessionsKey(Vec<SessionsDir>);
 
 impl Hash for SessionsKey {
     fn hash<H: Hasher>(&self, h: &mut H) {
@@ -64,13 +77,33 @@ impl Hash for SessionsKey {
     }
 }
 
-/// The active sessions under `dir`, emitted whenever they change.
-pub fn subscription(dir: PathBuf) -> Subscription<Vec<LocalSession>> {
-    Subscription::run_with(SessionsKey(dir), watch)
+/// The active sessions under `dirs`, emitted whenever they change.
+pub fn subscription(dirs: Vec<SessionsDir>) -> Subscription<Vec<LocalSession>> {
+    Subscription::run_with(SessionsKey(dirs), watch)
+}
+
+/// The directories of `dirs` that may be read now: those of a WSL distro only while it runs,
+/// since reading them would start a stopped one.
+fn scannable(dirs: &[SessionsDir]) -> Vec<SessionsDir> {
+    if dirs.iter().all(|dir| dir.distro.is_none()) {
+        return dirs.to_vec();
+    }
+    #[cfg(windows)]
+    {
+        let running = crate::wsl::running_distros();
+        dirs.iter()
+            .filter(|dir| dir.distro.as_ref().is_none_or(|d| running.contains(d)))
+            .cloned()
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        dirs.to_vec()
+    }
 }
 
 fn watch(key: &SessionsKey) -> impl Stream<Item = Vec<LocalSession>> + use<> {
-    let dir = key.0.clone();
+    let dirs = key.0.clone();
     iced::stream::channel(4, async move |mut out| {
         let mut scanner = Scanner::default();
         let mut last = Vec::new();
@@ -78,9 +111,9 @@ fn watch(key: &SessionsKey) -> impl Stream<Item = Vec<LocalSession>> + use<> {
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tick.tick().await;
-            let dir = dir.clone();
+            let dirs = dirs.clone();
             let scanned = tokio::task::spawn_blocking(move || {
-                let sessions = scanner.scan(&dir, schwitzer_proto::now_ms());
+                let sessions = scanner.scan(&scannable(&dirs), schwitzer_proto::now_ms());
                 (scanner, sessions)
             })
             .await;
@@ -223,20 +256,37 @@ fn markers_in(text: &str) -> impl Iterator<Item = ClaimToken> + '_ {
     })
 }
 
-/// Incremental reader of a sessions directory.
+/// Incremental reader of sessions directories.
 #[derive(Default)]
 pub struct Scanner {
     files: HashMap<PathBuf, FileState>,
 }
 
 impl Scanner {
-    /// The sessions under `dir` that were written within ten minutes of `now_ms`, newest first.
-    /// A missing directory has none.
-    pub fn scan(&mut self, dir: &Path, now_ms: u64) -> Vec<LocalSession> {
+    /// The sessions under `dirs` that were written within ten minutes of `now_ms`, newest
+    /// first. A missing directory has none.
+    pub fn scan(&mut self, dirs: &[SessionsDir], now_ms: u64) -> Vec<LocalSession> {
         let cutoff = now_ms.saturating_sub(u64::try_from(ACTIVE_WINDOW.as_millis()).unwrap_or(0));
         let mut seen = HashSet::new();
         let mut sessions = Vec::new();
-        for path in session_files(dir) {
+        for dir in dirs {
+            self.scan_dir(dir, cutoff, &mut seen, &mut sessions);
+        }
+        self.files.retain(|p, _| seen.contains(p));
+        sessions.sort_by(|a, b| b.active_ms.cmp(&a.active_ms).then_with(|| a.id.cmp(&b.id)));
+        sessions
+    }
+
+    /// Adds the sessions of `dir` written since `cutoff` to `sessions`, and the files read to
+    /// `seen`.
+    fn scan_dir(
+        &mut self,
+        dir: &SessionsDir,
+        cutoff: u64,
+        seen: &mut HashSet<PathBuf>,
+        sessions: &mut Vec<LocalSession>,
+    ) {
+        for path in session_files(&dir.path) {
             let subagents = jsonl_files(&path.with_extension(""));
             let main_mtime = mtime_ms(&path);
             let active_ms = subagents
@@ -258,11 +308,14 @@ impl Scanner {
                 tokens += self.files[&sub].tokens;
                 seen.insert(sub);
             }
-            sessions.push(session(&path, &self.files[&path], active_ms, tokens));
+            sessions.push(session(
+                &path,
+                &self.files[&path],
+                active_ms,
+                tokens,
+                dir.distro.as_deref(),
+            ));
         }
-        self.files.retain(|p, _| seen.contains(p));
-        sessions.sort_by(|a, b| b.active_ms.cmp(&a.active_ms).then_with(|| a.id.cmp(&b.id)));
-        sessions
     }
 
     /// Reads the new lines of `path`; a file that cannot be read keeps what it had.
@@ -274,8 +327,14 @@ impl Scanner {
     }
 }
 
-/// The session `state` describes.
-fn session(path: &Path, state: &FileState, active_ms: u64, tokens: u64) -> LocalSession {
+/// The session `state` describes; `distro` is the WSL distro whose omp wrote it.
+fn session(
+    path: &Path,
+    state: &FileState,
+    active_ms: u64,
+    tokens: u64,
+    distro: Option<&str>,
+) -> LocalSession {
     let id = if state.id.is_empty() {
         path.file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -286,7 +345,12 @@ fn session(path: &Path, state: &FileState, active_ms: u64, tokens: u64) -> Local
     LocalSession {
         id,
         title: state.title.clone(),
-        cwd: PathBuf::from(&state.cwd),
+        cwd: match distro {
+            Some(d) => crate::wsl::to_windows(d, &state.cwd)
+                .map(PathBuf::from)
+                .unwrap_or_default(),
+            None => PathBuf::from(&state.cwd),
+        },
         project: project_of(&state.cwd),
         model: state.model.clone(),
         started_ms: state.started_ms,
@@ -454,7 +518,14 @@ mod tests {
         }
 
         fn scan(&self, scanner: &mut Scanner) -> Vec<LocalSession> {
-            scanner.scan(self.root.path(), schwitzer_proto::now_ms())
+            scanner.scan(&self.dirs(None), schwitzer_proto::now_ms())
+        }
+
+        fn dirs(&self, distro: Option<&str>) -> Vec<SessionsDir> {
+            vec![SessionsDir {
+                path: self.root.path().to_owned(),
+                distro: distro.map(str::to_owned),
+            }]
         }
     }
 
@@ -583,8 +654,8 @@ mod tests {
         let dir = Dir::new();
         let mut scanner = Scanner::default();
         let now = schwitzer_proto::now_ms();
-        assert_eq!(scanner.scan(dir.root.path(), now + 9 * 60_000).len(), 1);
-        assert!(scanner.scan(dir.root.path(), now + 11 * 60_000).is_empty());
+        assert_eq!(scanner.scan(&dir.dirs(None), now + 9 * 60_000).len(), 1);
+        assert!(scanner.scan(&dir.dirs(None), now + 11 * 60_000).is_empty());
         assert!(scanner.files.is_empty());
     }
 
@@ -606,8 +677,34 @@ mod tests {
     #[test]
     fn a_missing_directory_has_no_sessions() {
         let dir = tempfile::tempdir().unwrap();
-        let sessions = Scanner::default().scan(&dir.path().join("none"), schwitzer_proto::now_ms());
+        let missing = [SessionsDir {
+            path: dir.path().join("none"),
+            distro: None,
+        }];
+        let sessions = Scanner::default().scan(&missing, schwitzer_proto::now_ms());
         assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn wsl_sessions_get_windows_working_directories() {
+        let local = Dir::new();
+        let wsl = Dir::new();
+        let dirs = [local.dirs(None), wsl.dirs(Some("Ubuntu"))].concat();
+        let mut scanner = Scanner::default();
+        for _ in 0..2 {
+            let sessions = scanner.scan(&dirs, schwitzer_proto::now_ms());
+            let mut cwds: Vec<&str> = sessions.iter().map(|s| s.cwd.to_str().unwrap()).collect();
+            cwds.sort_unstable();
+            assert_eq!(
+                cwds,
+                [
+                    "/home/felix/code/griasdi",
+                    r"\\wsl.localhost\Ubuntu\home\felix\code\griasdi",
+                ]
+            );
+            // Each directory's files keep their own state: nothing is lost or read twice.
+            assert!(sessions.iter().all(|s| s.tokens == 1800), "{sessions:?}");
+        }
     }
 
     #[test]
