@@ -82,12 +82,36 @@ fn this_room(app: &App) -> Element<'_, Message> {
     };
     let mut repos = column![].spacing(2);
     for (index, repo) in app.room_repos().iter().enumerate() {
+        let installed = app.plugin_repos.contains(repo);
         repos = repos.push(
             row![
                 icon(Icon::Folder, 16.0, Tone::Muted),
-                text(repo.display().to_string())
-                    .size(TS_14)
-                    .width(Length::Fill),
+                column![
+                    text(repo.display().to_string()).size(TS_14),
+                    muted(if installed {
+                        "omp plugin installed"
+                    } else {
+                        "No omp plugin"
+                    }),
+                ]
+                .spacing(2)
+                .width(Length::Fill),
+                icon_button(
+                    format!("repo-plugin-{index}"),
+                    Icon::Plug,
+                    if installed { Tone::Text } else { Tone::Muted },
+                    if installed {
+                        "Remove the omp plugin from this repo"
+                    } else {
+                        "Install the omp plugin in this repo"
+                    },
+                    Some(if installed {
+                        Message::RemovePlugin(index)
+                    } else {
+                        Message::InstallPlugin(index)
+                    }),
+                    theme::button_ghost,
+                ),
                 icon_button(
                     format!("repo-remove-{index}"),
                     Icon::Trash,
@@ -132,6 +156,10 @@ fn this_room(app: &App) -> Element<'_, Message> {
             muted(
                 "omp sessions running in these folders on this machine are visible to the \
                  room: title, project, runtime and tokens. Nothing else leaves your machine."
+            ),
+            muted(
+                "The plug installs the omp plugin in a repo: /schwitzer in omp there lists the \
+                 tasks waiting for a plan and plans one."
             ),
         ]
         .spacing(SP_1),

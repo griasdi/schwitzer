@@ -138,7 +138,7 @@ async fn guard(
 }
 
 /// The address MCP clients connect to.
-fn url(port: u16) -> String {
+pub fn url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/mcp")
 }
 

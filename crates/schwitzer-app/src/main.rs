@@ -10,6 +10,7 @@
 mod app;
 mod bridge;
 mod mcp;
+mod omp_plugin;
 mod sessions;
 mod settings;
 mod theme;

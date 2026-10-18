@@ -10,7 +10,7 @@ mod serve;
 mod token;
 mod tools;
 
-pub use serve::{client_config, subscription};
+pub use serve::{client_config, subscription, url};
 pub use token::load_or_create_token;
 
 /// Whether the server listens.

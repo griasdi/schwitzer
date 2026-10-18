@@ -10,7 +10,7 @@ mod settings_view;
 mod task_view;
 mod widgets;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -28,6 +28,7 @@ use self::icons::{Icon, Tone};
 use self::logic::Group;
 use crate::bridge::{self, ClientKey, call, fire};
 use crate::mcp::{self, McpStatus};
+use crate::omp_plugin;
 use crate::sessions::{self, LocalSession};
 use crate::settings::{self, Settings};
 use crate::theme::{self, SP_2};
@@ -80,6 +81,10 @@ pub enum Message {
     RepoInput(String),
     AddRepo,
     RemoveRepo(usize),
+    /// Index into the selected room's repos.
+    InstallPlugin(usize),
+    /// Index into the selected room's repos.
+    RemovePlugin(usize),
 
     ProposalTitle(String),
     ProposalBody(text_editor::Action),
@@ -176,6 +181,8 @@ pub struct App {
     published: HashMap<RoomId, Vec<SessionInfo>>,
     mcp: Option<McpStatus>,
     mcp_token: Option<String>,
+    /// Shared repos with the omp plugin installed.
+    plugin_repos: BTreeSet<PathBuf>,
     now_ms: u64,
 }
 
@@ -209,7 +216,14 @@ impl App {
 
         let rooms = client.rooms();
         let selected = rooms.first().map(|(key, _)| RoomId::of(&key.token));
-        let app = Self {
+        let plugin_repos = settings
+            .repos
+            .values()
+            .flatten()
+            .filter(|repo| omp_plugin::installed(repo))
+            .cloned()
+            .collect();
+        let mut app = Self {
             forms: Forms {
                 server_url: settings.last_server.clone().unwrap_or_default(),
                 room_name: String::new(),
@@ -241,8 +255,11 @@ impl App {
             published: HashMap::new(),
             mcp,
             mcp_token,
+            plugin_repos,
             now_ms: now_ms(),
         };
+        // Refreshes the plugin's code, version and config after an update or a new MCP port.
+        app.sync_plugins();
         (app, iced::system::theme().map(Message::SystemMode))
     }
 
@@ -494,6 +511,8 @@ impl App {
                 self.save_settings();
                 self.publish()
             }
+            Message::InstallPlugin(index) => self.install_plugin(index),
+            Message::RemovePlugin(index) => self.remove_plugin(index),
 
             Message::ProposalTitle(s) => {
                 self.forms.proposal_title = s;
@@ -826,6 +845,71 @@ impl App {
         self.publish()
     }
 
+    fn install_plugin(&mut self, index: usize) -> Task<Message> {
+        let Some(repo) = self.room_repos().get(index).cloned() else {
+            return Task::none();
+        };
+        let config = self.plugin_config(omp_plugin::rooms_of(&self.settings.repos, &repo));
+        match omp_plugin::install(&repo, &config) {
+            Ok(()) => {
+                self.plugin_repos.insert(repo);
+                self.notify("omp plugin installed");
+            }
+            Err(e) => {
+                self.banner = Some(format!(
+                    "Cannot install the omp plugin in {}: {e}",
+                    repo.display()
+                ));
+            }
+        }
+        Task::none()
+    }
+
+    fn remove_plugin(&mut self, index: usize) -> Task<Message> {
+        let Some(repo) = self.room_repos().get(index).cloned() else {
+            return Task::none();
+        };
+        match omp_plugin::uninstall(&repo) {
+            Ok(()) => {
+                self.plugin_repos.remove(&repo);
+                self.notify("omp plugin removed");
+            }
+            Err(e) => {
+                self.banner = Some(format!(
+                    "Cannot remove the omp plugin from {}: {e}",
+                    repo.display()
+                ));
+            }
+        }
+        Task::none()
+    }
+
+    fn plugin_config(&self, rooms: Vec<String>) -> omp_plugin::PluginConfig {
+        omp_plugin::PluginConfig {
+            data_dir: self.data_dir.clone(),
+            mcp_url: mcp::url(self.settings.mcp_port),
+            rooms,
+        }
+    }
+
+    /// Rewrites the plugin in every repo that has it, and removes it from a repo no room
+    /// shares any more.
+    fn sync_plugins(&mut self) {
+        for repo in self.plugin_repos.clone() {
+            let rooms = omp_plugin::rooms_of(&self.settings.repos, &repo);
+            let result = if rooms.is_empty() {
+                omp_plugin::uninstall(&repo).map(|()| {
+                    self.plugin_repos.remove(&repo);
+                })
+            } else {
+                omp_plugin::install(&repo, &self.plugin_config(rooms))
+            };
+            if let Err(e) = result {
+                self.banner = Some(format!("omp plugin in {}: {e}", repo.display()));
+            }
+        }
+    }
+
     fn propose(&mut self) -> Task<Message> {
         let (Some(room), title) = (self.selected, self.forms.proposal_title.trim()) else {
             return Task::none();
@@ -1054,13 +1138,18 @@ impl App {
     }
 
     /// Writes `settings.toml` when something changed since it was last read or written.
+    /// Changed repos also update the omp plugins.
     fn save_settings(&mut self) {
         if self.settings == self.saved {
             return;
         }
+        let repos_changed = self.settings.repos != self.saved.repos;
         match self.settings.save(&self.data_dir) {
             Ok(()) => self.saved = self.settings.clone(),
             Err(e) => self.banner = Some(format!("Cannot save settings: {e}")),
+        }
+        if repos_changed {
+            self.sync_plugins();
         }
     }
 
