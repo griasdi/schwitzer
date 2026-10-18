@@ -3,6 +3,9 @@
 /.omp/skills/impeccable/scripts/bin/
 /.omp/plugins/node_modules/
 
+# Local planning files, never committed.
+/SCHWITZER_PLAN.md
+
 # impeccable-ignore-start
 # Ephemeral output, runtime state, and per-dev overrides.
 # The **/ prefix covers .impeccable at the repo root or in a nested workspace.
