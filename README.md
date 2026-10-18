@@ -44,3 +44,12 @@ The server listens on UDP (QUIC) and prints `server url: weida://sha256:…@host
 ## Build from source
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, building, checks, commit rules and releases. [PRODUCT.md](PRODUCT.md) says what Schwitzer is for, [DESIGN.md](DESIGN.md) how it looks, and [AGENTS.md](AGENTS.md) is for coding agents working on this repo.
+
+## License
+
+Schwitzer is licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. The app lists the licenses of the open source components it is built from under Settings → About → Licenses.
