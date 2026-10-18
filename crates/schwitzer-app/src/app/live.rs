@@ -1,15 +1,21 @@
 //! The live agent sessions of the room's members: whose they are, what they are called, which
 //! task they work on, how long and how many tokens.
 
+use iced::widget::text::Wrapping;
 use iced::widget::{Space, column, container, row, scrollable, text};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{RoomState, SessionInfo};
 
-use super::icons::{Icon, Tone};
+use super::icons::{Icon, Tone, icon};
 use super::logic;
 use super::widgets::{self, id_button, member_tag, muted};
 use super::{App, Message};
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
+
+/// Height of a session slab: two lines and their padding.
+const SLAB_HEIGHT: f32 = 60.0;
+/// The panel grows with its sessions up to this many, then scrolls.
+const MAX_VISIBLE: f32 = 3.0;
 
 pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
     let mut rows = column![].spacing(SP_1);
@@ -23,15 +29,22 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
         }
     }
     let shares = !app.room_repos().is_empty();
-    let mut header = row![
+    let chevron = if app.sessions_open {
+        Icon::ChevronDown
+    } else {
+        Icon::ChevronRight
+    };
+    let mut line = row![
+        icon(chevron, 14.0, Tone::Muted),
         text("Sessions").size(TS_12).font(SEMIBOLD),
         widgets::pill(count.to_string()),
         Space::new().width(Length::Fill),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
+    // The share button takes the press before the header does.
     if !shares {
-        header = header.push(widgets::icon_text_button(
+        line = line.push(widgets::icon_text_button(
             "share-sessions",
             Icon::FolderPlus,
             Tone::Ink,
@@ -39,6 +52,20 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
             Some(Message::OpenSettings),
             theme::button_ghost,
         ));
+    }
+    let header = container(id_button(
+        "group-sessions",
+        container(line)
+            .padding([0.0, SP_1])
+            .height(32)
+            .align_y(Alignment::Center),
+        Some(Message::ToggleSessions),
+        theme::button_header,
+        Length::Fill,
+    ))
+    .padding([SP_1, SP_2]);
+    if !app.sessions_open {
+        return column![header].into();
     }
     let body: Element<'a, Message> = if count == 0 {
         container(
@@ -52,23 +79,22 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
         .padding([SP_2, SP_3])
         .into()
     } else {
-        scrollable(container(rows).padding([0.0, SP_2]))
+        container(
+            scrollable(container(rows).padding(Padding {
+                top: 0.0,
+                right: SP_2,
+                bottom: SP_2,
+                left: SP_2,
+            }))
             .spacing(SP_1)
             .id("sessions")
-            .height(Length::Fill)
-            .style(theme::scroll)
-            .into()
+            .height(Length::Shrink)
+            .style(theme::scroll),
+        )
+        .max_height(MAX_VISIBLE * SLAB_HEIGHT + (MAX_VISIBLE - 1.0) * SP_1 + SP_2)
+        .into()
     };
-    column![
-        container(header)
-            .padding([SP_1, SP_3])
-            .height(32)
-            .align_y(Alignment::Center),
-        body
-    ]
-    .spacing(SP_1)
-    .height(Length::Fill)
-    .into()
+    column![header, body].into()
 }
 
 fn session_row<'a>(
@@ -108,9 +134,9 @@ fn session_row<'a>(
     container(
         row![
             member_tag(owner, hue),
-            column![text(title).size(TS_14), facts,]
-                .spacing(2)
-                .width(Length::Fill),
+            container(column![text(title).size(TS_14).wrapping(Wrapping::None), facts].spacing(2))
+                .width(Length::Fill)
+                .clip(true),
             text(logic::runtime(
                 app.now_ms.saturating_sub(session.started_ms)
             ))
@@ -122,6 +148,8 @@ fn session_row<'a>(
         .align_y(Alignment::Start),
     )
     .padding([SP_2, SP_3])
+    .height(SLAB_HEIGHT)
+    .align_y(Alignment::Center)
     .style(theme::slab_static)
     .into()
 }

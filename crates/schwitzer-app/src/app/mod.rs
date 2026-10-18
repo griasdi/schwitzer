@@ -71,6 +71,8 @@ pub enum Message {
     /// if open, else returns to the main page.
     Back,
     ToggleGroup(Group),
+    /// Folds or unfolds the sessions panel.
+    ToggleSessions,
 
     SelectRoom(RoomId),
     ServerUrl(String),
@@ -183,6 +185,8 @@ pub struct App {
     open_task: Option<u64>,
     /// Folded groups of the list.
     collapsed: HashSet<Group>,
+    /// Whether the sessions panel is unfolded.
+    sessions_open: bool,
     /// The task whose pick is under way.
     picking: Option<u64>,
     forms: Forms,
@@ -261,6 +265,7 @@ impl App {
             page: Page::Main,
             open_task: None,
             collapsed: HashSet::from([Group::Closed]),
+            sessions_open: true,
             picking: None,
             task_draft: None,
             plan_draft: None,
@@ -341,9 +346,9 @@ impl App {
     fn main(&self) -> Element<'_, Message> {
         match (self.selected_state(), self.selected) {
             (Some(state), _) => column![
-                container(list::view(self, state)).height(Length::FillPortion(60)),
+                container(list::view(self, state)).height(Length::Fill),
                 widgets::hrule(),
-                container(live::view(self, state)).height(Length::FillPortion(38)),
+                live::view(self, state),
             ]
             .into(),
             (None, Some(_)) => list::empty(
@@ -466,6 +471,10 @@ impl App {
                 if !self.collapsed.remove(&group) {
                     self.collapsed.insert(group);
                 }
+                Task::none()
+            }
+            Message::ToggleSessions => {
+                self.sessions_open = !self.sessions_open;
                 Task::none()
             }
 
