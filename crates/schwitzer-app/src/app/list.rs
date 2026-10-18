@@ -1,5 +1,5 @@
 //! The task list: foldable groups of raised slabs, each with its stage lamp, labels, the
-//! worker's name tag and its next-step button.
+//! worker's name tag and its next-step button; the open task or draft sits in place among them.
 
 use iced::widget::{Space, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
@@ -7,15 +7,16 @@ use schwitzer_proto::{Decision, RoomState, Stage, Task};
 
 use super::icons::{Icon, Tone, icon};
 use super::logic::{self, Group};
+use super::task_view;
 use super::widgets::{
-    self, icon_button, icon_text_button, id_button, lamp, member_tag, muted, priority_pill,
-    with_tip,
+    self, LAMP, icon_button, icon_text_button, id_button, lamp, lamp_kind, member_tag, muted,
+    priority_pill, with_tip,
 };
-use super::{App, Message};
+use super::{App, Expanded, Message};
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
 
-/// Width of the stage lamp; the second line of a slab starts under the title.
-const LAMP: f32 = 10.0;
+/// The widget id of the task list's scrollable.
+pub const LIST_ID: &str = "tasks";
 
 pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
     let mut list = column![].spacing(SP_3).width(Length::Fill);
@@ -28,8 +29,20 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
         let open = !app.collapsed.contains(&group);
         let mut slabs = column![group_header(group, tasks.len(), open)].spacing(SP_1);
         if open {
+            if matches!(group, Group::Proposals | Group::Ideas)
+                && app.expanded
+                    == Some(Expanded::New {
+                        idea: group == Group::Ideas,
+                    })
+            {
+                slabs = slabs.push(task_view::new_task(app, group == Group::Ideas));
+            }
             for task in tasks {
-                slabs = slabs.push(task_row(app, state, task));
+                slabs = slabs.push(if app.expanded == Some(Expanded::Task(task.number)) {
+                    task_view::view(app, state, task)
+                } else {
+                    task_row(app, state, task)
+                });
             }
         }
         list = list.push(slabs);
@@ -44,7 +57,7 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
     }
     scrollable(container(list).padding(SP_2))
         .spacing(SP_1)
-        .id("tasks")
+        .id(LIST_ID)
         .height(Length::Fill)
         .style(theme::scroll)
         .into()
@@ -123,10 +136,10 @@ fn group_header<'a>(group: Group, count: usize, open: bool) -> Element<'a, Messa
     )
 }
 
-fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
-    let n = task.number;
+/// The two lines of a slab: lamp and title, then number, stage, priority and the worker's tag.
+pub fn summary<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     let mut meta = row![
-        text(format!("#{n}"))
+        text(format!("#{}", task.number))
             .size(TS_12)
             .font(MEDIUM)
             .style(theme::text_muted),
@@ -144,34 +157,38 @@ fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
             logic::member_hue(&claim.member),
         ));
     }
-    let mut line = row![
-        column![
-            row![
-                lamp(task),
-                text(&task.title)
-                    .size(TS_14)
-                    .font(MEDIUM)
-                    .width(Length::Fill),
-            ]
-            .spacing(SP_2)
-            .align_y(Alignment::Center),
-            container(meta).padding(Padding {
-                left: LAMP + SP_2,
-                ..Padding::ZERO
-            }),
+    column![
+        row![
+            lamp(lamp_kind(task)),
+            text(&task.title)
+                .size(TS_14)
+                .font(MEDIUM)
+                .width(Length::Fill),
         ]
-        .spacing(SP_1)
-        .width(Length::Fill),
+        .spacing(SP_2)
+        .align_y(Alignment::Center),
+        container(meta).padding(Padding {
+            left: LAMP + SP_2,
+            ..Padding::ZERO
+        }),
     ]
-    .spacing(SP_3)
-    .align_y(Alignment::Center);
+    .spacing(SP_1)
+    .width(Length::Fill)
+    .into()
+}
+
+fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
+    let n = task.number;
+    let mut line = row![summary(state, task)]
+        .spacing(SP_3)
+        .align_y(Alignment::Center);
     if let Some(action) = next_step(app, task) {
         line = line.push(action);
     }
     id_button(
         format!("task-{n}"),
         container(line).padding([SP_2, SP_3]),
-        Some(Message::OpenTask(n)),
+        Some(Message::ToggleTask(n)),
         theme::slab,
         Length::Fill,
     )

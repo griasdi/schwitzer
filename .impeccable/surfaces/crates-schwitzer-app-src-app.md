@@ -5,11 +5,11 @@ primary_target: "crates/schwitzer-app/src/app"
 related_targets: []
 ---
 
-Scope: the whole schwitzer-app window (task list, sessions, header bar, status bar, pages, task dialog). Mode: Operate.
+Scope: the whole schwitzer-app window (task list with the task open in place and the draft of a new task, sessions, header bar, status bar, settings page). Mode: Operate.
 
 Audience/job: two developers glancing at the room beside their editor: who works on what, which plan is ready to pick, which agent sessions run. Tasks: propose, decide, pick a finished plan (claim + prompt copy), configure rooms and repos.
 
-Constraints: narrow window (default 400x780); vertical split 60% task list, 38% sessions, header bar on top, bottom status bar with server state. New task and settings are pages with a back button; the task view is a dialog. Follow system light/dark.
+Constraints: narrow window (default 400x780); vertical split 60% task list, 38% sessions, header bar on top, bottom status bar with server state. Settings is a page with a back button; a task opens in place in the list, one at a time, and new tasks are drafted there. Follow system light/dark.
 
 ## Direction contract
 
@@ -19,10 +19,10 @@ THESIS: the room is a rack of physical slabs: every task is a raised full-width 
 
 OWN-WORLD: existing mint/green tokens; recessed `ground` well, white/green-black raised slabs with a hairline border and a soft 1px under-edge shadow that disappears when pressed; header and status bars as raised panels; Figtree; 8px radius; square stage lamps.
 
-STORY: open the app, scan "In progress" slabs with lamps, labels and name tags; press Accept or Pick right on the slab; `+` in a group header opens the New task page.
+STORY: open the app, scan "In progress" slabs with lamps, labels and name tags; press Accept or Pick right on the slab; press a slab to open it in place; `+` in a group header opens a draft at the top of that group.
 
 FIRST VIEWPORT: header bar (room switcher left, invite + settings right), list well with group headers and two-line slabs (60%), sessions slabs (38%), status bar.
 
-FORM: built-in iced widgets; slabs are styled buttons/containers; pages replace the main column, the task dialog overlays it.
+FORM: built-in iced widgets; slabs are styled buttons/containers; the settings page replaces the main column, a task and a draft open in place in the list.
 
 SIGNATURE: the press: a slab or button loses its under-edge shadow and darkens to `selected` when pressed.

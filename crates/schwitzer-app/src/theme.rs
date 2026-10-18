@@ -22,15 +22,13 @@ pub const SP_4: f32 = 16.0;
 pub const TS_12: f32 = 12.0;
 /// Body text and rows.
 pub const TS_14: f32 = 14.0;
-/// Dialog titles.
+/// Page titles.
 pub const TS_20: f32 = 20.0;
 
 /// Corner radius of rows, inputs and buttons.
 pub const RADIUS: f32 = 8.0;
 /// Corner radius of the square stage lamps.
 pub const RADIUS_LAMP: f32 = 3.0;
-/// Corner radius of dialogs.
-pub const RADIUS_DIALOG: f32 = 14.0;
 
 /// The bundled UI face, in the weights the app uses.
 pub const FAMILY: &str = "Figtree";
@@ -51,10 +49,6 @@ pub const SEMIBOLD: Font = Font {
     weight: Weight::Semibold,
     ..REGULAR
 };
-pub const BOLD: Font = Font {
-    weight: Weight::Bold,
-    ..REGULAR
-};
 
 // ---- colours -------------------------------------------------------------------------------
 
@@ -70,7 +64,7 @@ pub struct Tag {
 pub struct Tokens {
     /// The recessed well behind slabs: list, sessions, page bodies, inputs, pills.
     pub ground: Color,
-    /// Slabs, bars, dialogs, menus, tooltips.
+    /// Slabs, bars, menus, tooltips.
     pub raised: Color,
     /// A slab or button under the pointer.
     pub hover: Color,
@@ -92,8 +86,6 @@ pub struct Tokens {
     pub danger: Color,
     pub danger_soft: Color,
     pub on_danger: Color,
-    /// Behind dialogs.
-    pub scrim: Color,
     pub shadow: Color,
     /// The soft under-edge shadow of raised slabs and buttons.
     pub edge: Color,
@@ -125,7 +117,6 @@ const DAYLIGHT: Tokens = Tokens {
     danger: color!(0xc53a35),
     danger_soft: color!(0xfbe9e7),
     on_danger: color!(0xffffff),
-    scrim: Color::from_rgba8(12, 28, 17, 0.36),
     shadow: Color::from_rgba8(12, 28, 17, 0.18),
     edge: Color::from_rgba8(12, 28, 17, 0.14),
     stage_new: color!(0x7d8c80),
@@ -179,7 +170,6 @@ const NIGHT: Tokens = Tokens {
     danger: color!(0xf06a62),
     danger_soft: color!(0x3a1a19),
     on_danger: color!(0x2a0605),
-    scrim: Color::from_rgba8(0, 0, 0, 0.55),
     shadow: Color::from_rgba8(0, 0, 0, 0.45),
     edge: Color::from_rgba8(0, 0, 0, 0.55),
     stage_new: color!(0x7d9182),
@@ -310,6 +300,22 @@ pub fn slab_static(theme: &Theme) -> container::Style {
     }
 }
 
+/// The open task or the draft of a new one: a resting slab with the Sage Edge border.
+pub fn slab_open(theme: &Theme) -> container::Style {
+    let t = tokens(theme);
+    container::Style {
+        text_color: Some(t.text),
+        background: Some(t.raised.into()),
+        border: Border {
+            color: t.line_strong,
+            width: 1.0,
+            radius: RADIUS.into(),
+        },
+        shadow: lift(t, button::Status::Active),
+        snap: true,
+    }
+}
+
 /// A stage lamp: a small square, hollow while an idea or only proposed.
 pub fn lamp(kind: Lamp) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
@@ -341,34 +347,6 @@ pub fn lamp(kind: Lamp) -> impl Fn(&Theme) -> container::Style {
                 ..container::Style::default()
             },
         }
-    }
-}
-
-/// The dimmed layer behind a dialog.
-pub fn scrim(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(tokens(theme).scrim.into()),
-        ..container::Style::default()
-    }
-}
-
-/// A dialog card.
-pub fn dialog(theme: &Theme) -> container::Style {
-    let t = tokens(theme);
-    container::Style {
-        text_color: Some(t.text),
-        background: Some(t.raised.into()),
-        border: Border {
-            color: t.line,
-            width: 1.0,
-            radius: RADIUS_DIALOG.into(),
-        },
-        shadow: Shadow {
-            color: t.shadow,
-            offset: Vector::new(0.0, 8.0),
-            blur_radius: 28.0,
-        },
-        snap: true,
     }
 }
 
@@ -773,7 +751,7 @@ pub fn scroll(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
     style
 }
 
-/// Plans in the task dialog: body size, the UI face, headings one step above the body.
+/// Plans in the open task: body size, the UI face, headings one step above the body.
 pub fn plan_markdown(theme: &Theme) -> markdown::Settings {
     let t = tokens(theme);
     let mut style = markdown::Style::from_palette(theme.palette());

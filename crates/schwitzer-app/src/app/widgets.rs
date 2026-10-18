@@ -127,10 +127,13 @@ pub fn lamp_kind(task: &Task) -> Lamp {
     }
 }
 
-/// The stage lamp of a task: a 10 px square, hollow while an idea or only proposed.
-pub fn lamp<'a>(task: &Task) -> Element<'a, Message> {
-    container(Space::new().width(10).height(10))
-        .style(theme::lamp(lamp_kind(task)))
+/// Width of the stage lamp; the second line of a slab starts under the title.
+pub const LAMP: f32 = 10.0;
+
+/// A stage lamp: a 10 px square, hollow while an idea or only proposed.
+pub fn lamp<'a>(kind: Lamp) -> Element<'a, Message> {
+    container(Space::new().width(LAMP).height(LAMP))
+        .style(theme::lamp(kind))
         .into()
 }
 
@@ -192,7 +195,7 @@ pub fn muted<'a>(label: impl text::IntoFragment<'a>) -> iced::widget::Text<'a> {
     text(label).size(TS_12).style(theme::text_muted)
 }
 
-/// The heading of a block inside a dialog.
+/// The heading of a block in a page section or in the open task.
 pub fn heading<'a>(label: impl text::IntoFragment<'a>) -> iced::widget::Text<'a> {
     text(label).size(TS_14).font(SEMIBOLD)
 }

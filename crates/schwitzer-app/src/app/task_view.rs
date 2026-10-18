@@ -1,38 +1,61 @@
-//! The task dialog: what the task is, who works on it, its plan, the decisions and the notes.
+//! The element open in place in the task list: a task shown in full, or the draft of a new one.
 
-use iced::widget::{
-    Space, column, container, markdown, rich_text, row, span, text, text_editor, text_input,
-};
-use iced::{Alignment, Element, Font, Length};
+use iced::widget::{Space, column, container, markdown, row, text, text_editor, text_input};
+use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task};
 
-use super::dialogs;
 use super::icons::{Icon, Tone, icon};
+use super::list;
 use super::logic;
 use super::widgets::{
-    self, heading, hrule, icon_text_button, id_button, lamp, member_tag, muted, pill, text_button,
+    self, LAMP, heading, hrule, icon_button, icon_text_button, id_button, lamp, member_tag, muted,
+    text_button,
 };
 use super::{App, Message};
-use crate::theme::{self, BOLD, MEDIUM, SP_1, SP_2, SP_3, TS_12, TS_14, TS_20};
+use crate::theme::{self, Lamp, MEDIUM, SP_1, SP_2, SP_3, TS_12, TS_14};
 
+/// Task `task` open in place: the slab's two lines as a head that closes it again, then
+/// details, people, decisions, plan, priority and notes.
 pub fn view<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
+    let n = task.number;
     let editable = logic::editable(task);
-    let header = row![
-        lamp(task),
-        text(format!("#{}", task.number))
-            .size(TS_14)
-            .font(MEDIUM)
-            .style(theme::text_muted),
-        pill(logic::stage_label(task)),
-    ]
-    .spacing(SP_2)
-    .align_y(Alignment::Center);
+    let mut icons = row![];
+    if editable && app.task_draft.is_none() {
+        icons = icons.push(icon_button(
+            "edit-task",
+            Icon::Pencil,
+            Tone::Muted,
+            "Edit title and details",
+            Some(Message::EditTask),
+            theme::button_ghost,
+        ));
+    }
+    icons = icons.push(icon_button(
+        "close-task",
+        Icon::Close,
+        Tone::Muted,
+        "Close  (Esc)",
+        Some(Message::Back),
+        theme::button_ghost,
+    ));
+    let head = id_button(
+        format!("task-{n}"),
+        container(
+            row![list::summary(state, task), icons]
+                .spacing(SP_3)
+                .align_y(Alignment::Center),
+        )
+        .padding([SP_2, SP_3]),
+        Some(Message::ToggleTask(n)),
+        theme::button_row,
+        Length::Fill,
+    );
 
-    let mut body = column![
-        title_and_body(app, task, editable),
-        people(app, state, task)
-    ]
-    .spacing(SP_3);
+    let mut body = column![].spacing(SP_3);
+    if let Some(details) = details(app, task) {
+        body = body.push(details);
+    }
+    body = body.push(people(app, state, task));
     if let Some(actions) = actions(app, task) {
         body = body.push(actions);
     }
@@ -43,10 +66,85 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
         .push(priority(task))
         .push(hrule())
         .push(notes(app, state, task));
-    dialogs::frame("task-dialog", header.into(), body.into(), None)
+    container(column![head, hrule(), container(body).padding(SP_3)])
+        .id("open-task")
+        .width(Length::Fill)
+        .style(theme::slab_open)
+        .into()
 }
 
-fn title_and_body<'a>(app: &'a App, task: &'a Task, editable: bool) -> Element<'a, Message> {
+/// The draft of a new proposal, or of an idea, at the top of its group.
+pub fn new_task(app: &App, idea: bool) -> Element<'_, Message> {
+    let filled = !app.forms.proposal_title.trim().is_empty();
+    let (title_hint, body_hint, submit) = if idea {
+        (
+            "What's the idea?",
+            "A few more words (optional)",
+            "Add idea",
+        )
+    } else {
+        (
+            "What should be done?",
+            "Details, context, links (optional)",
+            "Propose",
+        )
+    };
+    container(
+        column![
+            row![
+                lamp(if idea { Lamp::Idea } else { Lamp::New }),
+                text_input(title_hint, &app.forms.proposal_title)
+                    .id("proposal-title")
+                    .on_input(Message::ProposalTitle)
+                    .on_submit(Message::Propose)
+                    .padding(SP_2)
+                    .size(TS_14)
+                    .style(theme::input),
+            ]
+            .spacing(SP_2)
+            .align_y(Alignment::Center),
+            container(
+                text_editor(&app.forms.proposal_body)
+                    .id("proposal-body")
+                    .placeholder(body_hint)
+                    .min_height(100)
+                    .padding(SP_2)
+                    .size(TS_14)
+                    .on_action(Message::ProposalBody)
+                    .style(theme::editor),
+            )
+            .padding(Padding {
+                left: LAMP + SP_2,
+                ..Padding::ZERO
+            }),
+            row![
+                Space::new().width(Length::Fill),
+                text_button(
+                    "cancel-new-task",
+                    "Cancel",
+                    Some(Message::Back),
+                    theme::button_secondary
+                ),
+                text_button(
+                    "propose",
+                    submit,
+                    filled.then_some(Message::Propose),
+                    theme::button_primary
+                ),
+            ]
+            .spacing(SP_2),
+        ]
+        .spacing(SP_2),
+    )
+    .padding([SP_2, SP_3])
+    .id("new-task")
+    .width(Length::Fill)
+    .style(theme::slab_open)
+    .into()
+}
+
+/// The task's details, or the form that edits its title and details.
+fn details<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
     if let Some(draft) = &app.task_draft {
         let idea = task.stage == Stage::Idea;
         let titled = !draft.title.trim().is_empty();
@@ -78,50 +176,30 @@ fn title_and_body<'a>(app: &'a App, task: &'a Task, editable: bool) -> Element<'
                 theme::button_primary,
             ));
         }
-        return column![
-            text_input("Title", &draft.title)
-                .id("task-title")
-                .on_input(Message::EditTitle)
-                .on_submit(Message::SaveTask)
-                .padding(SP_2)
-                .size(TS_14)
-                .style(theme::input),
-            text_editor(&draft.body)
-                .id("task-body")
-                .placeholder("Details")
-                .min_height(100)
-                .padding(SP_2)
-                .size(TS_14)
-                .on_action(Message::EditBody)
-                .style(theme::editor),
-            buttons,
-        ]
-        .spacing(SP_2)
-        .into();
+        return Some(
+            column![
+                text_input("Title", &draft.title)
+                    .id("task-title")
+                    .on_input(Message::EditTitle)
+                    .on_submit(Message::SaveTask)
+                    .padding(SP_2)
+                    .size(TS_14)
+                    .style(theme::input),
+                text_editor(&draft.body)
+                    .id("task-body")
+                    .placeholder("Details")
+                    .min_height(100)
+                    .padding(SP_2)
+                    .size(TS_14)
+                    .on_action(Message::EditBody)
+                    .style(theme::editor),
+                buttons,
+            ]
+            .spacing(SP_2)
+            .into(),
+        );
     }
-    // Rich text, so the title is shown once in the widget inventory: the task list behind the
-    // dialog carries the title as plain text, and addressing the task by it must stay
-    // unambiguous.
-    let title: Element<'a, Message> =
-        rich_text![span::<(), Font>(task.title.as_str()).size(TS_20).font(BOLD)]
-            .width(Length::Fill)
-            .into();
-    let mut top = row![title].spacing(SP_2).align_y(Alignment::Start);
-    if editable {
-        top = top.push(widgets::icon_button(
-            "edit-task",
-            Icon::Pencil,
-            Tone::Muted,
-            "Edit title and details",
-            Some(Message::EditTask),
-            theme::button_ghost,
-        ));
-    }
-    let mut col = column![top].spacing(SP_2);
-    if !task.body.is_empty() {
-        col = col.push(text(&task.body).size(TS_14));
-    }
-    col.into()
+    (!task.body.is_empty()).then(|| text(&task.body).size(TS_14).into())
 }
 
 /// Who proposed it and who works on it.

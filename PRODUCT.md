@@ -32,8 +32,8 @@ Agents and humans share one light queue with explicit human decisions (accept, a
 ## Capabilities and Constraints
 
 - Stages: Idea (a rough sketch, written up into a proposal later), Proposed, Accepted (planning), Planned (plan ready), Ready (approved), In progress (Ready with a build claim, labelled "Building"), Done, Rejected. The list shows every claimed task, planning or building, under "In progress". Priority High/Normal/Low, no Kanban.
-- Each task is a raised slab in the list that carries its own next-step button: Accept on a proposal, Pick on a finished plan, Release on your own claim. All other decisions (reject, approve, replan, reopen) stay in the task view.
-- New task and Settings are pages with a back button; the task view is a dialog over the list.
+- Each task is a raised slab in the list that carries its own next-step button: Accept on a proposal, Pick on a finished plan, Release on your own claim. All other decisions (reject, approve, replan, reopen) stay in the open task.
+- Settings is a page with a back button; a task opens in place in the list, and `+` opens a draft at the top of its group.
 - Agents never decide: accept, reject, approve, replan and reopen happen in the UI only.
 - Desktop only (Linux, Windows, macOS); no web client.
 - iced 0.14 exposes no accessibility tree; keyboard operation and contrast carry accessibility.

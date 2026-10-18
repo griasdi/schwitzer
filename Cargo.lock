@@ -1947,6 +1947,7 @@ dependencies = [
  "bytes",
  "iced_core",
  "iced_futures",
+ "iced_selector",
  "raw-window-handle",
  "thiserror 2.0.21",
 ]

@@ -24,7 +24,7 @@ schwitzer-server = { path = "crates/schwitzer-server" }
 schwitzer-client = { path = "crates/schwitzer-client" }
 # Exact: weida is alpha and its wire protocol may break within 0.x.
 weida = { git = "https://github.com/tuco86/weida.git", rev = "8e29fcb681fd36cd4ae668c991391a0f3d098519" }
-iced = { version = "0.14", features = ["advanced", "tokio", "markdown", "svg"] }
+iced = { version = "0.14", features = ["advanced", "tokio", "markdown", "svg", "selector"] }
 iced_impeccable = { git = "https://github.com/tuco86/iced_impeccable.git", rev = "4c90fe0cfc87c90fa43693d1d299db35e0a1021c" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net"] }
 futures = "0.3"

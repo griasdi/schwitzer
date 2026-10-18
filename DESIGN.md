@@ -17,7 +17,6 @@ colors:
   danger: "#c53a35"
   danger-soft: "#fbe9e7"
   on-danger: "#ffffff"
-  scrim: "rgba(12, 28, 17, 0.36)"
   shadow: "rgba(12, 28, 17, 0.18)"
   edge: "rgba(12, 28, 17, 0.14)"
   stage-new: "#7d8c80"
@@ -54,7 +53,6 @@ colors:
   night-danger: "#f06a62"
   night-danger-soft: "#3a1a19"
   night-on-danger: "#2a0605"
-  night-scrim: "rgba(0, 0, 0, 0.55)"
   night-shadow: "rgba(0, 0, 0, 0.45)"
   night-edge: "rgba(0, 0, 0, 0.55)"
   night-stage-new: "#7d9182"
@@ -81,12 +79,6 @@ typography:
     fontFamily: "Figtree"
     fontSize: "20px"
     fontWeight: 600
-    lineHeight: 1.3
-    letterSpacing: "normal"
-  headline:
-    fontFamily: "Figtree"
-    fontSize: "20px"
-    fontWeight: 700
     lineHeight: 1.3
     letterSpacing: "normal"
   heading:
@@ -128,7 +120,6 @@ typography:
 rounded:
   lamp: "3px"
   control: "8px"
-  dialog: "14px"
   pill: "999px"
 spacing:
   sp-1: "4px"
@@ -207,6 +198,10 @@ components:
     backgroundColor: "{colors.hover}"
   task-slab-pressed:
     backgroundColor: "{colors.selected}"
+  task-slab-open:
+    backgroundColor: "{colors.raised}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.control}"
   group-header:
     textColor: "{colors.text}"
     typography: "{typography.label}"
@@ -275,10 +270,6 @@ components:
     backgroundColor: "{colors.hover}"
   room-switcher-opened:
     backgroundColor: "{colors.selected}"
-  dialog:
-    backgroundColor: "{colors.raised}"
-    textColor: "{colors.text}"
-    rounded: "{rounded.dialog}"
   alert-strip:
     backgroundColor: "{colors.danger-soft}"
     textColor: "{colors.text}"
@@ -295,7 +286,7 @@ components:
 
 The room is a rack of physical slabs. Every task is a raised, full-width plate lying in a recessed well; it carries its own stage lamp, its labels, the name tag of whoever works on it and one button for the next step. The construction is taken from the classic Steam client of the early 2000s: stacked full-width panels in a well, header bars, buttons and status labels inside the entries. The colours are not: the palette stays mint and green, the finish is clean and modern, Figtree is the typeface. It lives as a narrow window (400x780) beside the editor and terminal and is read in a glance, so everything is quiet and tinted toward green; the only saturated things on screen are the lamps, the name tags and the green action fills.
 
-The system is tactile but calm. Depth is a pair of tones (the `ground` well is darker than every raised slab, by day and by night) plus a soft under-edge shadow that makes slabs and buttons look like plates lifted by a pixel or two. The shadow deepens under the pointer and vanishes when the plate is pressed in. Menus, tooltips and dialogs float higher with a larger shadow. There is no motion by design: state changes are instant swaps, nothing animates, nothing blurs. Two themes, Daylight and Night, follow the system appearance (no preference means Night); every colour comes from the active theme's token set.
+The system is tactile but calm. Depth is a pair of tones (the `ground` well is darker than every raised slab, by day and by night) plus a soft under-edge shadow that makes slabs and buttons look like plates lifted by a pixel or two. The shadow deepens under the pointer and vanishes when the plate is pressed in. Menus and tooltips float higher with a larger shadow. There is no motion by design: state changes are instant swaps, nothing animates, nothing blurs. Two themes, Daylight and Night, follow the system appearance (no preference means Night); every colour comes from the active theme's token set.
 
 The signature is the press: a slab or button loses its under-edge shadow and darkens to `selected` the instant it is pressed. The second device is the stage lamp, a small square at the head of every task whose colour is the stage and whose hollow form marks the first two stages. It refuses the flat one-line contact list, the Kanban board and the wide three-pane admin layout.
 
@@ -305,7 +296,7 @@ The signature is the press: a slab or button loses its under-edge shadow and dar
 - Every neutral leans mint-green; no cool or pure greys.
 - Six member tag hues, fixed per member, identical for everyone; light fills with dark text by day, dark fills with light text by night.
 - Figtree only, four weights (400 / 500 / 600 / 700), three sizes in practice (12 / 14 / 20).
-- Raised plates with a 1px hairline and a soft under-edge shadow; settings and New task are pages with a back button, the task view is a modal dialog over a green-black scrim.
+- Raised plates with a 1px hairline and a soft under-edge shadow; settings is a page with a back button, a task opens in place in the list and new tasks are drafted there too.
 
 ## Colors
 
@@ -340,7 +331,7 @@ Six hues, picked per member by a fixed hash, the same on every machine. Day: lig
 
 ### Neutral
 - **Mint Well / Night Well** (#e9f0ea / #0d1310, `ground`): the recessed well behind the slabs: list, sessions, page bodies, and the fill of pills and disabled inputs. Always darker than `raised`.
-- **Slab White / Night Slab** (#ffffff / #1a231e, `raised`): task slabs, session slabs, page sections, the header, page and status bars, dialogs, inputs, tooltips, menus, secondary buttons.
+- **Slab White / Night Slab** (#ffffff / #1a231e, `raised`): task slabs (open or not), session slabs, page sections, the header, page and status bars, inputs, tooltips, menus, secondary buttons.
 - **Mint Breath** (#f2f8f3 / #222d26, `hover`): a slab or button under the pointer.
 - **Mint Pressed** (#e2f1e5 / #213629, `selected`): a pressed slab or button, text selection, active segment fill, opened room switcher.
 - **Mint Hairline** (#d9e5db / #2a3a30, `line`): separators, slab and resting input and secondary-button borders, scroller rails, disabled primary fill.
@@ -348,7 +339,7 @@ Six hues, picked per member by a fixed hash, the same on every machine. Day: lig
 - **Green-Black Ink / Night Text** (#142019 / #e4eee6, `text`): all primary text.
 - **Moss Grey** (#56665a / #93a597, `muted`): secondary text, placeholders, inactive icons; held at 4.5:1 on `ground`, `raised`, `hover` and `selected`.
 - **Under-Edge** (rgba(12, 28, 17, 0.14) / rgba(0, 0, 0, 0.55), `edge`): the soft shadow of raised slabs and buttons.
-- **Scrim** (rgba(12, 28, 17, 0.36) / rgba(0, 0, 0, 0.55)) and **Shadow** (rgba(12, 28, 17, 0.18) / rgba(0, 0, 0, 0.45)): the dim layer behind dialogs and the shadow of floating cards.
+- **Shadow** (rgba(12, 28, 17, 0.18) / rgba(0, 0, 0, 0.45)): the shadow of floating cards (menu, tooltip).
 
 ### Named Rules
 **The Lamp Carries Status Rule.** Stage is shown by the lamp colour and nowhere else on a slab: no slab backgrounds, side stripes or coloured titles. A stage colour is never used for anything but a stage. The stage label (a pill) and the lamp say the same thing twice.
@@ -368,11 +359,10 @@ Six hues, picked per member by a fixed hash, the same on every machine. Day: lig
 **Character:** Figtree is a friendly geometric sans with slightly rounded terminals, the right register for a tool that sits beside the editor all day. Hierarchy comes from weight and from three sizes, not from many faces or tracking (iced has no letter spacing; all tracking is normal).
 
 ### Hierarchy
-- **Headline** (700, 20px, 1.3): the task title in the task dialog.
-- **Title** (600, 20px, 1.3): page titles ("New task", "Settings"); markdown `h1` in plans.
-- **Heading** (600, 14px, 1.3): a block heading inside a page section or dialog ("Plan", "Priority", "Notes", "Your name"); the room switcher.
-- **Body** (400, 14px, 1.3): dialog text, inputs, session titles, plan text.
-- **Body Medium** (500, 14px, 1.3): task titles on slabs, button labels, the `#n` number in the task dialog.
+- **Title** (600, 20px, 1.3): page titles ("Settings"); markdown `h1` in plans.
+- **Heading** (600, 14px, 1.3): a block heading inside a page section or the open task ("Plan", "Priority", "Notes", "Your name"); the room switcher.
+- **Body** (400, 14px, 1.3): task details, inputs, session titles, plan text.
+- **Body Medium** (500, 14px, 1.3): task titles on slabs and in the head of the open task, button labels.
 - **Label** (600, 12px, 1.3): group headers, "Sessions", member name tags, the status-bar user name.
 - **Caption Medium** (500, 12px, 1.3): `#n` on slabs, pills, session runtime, segment labels.
 - **Caption** (400, 12px, 1.3, Moss Grey): hints, project names, token counts, tooltips, empty-state hints.
@@ -390,11 +380,11 @@ A single narrow column, designed for a 400x780 window (minimum 340x520), pinned 
 
 **Main page**, top to bottom: the **header bar** (room switcher left; invite and settings ghost icons right; 8px padding), a hairline, the **task list** (60% of the area, `FillPortion(60)`), a hairline, the **sessions** panel (38%, `FillPortion(38)`).
 
-**Pages** (New task, Settings) replace the main column: a header bar with a ghost back button (`Esc` tooltip) and the title (20px semibold), a hairline, a scrolling body, an optional footer bar (hairline, 8px 12px padding, right-aligned Cancel + primary action). The body is centred, at most 560px wide, 12px inset; its blocks are **sections**, one raised slab each, 16px apart. The **task view** is not a page: it is a modal dialog over the main page.
+**Pages** (Settings) replace the main column: a header bar with a ghost back button (`Esc` tooltip) and the title (20px semibold), a hairline, a scrolling body, an optional footer bar (hairline, 8px 12px padding, right-aligned Cancel + primary action). The body is centred, at most 560px wide, 12px inset; its blocks are **sections**, one raised slab each, 16px apart. A task is not a page: it opens in place in the list, and a new task is drafted there (see Slabs).
 
 Spacing is a four-step scale: 4 / 8 / 12 / 16 (`sp-1`..`sp-4`). The list well is inset 8px; groups stack 12px apart, slabs inside a group 4px apart. The scrollable embeds its rail beside the slabs (4px), so slabs span the full width and the rail never overlaps them. Controls are 32px tall (text buttons, icon buttons at 16px glyph + 8px padding, group headers, status bar, sessions header).
 
-The list is grouped in fixed order: **In progress** (every claimed task, planning or building), **Ready to pick**, **Planning**, **Proposals**, **Ideas**, **Done**. **Proposals** and **Ideas** are always shown, even empty, so their `+` stays reachable; the other groups disappear when empty. Groups fold with a chevron; within a group, higher priority first, then task number. A slab is two lines plus the action: line one, lamp (10px square) and the title (fills, wraps); line two, indented under the title: `#n`, the stage pill, the priority pill (High or Low; nothing for Normal), spacer, the claimer's name tag. At the right edge, vertically centred, the one next-step button. A wide window changes nothing except that pages and dialogs grow to at most 560px wide.
+The list is grouped in fixed order: **In progress** (every claimed task, planning or building), **Ready to pick**, **Planning**, **Proposals**, **Ideas**, **Done**. **Proposals** and **Ideas** are always shown, even empty, so their `+` stays reachable; the other groups disappear when empty. Groups fold with a chevron; within a group, higher priority first, then task number. A slab is two lines plus the action: line one, lamp (10px square) and the title (fills, wraps); line two, indented under the title: `#n`, the stage pill, the priority pill (High or Low; nothing for Normal), spacer, the claimer's name tag. At the right edge, vertically centred, the one next-step button. A wide window changes nothing except that pages grow to at most 560px wide.
 
 Empty states are centred, max 280px: a 40px Lucide glyph (plug while connecting, users on the welcome screen, muted), a semibold title, a muted hint, one action. An empty room shows its pinned groups and a muted hint line.
 
@@ -402,15 +392,14 @@ Follows the system appearance: light = Daylight, dark (or unknown) = Night.
 
 ## Elevation & Depth
 
-Tactile by tone and edge. The well sits below, slabs and bars sit above it as `raised`; a plate is a 1px `line` border plus a soft under-edge shadow. A plate that is pressed loses the shadow and darkens. Floating things (menu, tooltip, dialog) cast bigger shadows. There is no glass, blur or gradient.
+Tactile by tone and edge. The well sits below, slabs and bars sit above it as `raised`; a plate is a 1px `line` border plus a soft under-edge shadow. A plate that is pressed loses the shadow and darkens. Floating things (menu, tooltip) cast bigger shadows. There is no glass, blur or gradient.
 
 ### Shadow Vocabulary
-- **Slab / button, at rest** (`offset 0 1px, blur 2px, colour edge`): task slabs, session slabs, page sections, primary / secondary / danger buttons, inactive segments.
+- **Slab / button, at rest** (`offset 0 1px, blur 2px, colour edge`): task slabs, the open task and the draft, session slabs, page sections, primary / secondary / danger buttons, inactive segments.
 - **Slab / button, hovered** (`offset 0 2px, blur 4px, colour edge`): the plate lifts a little more, together with the `hover` fill and the `line-strong` border on slabs.
 - **Pressed and disabled**: no shadow. The active segment of a segmented control is also shadowless: it reads as pressed in.
 - **Menu** (`offset 0 4px, blur 16px, colour shadow`): the room-switcher menu.
 - **Tooltip** (`offset 0 2px, blur 8px, colour shadow`): hover tips above the control, 4px gap.
-- **Dialog** (`offset 0 8px, blur 28px, colour shadow`, with a 1px `line` border): the modal card above the scrim.
 
 Flat on purpose: bars (header, page, status; separated by 1px hairlines), ghost buttons, group headers, flat rows inside a slab (the room list in Settings), name tags, pills, lamps, inputs.
 
@@ -419,11 +408,9 @@ Flat on purpose: bars (header, page, status; separated by 1px hairlines), ghost 
 
 **The No Slabs in Slabs Rule.** A raised plate never contains another raised plate with its own shadow, except the action button a slab carries. Rows inside a section (rooms, repos) are flat, hover-tinted rows.
 
-**The Scrim Rule.** A dialog dims everything behind it with the scrim colour; the base takes no input and a click on the scrim closes the dialog. Pages have no scrim.
-
 ## Shapes
 
-Soft but not bubbly. Everything interactive is a rounded rectangle with an 8px radius (`control`): slabs, sections, buttons, inputs, editors, the room switcher, menus, alert strip. Dialogs step up to 14px. Stage lamps are small squares with a 3px radius (`lamp`), 10px wide; Idea and New are hollow with a 2px border, all other stages filled. Name tags, pills, dots and scroller rails are fully round (999px). Tooltips use 6px and inline code 4px (one-offs, see below). Borders are 1px hairlines in `line`; focus is 2px. Icons are Lucide (stroke, ISC) at 14px in group headers, 16px on buttons, 12px in the priority pill, 40px in empty states, tinted by theme tokens.
+Soft but not bubbly. Everything interactive is a rounded rectangle with an 8px radius (`control`): slabs, sections, buttons, inputs, editors, the room switcher, menus, alert strip. Stage lamps are small squares with a 3px radius (`lamp`), 10px wide; Idea and New are hollow with a 2px border, all other stages filled. Name tags, pills, dots and scroller rails are fully round (999px). Tooltips use 6px and inline code 4px (one-offs, see below). Borders are 1px hairlines in `line`; focus is 2px. Icons are Lucide (stroke, ISC) at 14px in group headers, 16px on buttons, 12px in the priority pill, 40px in empty states, tinted by theme tokens.
 
 ## Components
 
@@ -432,19 +419,21 @@ Four kinds plus a segmented control; every button is wrapped in an id container 
 - **Shape:** 8px radius; 32px tall (6px 12px padding around a 14px medium label; icon+label gap 6px, icon 16px). Primary, secondary and danger buttons are raised plates: under-edge shadow at rest, deeper on hover, none when pressed or disabled.
 - **Primary:** Action Green fill, Deep Green Ink text. Hovered: `primary-hover`. Pressed: Leaf Ink fill. Disabled: Hairline fill, Moss Grey text. One per view for the main call to action (Propose, Save, Approve, "Pick and copy prompt"); on a slab it is the next step: **Pick** (hand-grab icon) on finished plans, **Accept** (check icon) on proposals. Pick is disabled (muted icon) while a pick runs.
 - **Secondary:** raised fill, Mint Hairline border; hovered Mint Breath with Sage Edge border; pressed Mint Pressed. Cancel, Replan, Reopen, Add, Save name; **Release** (leave icon) on a slab whose claim is yours.
-- **Danger:** red text and 1px red border on no fill; hovered Alarm Wash; pressed solid red with on-danger text. Reject (task dialog only).
-- **Ghost:** no border, no fill, no shadow; hover Mint Breath, pressed Mint Pressed. Icon buttons (32x32, 16px glyph, tooltip above) in the bars (invite, settings, back), group headers (`+`) and dialog headers, text links ("Share mine"), the `#n` session task link.
-- **Segment:** 1px border; the active segment is Mint Pressed with Leaf Ink border and text, shadowless (Idea / Proposal, priority High / Normal / Low).
+- **Danger:** red text and 1px red border on no fill; hovered Alarm Wash; pressed solid red with on-danger text. Reject (open task only).
+- **Ghost:** no border, no fill, no shadow; hover Mint Breath, pressed Mint Pressed. Icon buttons (32x32, 16px glyph, tooltip above) in the bars (invite, settings, back), group headers (`+`) and the head of the open task (edit, close), text links ("Share mine"), the `#n` session task link.
+- **Segment:** 1px border; the active segment is Mint Pressed with Leaf Ink border and text, shadowless (priority High / Normal / Low).
 
 ### Slabs and group headers
-- **Task slab:** a full-width button on `raised`, 8px radius, 1px Mint Hairline border, under-edge shadow, padding 8px 12px. Hover: Mint Breath fill, Sage Edge border, deeper shadow. Pressed: Mint Pressed, no shadow. Opens the task dialog. Two lines plus the next-step button (see Layout); the button takes the press before the slab does. Reject, Approve, Replan and Reopen stay in the dialog.
-- **Group header:** a flat full-width button in the well, 32px tall: chevron (14px muted), title (12px semibold), count pill, spacer, and on Proposals and Ideas a ghost `+` (tooltips "New proposal  (Ctrl+N)" and "New idea") that opens the New task page. Hover Mint Breath, pressed Mint Pressed; the `+` takes the press before the header.
+- **Task slab:** a full-width button on `raised`, 8px radius, 1px Mint Hairline border, under-edge shadow, padding 8px 12px. Hover: Mint Breath fill, Sage Edge border, deeper shadow. Pressed: Mint Pressed, no shadow. Opens the task in place. Two lines plus the next-step button (see Layout); the button takes the press before the slab does. Reject, Approve, Replan and Reopen stay in the open task.
+- **Open task:** a press on a slab opens it in place; only one element is open. Head = the slab's two lines on a flat hover-tinted row (press closes), with ghost Edit and Close (`Esc`) icons; under a hairline, at 12px padding: details, people, action row, Plan, Priority, Notes, with hairlines between. Resting shadow, Sage Edge border; opening scrolls it into view.
+- **Draft:** `+` (or `Ctrl+N` for a proposal) opens a draft at the top of Proposals or Ideas: hollow lamp + title field, details editor, Cancel + Propose / Add idea. Esc, Cancel or opening another element closes it and keeps its text.
+- **Group header:** a flat full-width button in the well, 32px tall: chevron (14px muted), title (12px semibold), count pill, spacer, and on Proposals and Ideas a ghost `+` (tooltips "New proposal  (Ctrl+N)" and "New idea") that opens a draft at the top of that group. Hover Mint Breath, pressed Mint Pressed; the `+` takes the press before the header.
 - **Section / session slab:** the resting task slab as a plain container (hairline border, under-edge shadow), never reacting. Sections hold page blocks at 12px padding; session slabs, 8px 12px.
 
 ### Lamps, name tags and pills
 - **Lamp:** 10px square, 3px radius; filled in the stage colour, hollow (2px border) for Idea and New.
 - **Name tag:** fully round, 2px 8px padding, 12px semibold; fill/text from the member's tag hue. Appears on slabs with a claim, in sessions, in notes.
-- **Pill:** quiet round label on the Mint Well with a Hairline border and Moss Grey 12px medium text: the stage label on a slab and in the task dialog, group counts, "idle" on a session.
+- **Pill:** quiet round label on the Mint Well with a Hairline border and Moss Grey 12px medium text: the stage label on a slab and in the head of the open task, group counts, "idle" on a session.
 - **Priority pill:** a pill with a 12px arrow and label: High (red arrow, red text), Low (muted arrow and text); none for Normal.
 - **Dot:** 8px round; running green up, red down, Sage Edge unknown. Server and omp connection state in the status bar.
 
@@ -464,9 +453,6 @@ Four kinds plus a segmented control; every button is wrapped in an id container 
 ### Sessions
 A 32px header ("Sessions" in the group-header style, count pill, optional ghost "Share mine"), then one static slab per session, 4px apart in 8px inset: member tag, session title (14px), a caption line (project, `#n` task link in Leaf Ink, tokens, "idle" pill) and the runtime on the right. Slabs are not buttons; they scroll with the rail beside them.
 
-### Dialogs
-Only the task view. Modal card over the scrim: raised fill, 14px radius, 1px hairline, dialog shadow, max 560px wide, centred, 12px from the window edge, as tall as its content up to the window. Header (lamp + `#n` + stage pill, 32px ghost close with `Esc` tooltip), scrolling body (16px side padding, 12px rhythm, hairline rules between blocks). The task dialog stacks: headline title, "Proposed by" tag, action row (primary, secondary, danger), Plan (markdown at 14px, links in Leaf Ink), Priority segments, Notes, add-note field. Esc, the close button and the scrim close it.
-
 ### Scroll rails
 Thin pill scrollers only, no track: Mint Hairline at rest, Sage Edge when hovered, Moss Grey while dragged. In the list, sessions and pages the rail sits beside the content, not over it.
 
@@ -474,10 +460,10 @@ Thin pill scrollers only, no track: Mint Hairline at rest, Sage Edge when hovere
 Alarm Wash fill, 1px red border, 8px radius; alert icon, 12px text, ghost dismiss. Sits at the very top, 8px from the window edge, above every page.
 
 ### Motion
-None, by design. Hover, press and focus are instant swaps (including the shadow); dialogs and pages appear and disappear without transition; there are no animated indicators (the runtime counters tick once a second as text).
+None, by design. Hover, press and focus are instant swaps (including the shadow); pages, the open task and the draft appear and disappear without transition; there are no animated indicators (the runtime counters tick once a second as text).
 
 ### Accessibility and input
-iced 0.14 exposes no accessibility tree and screen readers cannot read the window, so contrast and keyboard operation carry accessibility. Muted text is held at 4.5:1 on every surface; hovered slab and input borders reach 3:1 on the ground; lamps hold 3:1 on raised. Keyboard: `Tab` / `Shift+Tab` move focus through the fields, `Esc` closes the open task dialog, else returns from a page to the main page, `Ctrl+N` (Cmd on macOS) opens the New task page, `Ctrl+,` opens the Settings page, `Enter` submits the focused field. Focus is visible only on fields and editors (2px Leaf Ink ring): iced 0.14 buttons have no focused state, so buttons and slabs are pointer targets (at least 32px tall) and every keyboard path must go through a shortcut or a field. Every icon-only button has a tooltip naming its action.
+iced 0.14 exposes no accessibility tree and screen readers cannot read the window, so contrast and keyboard operation carry accessibility. Muted text is held at 4.5:1 on every surface; hovered slab and input borders reach 3:1 on the ground; lamps hold 3:1 on raised. Keyboard: `Tab` / `Shift+Tab` move focus through the fields, `Esc` closes the open task or draft, else returns from Settings to the main page, `Ctrl+N` (Cmd on macOS) opens the draft of a new proposal, `Ctrl+,` opens the Settings page, `Enter` submits the focused field. Focus is visible only on fields and editors (2px Leaf Ink ring): iced 0.14 buttons have no focused state, so buttons and slabs are pointer targets (at least 32px tall) and every keyboard path must go through a shortcut or a field. Every icon-only button has a tooltip naming its action.
 
 ## Do's and Don'ts
 
@@ -490,12 +476,12 @@ iced 0.14 exposes no accessibility tree and screen readers cannot read the windo
 - **Do** read colours from the active theme's tokens through the style functions in `theme.rs`; add a new colour as a token pair (Daylight and Night) first.
 - **Do** keep controls at 32px height and slabs at 8px radius, 8px 12px padding, 4px apart.
 - **Do** put a tooltip on every icon-only button and name the shortcut where one exists (`Settings  (Ctrl+,)`, `Back  (Esc)`, `Close  (Esc)`).
-- **Do** make New task and Settings pages with a back button; keep the task dialog modal with the scrim, max 560px wide.
+- **Do** make Settings a page with a back button; open tasks and drafts in place in the list, one at a time.
 - **Do** write weight, not size, to emphasise: 400 / 500 / 600 / 700 in 12 / 14 / 20.
 
 ### Don't:
 - **Don't** recolour slabs, tint backgrounds or add side stripes to show status; the lamp is the status.
-- **Don't** introduce a Kanban board, a wide multi-pane layout or any pane beside the list; new full surfaces are pages with a back button, small ones dialogs.
+- **Don't** introduce a Kanban board, a wide multi-pane layout or any pane beside the list; new full surfaces are pages with a back button, small ones open in place in the list.
 - **Don't** add a button bar or a standing "New task" button; the `+` in a group header adds tasks.
 - **Don't** use Action Green for decoration, or Running Green for a button.
 - **Don't** lift anything that cannot be pressed beyond a section or session slab's resting shadow; no shadow on bars, ghost buttons, headers or pills; no gradients, blur or glass.

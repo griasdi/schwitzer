@@ -1,7 +1,6 @@
 //! The application: state, messages and `update`. The views live in the submodules.
 
 mod chrome;
-mod dialogs;
 mod icons;
 mod list;
 mod live;
@@ -16,6 +15,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use iced::keyboard::{self, Key, key::Named};
+use iced::widget::operation::AbsoluteOffset;
+use iced::widget::selector::{self, Target};
 use iced::widget::{column, container, markdown, operation, text_editor};
 use iced::{Element, Length, Subscription, Task, Theme};
 use schwitzer_client::{Client, ClientError, ClientEvent};
@@ -61,14 +62,20 @@ pub enum Message {
     FocusNext,
     FocusPrevious,
 
-    /// Opens the New task page, for an idea or a proposal.
+    /// Opens the draft of a new task at the top of the Proposals group, or of the Ideas group
+    /// for an idea.
     OpenNewTask {
         idea: bool,
     },
     OpenSettings,
+    /// Opens task `n` in place in the list and scrolls it into view (the `#n` links in
+    /// sessions).
     OpenTask(u64),
-    /// Esc, the back button, the dialog's close button and the scrim: closes the task dialog
-    /// if open, else returns to the main page.
+    /// A press on a task slab or on the head of the open task: opens it, or closes it when it
+    /// is open.
+    ToggleTask(u64),
+    /// Esc, the back button, the close button of the open task and Cancel on a draft: closes
+    /// the open task or draft, else returns from Settings to the main page.
     Back,
     ToggleGroup(Group),
     /// Folds or unfolds the sessions panel.
@@ -101,7 +108,6 @@ pub enum Message {
 
     ProposalTitle(String),
     ProposalBody(text_editor::Action),
-    NewIdea(bool),
     Propose,
     Proposed(Result<Response, String>),
     Pick(u64),
@@ -139,8 +145,16 @@ struct ServerStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
     Main,
-    NewTask,
     Settings,
+}
+
+/// The one element open in place in the task list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Expanded {
+    /// Task `n` shown in full: details, people, decisions, plan, priority, notes.
+    Task(u64),
+    /// The draft of a new proposal, or of an idea, at the top of its group.
+    New { idea: bool },
 }
 
 /// A short confirmation in the status bar.
@@ -149,7 +163,8 @@ struct Notice {
     until_ms: u64,
 }
 
-/// The inputs of the pages and the task dialog.
+/// The inputs of the settings page, the draft of a new task and the note field of the open
+/// task.
 struct Forms {
     server_url: String,
     room_name: String,
@@ -158,8 +173,6 @@ struct Forms {
     repo: String,
     proposal_title: String,
     proposal_body: text_editor::Content,
-    /// Whether the New task page adds an idea instead of a proposal.
-    idea: bool,
     note: String,
 }
 
@@ -181,8 +194,8 @@ pub struct App {
     servers: HashMap<ServerAddr, ServerStatus>,
     selected: Option<RoomId>,
     page: Page,
-    /// The task dialog over the main page.
-    open_task: Option<u64>,
+    /// The task or draft open in place in the list.
+    expanded: Option<Expanded>,
     /// Folded groups of the list.
     collapsed: HashSet<Group>,
     /// Whether the sessions panel is unfolded.
@@ -251,7 +264,6 @@ impl App {
                 repo: String::new(),
                 proposal_title: String::new(),
                 proposal_body: text_editor::Content::new(),
-                idea: false,
                 note: String::new(),
             },
             saved: settings.clone(),
@@ -263,7 +275,7 @@ impl App {
             servers: HashMap::new(),
             selected,
             page: Page::Main,
-            open_task: None,
+            expanded: None,
             collapsed: HashSet::from([Group::Closed]),
             sessions_open: true,
             picking: None,
@@ -324,22 +336,17 @@ impl App {
         }
         let body: Element<'_, Message> = match self.page {
             Page::Main => column![chrome::header(self), widgets::hrule(), self.main()].into(),
-            Page::NewTask => pages::new_task(self),
             Page::Settings => settings_view::view(self),
         };
-        let page = container(
+        container(
             page.push(container(body).height(Length::Fill))
                 .push(widgets::hrule())
                 .push(chrome::status_bar(self)),
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::ground);
-
-        match self.open().filter(|_| self.page == Page::Main) {
-            Some((state, task)) => dialogs::modal(page, task_view::view(self, state, task)),
-            None => page.into(),
-        }
+        .style(theme::ground)
+        .into()
     }
 
     /// The main page below the header bar: list and sessions, or an empty state.
@@ -442,24 +449,57 @@ impl App {
                 if self.selected_state().is_none() {
                     return Task::none();
                 }
-                self.forms.idea = idea;
-                self.open_page(Page::NewTask);
-                operation::focus("proposal-title")
+                if self.page != Page::Main {
+                    self.page = Page::Main;
+                    self.reset_drafts();
+                }
+                if matches!(self.expanded, Some(Expanded::Task(_))) {
+                    self.reset_drafts();
+                }
+                self.expanded = Some(Expanded::New { idea });
+                self.collapsed.remove(if idea {
+                    &Group::Ideas
+                } else {
+                    &Group::Proposals
+                });
+                Task::batch([operation::focus("proposal-title"), reveal("new-task")])
             }
             Message::OpenSettings => {
-                self.open_page(Page::Settings);
+                if self.page != Page::Settings {
+                    self.reset_drafts();
+                }
+                self.expanded = None;
+                self.page = Page::Settings;
                 Task::none()
             }
             Message::OpenTask(number) => {
-                if self.open_task != Some(number) {
+                let Some(group) = self
+                    .selected_state()
+                    .and_then(|s| s.tasks.iter().find(|t| t.number == number))
+                    .map(Group::of)
+                else {
+                    return Task::none();
+                };
+                self.page = Page::Main;
+                if self.expanded != Some(Expanded::Task(number)) {
                     self.reset_drafts();
                 }
-                self.page = Page::Main;
-                self.open_task = Some(number);
-                Task::none()
+                self.expanded = Some(Expanded::Task(number));
+                self.collapsed.remove(&group);
+                reveal("open-task")
+            }
+            Message::ToggleTask(number) => {
+                if self.expanded == Some(Expanded::Task(number)) {
+                    self.expanded = None;
+                    self.reset_drafts();
+                    return Task::none();
+                }
+                self.reset_drafts();
+                self.expanded = Some(Expanded::Task(number));
+                reveal("open-task")
             }
             Message::Back => {
-                if self.open_task.take().is_some() {
+                if self.expanded.take().is_some() {
                     self.reset_drafts();
                 } else if self.page != Page::Main {
                     self.page = Page::Main;
@@ -579,18 +619,14 @@ impl App {
                 self.forms.proposal_body.perform(action);
                 Task::none()
             }
-            Message::NewIdea(on) => {
-                self.forms.idea = on;
-                Task::none()
-            }
             Message::Propose => self.propose(),
             Message::Proposed(result) => {
                 match result {
                     Ok(response) => {
                         self.forms.proposal_title.clear();
                         self.forms.proposal_body = text_editor::Content::new();
-                        if self.page == Page::NewTask {
-                            self.page = Page::Main;
+                        if matches!(self.expanded, Some(Expanded::New { .. })) {
+                            self.expanded = None;
                         }
                         let idea = matches!(&response, Response::Task(t) if t.stage == Stage::Idea);
                         self.notify(if idea { "Idea added" } else { "Task proposed" });
@@ -783,9 +819,11 @@ impl App {
             .map_or(&[], Vec::as_slice)
     }
 
-    /// The selected room and the task of the open task dialog.
+    /// The selected room and the open task.
     fn open(&self) -> Option<(&RoomState, &RoomTask)> {
-        let number = self.open_task?;
+        let Some(Expanded::Task(number)) = self.expanded else {
+            return None;
+        };
         let state = self.selected_state()?;
         let task = state.tasks.iter().find(|t| t.number == number)?;
         Some((state, task))
@@ -1059,6 +1097,9 @@ impl App {
     }
 
     fn propose(&mut self) -> Task<Message> {
+        let Some(Expanded::New { idea }) = self.expanded else {
+            return Task::none();
+        };
         let (Some(room), title) = (self.selected, self.forms.proposal_title.trim()) else {
             return Task::none();
         };
@@ -1066,7 +1107,7 @@ impl App {
             return Task::none();
         }
         let (title, body) = (title.to_owned(), self.forms.proposal_body.text());
-        let req = if self.forms.idea {
+        let req = if idea {
             Request::AddIdea { room, title, body }
         } else {
             Request::Propose { room, title, body }
@@ -1277,20 +1318,9 @@ impl App {
     fn select(&mut self, room: Option<RoomId>) {
         if self.selected != room {
             self.selected = room;
-            self.open_task = None;
-            if self.page == Page::NewTask {
-                self.page = Page::Main;
-            }
+            self.expanded = None;
             self.reset_drafts();
         }
-    }
-
-    fn open_page(&mut self, page: Page) {
-        if self.page != page {
-            self.reset_drafts();
-        }
-        self.open_task = None;
-        self.page = page;
     }
 
     fn reset_drafts(&mut self) {
@@ -1380,6 +1410,41 @@ fn key_message(event: keyboard::Event) -> Option<Message> {
         Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
         _ => None,
     }
+}
+
+/// Scrolls the task list so the element with widget id `id` shows: when its top is above the
+/// list, or its first list-height is below it, its top goes to the top of the list. Runs after
+/// the next layout, so it finds an element the same update opened.
+fn reveal(id: &'static str) -> Task<Message> {
+    selector::find(selector::id(list::LIST_ID)).then(move |list| {
+        let Some(Target::Scrollable {
+            bounds,
+            content_bounds,
+            translation,
+            ..
+        }) = list
+        else {
+            return Task::none();
+        };
+        selector::find(selector::id(id)).then(move |target| {
+            let Some(target) = target else {
+                return Task::none();
+            };
+            let el = target.bounds();
+            let top = el.y - translation.y;
+            let bottom = top + el.height.min(bounds.height);
+            if top >= bounds.y && bottom <= bounds.y + bounds.height {
+                return Task::none();
+            }
+            operation::scroll_to(
+                list::LIST_ID,
+                AbsoluteOffset {
+                    x: 0.0,
+                    y: (el.y - content_bounds.y - SP_2).max(0.0),
+                },
+            )
+        })
+    })
 }
 
 /// `~/x` as a path under the home directory; anything else as given.
