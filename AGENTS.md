@@ -11,6 +11,7 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 deploy/deploy.sh local   # build HEAD, run it as the systemd user service schwitzer-server-local on 127.0.0.1:7444
+deploy/deploy.sh stkn    # the same on stkn.org (ssh felix@stkn.org): service schwitzer-server, UDP 7444, only when the user asks
 ```
 
 Never `cargo run -p schwitzer-app` or start `schwitzer` without `--headless`: see "Running headless". There is no CI and no xtask, so the gate below is the only check before a push.
@@ -38,6 +39,7 @@ A change is finished when its gate passed, it is committed and pushed to `origin
 - Commit messages follow CONTRIBUTING.md: no prefix, a `Changelog:` trailer for user-visible changes.
 - Before pushing, `git pull --rebase origin main`; if that brought new commits, run the gate again. Push only to `origin`.
 - A change without code skips `deploy.sh` as well.
+- `deploy/deploy.sh stkn` deploys to the shared server on stkn.org (service `schwitzer-server`, `weida://…@stkn.org:7444`), which other people use: run it only when the user asks for it, never as part of finishing a change.
 
 ## Running headless
 

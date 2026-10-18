@@ -20,6 +20,8 @@ The server prints its URL (`server url: weida://sha256:…@host:port`) on stdout
 
 `deploy/deploy.sh local` (Linux, systemd) builds the committed `HEAD` and runs it as the systemd user service `schwitzer-server-local` on `127.0.0.1:7444`, with its data in `~/.local/share/schwitzer-server`; it restarts the service only when the binary or unit changed.
 
+`deploy/deploy.sh stkn` builds the same way on this machine and deploys over ssh (`felix@stkn.org`) as the systemd user service `schwitzer-server` on UDP 7444 (IPv4 and IPv6) with public host `stkn.org`; it enables lingering there so the service runs without a login. The target needs `rsync` and the same or a newer glibc than the build machine.
+
 ## Before pushing
 
 There is no CI: these checks are the only ones, run them before every commit that touches code:

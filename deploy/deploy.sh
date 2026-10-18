@@ -1,48 +1,64 @@
 #!/bin/sh
-# Deploys the committed HEAD of this checkout (Linux, systemd):
+# Deploys the committed HEAD of this checkout as a systemd user service:
 #
-#   local    builds the server in release mode and runs it as the systemd user
-#            service `schwitzer-server-local` on 127.0.0.1:7444, for use on
-#            this machine; restarts it only when binary or unit changed. The
-#            binary lives in ~/.local/state/schwitzer-server-local/bin, the
-#            data (identity, rooms) in ~/.local/share/schwitzer-server.
+#   local    on this machine: `schwitzer-server-local` on 127.0.0.1:7444,
+#            for the user's own app.
+#   stkn     on stkn.org, over ssh as felix: `schwitzer-server` on UDP 7444
+#            (IPv4 and IPv6), public host stkn.org. Enables lingering there,
+#            so the service runs without a login and starts at boot.
 #
-# It builds from an export of HEAD, so uncommitted changes in the checkout
-# are ignored: what runs is what is committed.
+# Both build the server in release mode on this machine, from an export of
+# HEAD: uncommitted changes in the checkout are ignored, what runs is what is
+# committed. The service restarts only when binary or unit changed. On the
+# target the binary lives in ~/.local/state/<service>/bin, the data (identity,
+# rooms) in ~/.local/share/schwitzer-server.
 #
-# Usage: deploy.sh local
+# Usage: deploy.sh local|stkn
+#
+# `deploy.sh activate …` is the half that runs on the target; the two above
+# call it.
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-cache=${XDG_CACHE_HOME:-$HOME/.cache}/schwitzer-server-local
-state=${XDG_STATE_HOME:-$HOME/.local/state}/schwitzer-server-local
-bin=$state/bin/schwitzer-server
-data=${XDG_DATA_HOME:-$HOME/.local/share}/schwitzer-server
-unit_file=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/schwitzer-server-local.service
-service=schwitzer-server-local.service
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/schwitzer-deploy
+stkn_ssh=felix@stkn.org
+# Where `stkn` uploads binary and unit template, relative to the remote home.
+stkn_stage=.cache/schwitzer-server-deploy
 
 say() { printf '[deploy] %s\n' "$*"; }
 
-journal() {
-    journalctl -q --user -u schwitzer-server-local -o cat --no-pager "$@"
+# Exports HEAD to $cache/src and builds it there; sets $src and $built.
+build() {
+    rev=$(git -C "$root" rev-parse --short HEAD)
+    src=$cache/src
+    rm -rf "$src"
+    mkdir -p "$src"
+    git -C "$root" archive HEAD | tar -x -C "$src"
+    say "building $rev"
+    cargo build --release --locked -p schwitzer-server \
+        --manifest-path "$src/Cargo.toml" --target-dir "$cache/target"
+    built=$cache/target/release/schwitzer-server
 }
 
-deploy_local() {
-    rev=$(git -C "$root" rev-parse --short HEAD)
-    rm -rf "$cache/src"
-    mkdir -p "$cache/src"
-    git -C "$root" archive HEAD | tar -x -C "$cache/src"
-    say "local: building $rev"
-    cargo build --release --locked -p schwitzer-server \
-        --manifest-path "$cache/src/Cargo.toml" --target-dir "$cache/target"
+# activate <label> <service> <listen> <public host> <binary> <unit template>
+#
+# Installs binary and unit as the systemd user service <service> on this
+# machine and (re)starts it when either changed or it is not running.
+activate() {
+    label=$1 service=$2 listen=$3 public_host=$4 new_bin=$5 template=$6
+    bin=${XDG_STATE_HOME:-$HOME/.local/state}/$service/bin/schwitzer-server
+    data=${XDG_DATA_HOME:-$HOME/.local/share}/schwitzer-server
+    unit_file=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$service.service
+    port=${listen##*:}
+    journal() { journalctl -q --user -u "$service" -o cat --no-pager "$@"; }
 
     changed=
-    built=$cache/target/release/schwitzer-server
-    if ! cmp -s "$built" "$bin"; then
-        install -D -m 755 "$built" "$bin"
+    if ! cmp -s "$new_bin" "$bin"; then
+        install -D -m 755 "$new_bin" "$bin"
         changed=binary
     fi
-    unit=$(sed -e "s|@BIN@|$bin|" -e "s|@DATA@|$data|" "$cache/src/deploy/schwitzer-server-local.service")
+    unit=$(sed -e "s|@BIN@|$bin|" -e "s|@DATA@|$data|" -e "s|@LISTEN@|$listen|" \
+        -e "s|@PUBLIC_HOST@|$public_host|" "$template")
     if [ "$unit" != "$(cat "$unit_file" 2>/dev/null || true)" ]; then
         mkdir -p "$(dirname "$unit_file")"
         printf '%s\n' "$unit" >"$unit_file"
@@ -53,38 +69,69 @@ deploy_local() {
     systemctl --user enable --quiet "$service"
 
     if [ -z "$changed" ] && systemctl --user is-active --quiet "$service"; then
-        say "local: unchanged, still running"
+        say "$label: unchanged, still running"
     else
         if ! systemctl --user is-active --quiet "$service"; then
-            taken=$(ss -Hulpn 'sport = :7444')
+            taken=$(ss -Hulpn "sport = :$port")
             if [ -n "$taken" ]; then
-                say "local: 127.0.0.1:7444 is taken by another process; stop it first:"
+                say "$label: UDP port $port is taken by another process; stop it first:"
                 printf '%s\n' "$taken"
                 exit 1
             fi
         fi
-        say "local: restarting (${changed:-was not running})"
+        say "$label: restarting (${changed:-was not running})"
         since=$(date +%s)
         systemctl --user restart "$service"
         tries=0
         until [ -n "$(journal --since "@$since" --grep '^server url:')" ]; do
             tries=$((tries + 1))
             if [ "$tries" -ge 50 ] || ! systemctl --user is-active --quiet "$service"; then
-                say "local: did not come up"
+                say "$label: did not come up"
                 journal --since "@$since" | tail -n 20
                 exit 1
             fi
             sleep 0.2
         done
     fi
-    say "local: $(journal --grep '^server url:' -n 1)"
+    say "$label: $(journal --grep '^server url:' -n 1)"
+}
+
+deploy_local() {
+    build
+    activate local schwitzer-server-local 127.0.0.1:7444 127.0.0.1 \
+        "$built" "$src/deploy/schwitzer-server.service"
+}
+
+deploy_stkn() {
+    build
+    say "stkn: uploading to $stkn_ssh"
+    ssh "$stkn_ssh" mkdir -p "$stkn_stage"
+    rsync -cz "$built" "$src/deploy/schwitzer-server.service" "$stkn_ssh:$stkn_stage/"
+    if [ "$(ssh "$stkn_ssh" 'loginctl show-user "$USER" -p Linger --value')" != yes ]; then
+        say "stkn: enabling lingering"
+        ssh "$stkn_ssh" loginctl enable-linger
+    fi
+    # The activating half comes from the HEAD export as well.
+    ssh "$stkn_ssh" sh -s activate stkn schwitzer-server "'[::]:7444'" stkn.org \
+        "$stkn_stage/schwitzer-server" "$stkn_stage/schwitzer-server.service" \
+        <"$src/deploy/deploy.sh"
 }
 
 case "${1:-}" in
-local) deploy_local ;;
+local)
+    deploy_local
+    say "done"
+    ;;
+stkn)
+    deploy_stkn
+    say "done"
+    ;;
+activate)
+    shift
+    activate "$@"
+    ;;
 *)
-    say "usage: $0 local"
+    say "usage: $0 local|stkn"
     exit 2
     ;;
 esac
-say "done"

@@ -1,0 +1,13 @@
+[Unit]
+Description=schwitzer server (@PUBLIC_HOST@, UDP @LISTEN@)
+
+[Service]
+Type=simple
+# `deploy.sh` installs this unit as a systemd user unit and replaces @BIN@,
+# @DATA@, @LISTEN@ and @PUBLIC_HOST@.
+ExecStart=@BIN@ --listen @LISTEN@ --public-host @PUBLIC_HOST@ --data-dir @DATA@
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=default.target
