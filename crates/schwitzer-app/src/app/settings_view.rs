@@ -12,6 +12,7 @@ use super::widgets::{
 };
 use super::{App, Message};
 use crate::mcp::McpStatus;
+use crate::omp_plugin::PluginState;
 use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -82,47 +83,58 @@ fn this_room(app: &App) -> Element<'_, Message> {
     };
     let mut repos = column![].spacing(2);
     for (index, repo) in app.room_repos().iter().enumerate() {
-        let installed = app.plugin_repos.contains(repo);
-        repos = repos.push(
-            row![
-                icon(Icon::Folder, 16.0, Tone::Muted),
-                column![
-                    text(repo.display().to_string()).size(TS_14),
-                    muted(if installed {
-                        "omp plugin installed"
-                    } else {
-                        "No omp plugin"
-                    }),
-                ]
-                .spacing(2)
-                .width(Length::Fill),
-                icon_button(
-                    format!("repo-plugin-{index}"),
-                    Icon::Plug,
-                    if installed { Tone::Text } else { Tone::Muted },
-                    if installed {
-                        "Remove the omp plugin from this repo"
-                    } else {
-                        "Install the omp plugin in this repo"
-                    },
-                    Some(if installed {
-                        Message::RemovePlugin(index)
-                    } else {
-                        Message::InstallPlugin(index)
-                    }),
-                    theme::button_ghost,
-                ),
-                icon_button(
-                    format!("repo-remove-{index}"),
-                    Icon::Trash,
-                    Tone::Muted,
-                    "Stop sharing this repo",
-                    Some(Message::RemoveRepo(index)),
-                    theme::button_ghost,
-                ),
+        let state = app.plugins.get(repo).copied();
+        let installed = state.is_some();
+        let mut line = row![
+            icon(Icon::Folder, 16.0, Tone::Muted),
+            column![
+                text(repo.display().to_string()).size(TS_14),
+                muted(match state {
+                    Some(PluginState::Current) => "omp plugin installed",
+                    Some(PluginState::Outdated) => "omp plugin out of date",
+                    None => "No omp plugin",
+                }),
             ]
-            .spacing(SP_2)
-            .align_y(Alignment::Center),
+            .spacing(2)
+            .width(Length::Fill),
+        ]
+        .spacing(SP_2)
+        .align_y(Alignment::Center);
+        if state == Some(PluginState::Outdated) {
+            line = line.push(icon_button(
+                format!("repo-plugin-update-{index}"),
+                Icon::Refresh,
+                Tone::Ink,
+                "Update the omp plugin in this repo",
+                Some(Message::UpdatePlugin(index)),
+                theme::button_ghost,
+            ));
+        }
+        repos = repos.push(
+            line.push(icon_button(
+                format!("repo-plugin-{index}"),
+                Icon::Plug,
+                if installed { Tone::Text } else { Tone::Muted },
+                if installed {
+                    "Remove the omp plugin from this repo"
+                } else {
+                    "Install the omp plugin in this repo"
+                },
+                Some(if installed {
+                    Message::RemovePlugin(index)
+                } else {
+                    Message::InstallPlugin(index)
+                }),
+                theme::button_ghost,
+            ))
+            .push(icon_button(
+                format!("repo-remove-{index}"),
+                Icon::Trash,
+                Tone::Muted,
+                "Stop sharing this repo",
+                Some(Message::RemoveRepo(index)),
+                theme::button_ghost,
+            )),
         );
     }
     if app.room_repos().is_empty() {
@@ -308,7 +320,70 @@ fn agents(app: &App) -> Element<'_, Message> {
         ))
         .size(TS_12)
         .style(theme::text_muted),
+        plugins(app),
     ]
     .spacing(SP_3)
     .into()
+}
+
+/// The omp plugins in all shared repos: how many are out of date, and auto-update.
+fn plugins(app: &App) -> Element<'_, Message> {
+    let installed = app.plugins.len();
+    let outdated = app
+        .plugins
+        .values()
+        .filter(|state| **state == PluginState::Outdated)
+        .count();
+    let summary = if installed == 0 {
+        "No shared repo has the omp plugin.".to_owned()
+    } else if outdated > 0 {
+        format!("Out of date in {outdated} of {}.", repos(installed))
+    } else {
+        format!("Up to date in {}.", repos(installed))
+    };
+    let segment = |id: &'static str, label: &'static str, value: bool| {
+        id_button(
+            id,
+            container(text(label).size(TS_12).font(MEDIUM)).padding([SP_1, SP_3]),
+            Some(Message::AutoUpdatePlugins(value)),
+            theme::button_segment(app.settings.auto_update_plugins == value),
+            Length::Shrink,
+        )
+    };
+    column![
+        text("omp plugin").size(TS_14).font(MEDIUM),
+        row![
+            muted(summary).width(Length::Fill),
+            text_button(
+                "plugins-update-all",
+                "Update all",
+                (outdated > 0).then_some(Message::UpdateAllPlugins),
+                theme::button_secondary,
+            ),
+        ]
+        .spacing(SP_2)
+        .align_y(Alignment::Center),
+        row![
+            text("Update automatically").size(TS_14).width(Length::Fill),
+            segment("plugins-auto-on", "On", true),
+            segment("plugins-auto-off", "Off", false),
+        ]
+        .spacing(SP_1)
+        .align_y(Alignment::Center),
+        muted(
+            "Rewrites an out-of-date plugin as soon as this app sees it. omp loads the new one \
+             when it starts next."
+        ),
+    ]
+    .spacing(SP_2)
+    .into()
+}
+
+/// "1 repo", "2 repos".
+fn repos(n: usize) -> String {
+    if n == 1 {
+        "1 repo".to_owned()
+    } else {
+        format!("{n} repos")
+    }
 }

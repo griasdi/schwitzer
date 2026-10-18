@@ -39,6 +39,7 @@ icons! {
     Users => "users",
     UserPlus => "user-plus",
     Plug => "plug",
+    Refresh => "refresh-cw",
     Notes => "message-square",
     ArrowUp => "arrow-up",
     ArrowDown => "arrow-down",

@@ -9,6 +9,9 @@
 //! Install also registers the app's MCP server as `schwitzer` in `<repo>/.omp/mcp.json`, with
 //! the access token in its `Authorization` header. That file is then readable by the user only
 //! on unix and must stay out of version control.
+//!
+//! The app compares a repo's plugin with what it would write ([`state`]) and rewrites it on
+//! request or automatically.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -59,6 +62,74 @@ pub fn rooms_of(repos: &BTreeMap<String, Vec<PathBuf>>, repo: &Path) -> Vec<Stri
 /// Whether the app's plugin is in `repo`.
 pub fn installed(repo: &Path) -> bool {
     plugin_dir(repo).join(CONFIG_FILE).is_file()
+}
+
+/// How the plugin in a repo compares with the one this app writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginState {
+    Current,
+    Outdated,
+}
+
+/// The plugin in `repo` compared with what [`install`] would write for `config` and
+/// `mcp_token`; `None` when it is not installed.
+pub fn state(repo: &Path, config: &PluginConfig, mcp_token: Option<&str>) -> Option<PluginState> {
+    if !installed(repo) {
+        return None;
+    }
+    let current = if matches(repo, config, mcp_token) {
+        PluginState::Current
+    } else {
+        PluginState::Outdated
+    };
+    Some(current)
+}
+
+/// Whether everything [`install`] would write into `repo` is already there.
+fn matches(repo: &Path, config: &PluginConfig, mcp_token: Option<&str>) -> bool {
+    let dir = plugin_dir(repo);
+    let holds =
+        |name: &str, bytes: &[u8]| std::fs::read(dir.join(name)).is_ok_and(|old| old == bytes);
+    let (Ok(package), Ok(config_json)) = (pretty(&package()), pretty(config)) else {
+        return false;
+    };
+    if !holds("index.ts", INDEX_TS.as_bytes())
+        || !holds("package.json", package.as_bytes())
+        || !holds(CONFIG_FILE, config_json.as_bytes())
+    {
+        return false;
+    }
+    let lock_current = match read_json(&lock_path(repo), "plugins", "an omp plugin lock file") {
+        Ok(Some(lock)) => {
+            lock.get("plugins")
+                .and_then(|plugins| plugins.get(NAME))
+                .and_then(|entry| entry.get("version"))
+                == Some(&json!(env!("CARGO_PKG_VERSION")))
+        }
+        _ => false,
+    };
+    if !lock_current {
+        return false;
+    }
+    let entry = match read_json(&mcp_path(repo), "mcpServers", "an omp MCP config") {
+        Ok(mcp) => mcp.and_then(|mcp| mcp.get("mcpServers")?.get(NAME).cloned()),
+        Err(_) => return false,
+    };
+    match mcp_token {
+        Some(token) => entry == Some(crate::mcp::server_entry(&config.mcp_url, token)),
+        None => entry.is_none(),
+    }
+}
+
+/// The plugin's `package.json`.
+fn package() -> Value {
+    json!({
+        "name": NAME,
+        "version": env!("CARGO_PKG_VERSION"),
+        "private": true,
+        "description": "Plan Schwitzer tasks from omp. Written by the Schwitzer app; edits are overwritten.",
+        "omp": { "extensions": ["./index.ts"] },
+    })
 }
 
 /// Writes the plugin into `repo`, enables it in the lock file and registers the app's MCP
@@ -113,14 +184,7 @@ pub fn install(repo: &Path, config: &PluginConfig, mcp_token: Option<&str>) -> i
     let dir = plugin_dir(repo);
     std::fs::create_dir_all(&dir)?;
     write_if_changed(&dir.join("index.ts"), INDEX_TS.as_bytes())?;
-    let package = json!({
-        "name": NAME,
-        "version": env!("CARGO_PKG_VERSION"),
-        "private": true,
-        "description": "Plan Schwitzer tasks from omp. Written by the Schwitzer app; edits are overwritten.",
-        "omp": { "extensions": ["./index.ts"] },
-    });
-    write_if_changed(&dir.join("package.json"), pretty(&package)?.as_bytes())?;
+    write_if_changed(&dir.join("package.json"), pretty(&package())?.as_bytes())?;
     write_if_changed(&dir.join(CONFIG_FILE), pretty(config)?.as_bytes())?;
     write_json(&lock_path, lock, false)?;
     if let Some(mcp) = mcp {
@@ -399,5 +463,86 @@ mod tests {
         ]);
         assert_eq!(rooms_of(&repos, Path::new("/code/app")), ["a", "c"]);
         assert!(rooms_of(&repos, Path::new("/code/other")).is_empty());
+    }
+
+    #[test]
+    fn state_follows_install() {
+        let repo = tempfile::tempdir().unwrap();
+        assert_eq!(state(repo.path(), &config(), Some(TOKEN)), None);
+        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        assert_eq!(
+            state(repo.path(), &config(), Some(TOKEN)),
+            Some(PluginState::Current)
+        );
+    }
+
+    #[test]
+    fn edited_plugin_is_outdated_until_reinstalled() {
+        let repo = tempfile::tempdir().unwrap();
+        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        let index = plugin_dir(repo.path()).join("index.ts");
+        std::fs::write(&index, format!("{INDEX_TS}// edited\n")).unwrap();
+        assert_eq!(
+            state(repo.path(), &config(), Some(TOKEN)),
+            Some(PluginState::Outdated)
+        );
+        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        assert_eq!(
+            state(repo.path(), &config(), Some(TOKEN)),
+            Some(PluginState::Current)
+        );
+    }
+
+    #[test]
+    fn other_mcp_port_is_outdated() {
+        let repo = tempfile::tempdir().unwrap();
+        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        let moved = PluginConfig {
+            mcp_url: "http://127.0.0.1:13402/mcp".to_owned(),
+            ..config()
+        };
+        assert_eq!(
+            state(repo.path(), &moved, Some(TOKEN)),
+            Some(PluginState::Outdated)
+        );
+    }
+
+    #[test]
+    fn older_lock_version_is_outdated() {
+        let repo = tempfile::tempdir().unwrap();
+        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        let mut lock = lock(repo.path());
+        lock["plugins"]["schwitzer"]["version"] = json!("0.0.1");
+        write(&lock_path(repo.path()), &lock.to_string());
+        assert_eq!(
+            state(repo.path(), &config(), Some(TOKEN)),
+            Some(PluginState::Outdated)
+        );
+    }
+
+    #[test]
+    fn mcp_entry_follows_the_token() {
+        let repo = tempfile::tempdir().unwrap();
+        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        assert_eq!(
+            state(repo.path(), &config(), None),
+            Some(PluginState::Outdated)
+        );
+        install(repo.path(), &config(), None).unwrap();
+        assert_eq!(
+            state(repo.path(), &config(), None),
+            Some(PluginState::Current)
+        );
+    }
+
+    #[test]
+    fn malformed_mcp_config_is_outdated() {
+        let repo = tempfile::tempdir().unwrap();
+        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        write(&mcp_path(repo.path()), "not json");
+        assert_eq!(
+            state(repo.path(), &config(), Some(TOKEN)),
+            Some(PluginState::Outdated)
+        );
     }
 }

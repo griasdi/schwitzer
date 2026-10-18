@@ -10,7 +10,7 @@ mod settings_view;
 mod task_view;
 mod widgets;
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -28,7 +28,7 @@ use self::icons::{Icon, Tone};
 use self::logic::Group;
 use crate::bridge::{self, ClientKey, call, fire};
 use crate::mcp::{self, McpStatus};
-use crate::omp_plugin;
+use crate::omp_plugin::{self, PluginState};
 use crate::sessions::{self, LocalSession};
 use crate::settings::{self, Settings};
 use crate::theme::{self, SP_2};
@@ -38,6 +38,8 @@ const PICK_AGENT: &str = "omp";
 
 /// How long a status-bar notice stays.
 const NOTICE_MS: u64 = 5_000;
+/// How often the omp plugins in the shared repos are compared with this app's.
+const PLUGIN_CHECK_MS: u64 = 5_000;
 
 /// Everything the user and the outside world can make the app do.
 #[derive(Debug, Clone)]
@@ -85,6 +87,10 @@ pub enum Message {
     InstallPlugin(usize),
     /// Index into the selected room's repos.
     RemovePlugin(usize),
+    /// Index into the selected room's repos.
+    UpdatePlugin(usize),
+    UpdateAllPlugins,
+    AutoUpdatePlugins(bool),
 
     ProposalTitle(String),
     ProposalBody(text_editor::Action),
@@ -181,8 +187,13 @@ pub struct App {
     published: HashMap<RoomId, Vec<SessionInfo>>,
     mcp: Option<McpStatus>,
     mcp_token: Option<String>,
-    /// Shared repos with the omp plugin installed.
-    plugin_repos: BTreeSet<PathBuf>,
+    /// Shared repos with the omp plugin installed, and how it compares with this app's.
+    plugins: BTreeMap<PathBuf, PluginState>,
+    /// Repos whose automatic update failed; not retried until their plugin changes state or
+    /// the user updates by hand, so a broken repo does not raise the banner every check.
+    auto_failed: BTreeSet<PathBuf>,
+    /// When the plugins were last checked.
+    plugins_checked_ms: u64,
     now_ms: u64,
 }
 
@@ -216,13 +227,6 @@ impl App {
 
         let rooms = client.rooms();
         let selected = rooms.first().map(|(key, _)| RoomId::of(&key.token));
-        let plugin_repos = settings
-            .repos
-            .values()
-            .flatten()
-            .filter(|repo| omp_plugin::installed(repo))
-            .cloned()
-            .collect();
         let mut app = Self {
             forms: Forms {
                 server_url: settings.last_server.clone().unwrap_or_default(),
@@ -255,11 +259,14 @@ impl App {
             published: HashMap::new(),
             mcp,
             mcp_token,
-            plugin_repos,
+            plugins: BTreeMap::new(),
+            auto_failed: BTreeSet::new(),
+            plugins_checked_ms: 0,
             now_ms: now_ms(),
         };
-        // Refreshes the plugin's code, version and config after an update or a new MCP port.
-        app.sync_plugins();
+        // Finds out-of-date plugins; with auto-update on, this refreshes them after an app
+        // update or a new MCP port.
+        app.check_plugins();
         (app, iced::system::theme().map(Message::SystemMode))
     }
 
@@ -369,6 +376,9 @@ impl App {
                     .is_some_and(|n| n.until_ms <= self.now_ms)
                 {
                     self.notice = None;
+                }
+                if self.now_ms >= self.plugins_checked_ms + PLUGIN_CHECK_MS {
+                    self.check_plugins();
                 }
                 Task::none()
             }
@@ -513,6 +523,28 @@ impl App {
             }
             Message::InstallPlugin(index) => self.install_plugin(index),
             Message::RemovePlugin(index) => self.remove_plugin(index),
+            Message::UpdatePlugin(index) => {
+                if let Some(repo) = self.room_repos().get(index).cloned() {
+                    match self.update_plugin(&repo) {
+                        Ok(()) => self.notify("omp plugin updated"),
+                        Err(e) => self.banner = Some(update_failed(&repo, &e)),
+                    }
+                }
+                Task::none()
+            }
+            Message::UpdateAllPlugins => {
+                self.update_all_plugins();
+                Task::none()
+            }
+            Message::AutoUpdatePlugins(on) => {
+                self.settings.auto_update_plugins = on;
+                self.save_settings();
+                if on {
+                    self.auto_failed.clear();
+                    self.check_plugins();
+                }
+                Task::none()
+            }
 
             Message::ProposalTitle(s) => {
                 self.forms.proposal_title = s;
@@ -849,10 +881,8 @@ impl App {
         let Some(repo) = self.room_repos().get(index).cloned() else {
             return Task::none();
         };
-        let config = self.plugin_config(omp_plugin::rooms_of(&self.settings.repos, &repo));
-        match omp_plugin::install(&repo, &config, self.mcp_token.as_deref()) {
+        match self.update_plugin(&repo) {
             Ok(()) => {
-                self.plugin_repos.insert(repo);
                 self.notify("omp plugin installed");
             }
             Err(e) => {
@@ -871,7 +901,8 @@ impl App {
         };
         match omp_plugin::uninstall(&repo) {
             Ok(()) => {
-                self.plugin_repos.remove(&repo);
+                self.plugins.remove(&repo);
+                self.auto_failed.remove(&repo);
                 self.notify("omp plugin removed");
             }
             Err(e) => {
@@ -892,17 +923,100 @@ impl App {
         }
     }
 
+    /// Writes the plugin into `repo` for the rooms that share it and marks it current.
+    fn update_plugin(&mut self, repo: &Path) -> std::io::Result<()> {
+        let rooms = omp_plugin::rooms_of(&self.settings.repos, repo);
+        omp_plugin::install(repo, &self.plugin_config(rooms), self.mcp_token.as_deref())?;
+        self.plugins.insert(repo.to_owned(), PluginState::Current);
+        self.auto_failed.remove(repo);
+        Ok(())
+    }
+
+    /// Updates every out-of-date plugin, in all rooms; the first failure goes to the banner.
+    fn update_all_plugins(&mut self) {
+        let outdated: Vec<PathBuf> = self
+            .plugins
+            .iter()
+            .filter(|(_, state)| **state == PluginState::Outdated)
+            .map(|(repo, _)| repo.clone())
+            .collect();
+        let mut updated = 0;
+        let mut failure = None;
+        for repo in outdated {
+            match self.update_plugin(&repo) {
+                Ok(()) => updated += 1,
+                Err(e) => {
+                    failure.get_or_insert_with(|| update_failed(&repo, &e));
+                }
+            }
+        }
+        if let Some(failure) = failure {
+            self.banner = Some(failure);
+        }
+        match updated {
+            0 => {}
+            1 => self.notify("omp plugin updated"),
+            n => self.notify(&format!("omp plugin updated in {n} repos")),
+        }
+    }
+
+    /// Compares the plugin in every shared repo with this app's and, with auto-update on,
+    /// rewrites the out-of-date ones whose automatic update has not failed before.
+    fn check_plugins(&mut self) {
+        self.plugins_checked_ms = now_ms();
+        let shared: BTreeSet<PathBuf> = self.settings.repos.values().flatten().cloned().collect();
+        for repo in &shared {
+            let rooms = omp_plugin::rooms_of(&self.settings.repos, repo);
+            match omp_plugin::state(repo, &self.plugin_config(rooms), self.mcp_token.as_deref()) {
+                Some(state) => {
+                    self.plugins.insert(repo.clone(), state);
+                }
+                None => {
+                    self.plugins.remove(repo);
+                }
+            }
+        }
+        self.plugins.retain(|repo, _| shared.contains(repo));
+        let plugins = &self.plugins;
+        self.auto_failed
+            .retain(|repo| plugins.get(repo) == Some(&PluginState::Outdated));
+        if !self.settings.auto_update_plugins {
+            return;
+        }
+        let outdated: Vec<PathBuf> = self
+            .plugins
+            .iter()
+            .filter(|(repo, state)| {
+                **state == PluginState::Outdated && !self.auto_failed.contains(*repo)
+            })
+            .map(|(repo, _)| repo.clone())
+            .collect();
+        let mut updated = false;
+        for repo in outdated {
+            match self.update_plugin(&repo) {
+                Ok(()) => updated = true,
+                Err(e) => {
+                    self.auto_failed.insert(repo.clone());
+                    self.banner = Some(update_failed(&repo, &e));
+                }
+            }
+        }
+        if updated {
+            self.notify("omp plugin updated");
+        }
+    }
+
     /// Rewrites the plugin in every repo that has it, and removes it from a repo no room
-    /// shares any more.
+    /// shares any more. Runs regardless of auto-update: `schwitzer.json` lists the rooms.
     fn sync_plugins(&mut self) {
-        for repo in self.plugin_repos.clone() {
-            let rooms = omp_plugin::rooms_of(&self.settings.repos, &repo);
-            let result = if rooms.is_empty() {
+        for repo in self.plugins.keys().cloned().collect::<Vec<_>>() {
+            let result = if omp_plugin::rooms_of(&self.settings.repos, &repo).is_empty() {
                 omp_plugin::uninstall(&repo).map(|()| {
-                    self.plugin_repos.remove(&repo);
+                    self.plugins.remove(&repo);
+                    self.auto_failed.remove(&repo);
                 })
             } else {
-                omp_plugin::install(&repo, &self.plugin_config(rooms), self.mcp_token.as_deref())
+                self.update_plugin(&repo)
             };
             if let Err(e) = result {
                 self.banner = Some(format!("omp plugin in {}: {e}", repo.display()));
@@ -1220,6 +1334,11 @@ fn expand_home(path: &str) -> PathBuf {
             .map_or_else(|| PathBuf::from(path), |dirs| dirs.home_dir().join(rest)),
         None => Path::new(path).to_path_buf(),
     }
+}
+
+/// The banner text for a plugin update that failed.
+fn update_failed(repo: &Path, e: &std::io::Error) -> String {
+    format!("Cannot update the omp plugin in {}: {e}", repo.display())
 }
 
 /// A start that cannot continue: no data directory, no identity.
