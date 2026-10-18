@@ -11,6 +11,8 @@ mod settings_view;
 mod task_view;
 mod widgets;
 
+pub use self::resume::Resumed;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -173,8 +175,8 @@ pub enum Message {
     UpdateInstalled(Result<semver::Version, String>),
     /// Restarts into the installed update; first asks which widget has the focus.
     RestartForUpdate,
-    /// The focused widget just before the restart.
-    Restart(Option<iced::advanced::widget::Id>),
+    /// The focused widget and the window's place just before the restart.
+    Restart(Option<iced::advanced::widget::Id>, Option<Placement>),
     AutoInstallUpdates(bool),
     AutoRestartUpdates(bool),
     /// Whether the element to focus after a restart is laid out yet.
@@ -248,6 +250,15 @@ struct PendingFocus {
     until_ms: u64,
 }
 
+/// Where the window was on screen, in logical pixels: outer position (`None` where the
+/// platform does not tell, as on Wayland), inner size and whether it was maximized.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Placement {
+    pub position: Option<(f32, f32)>,
+    pub size: (f32, f32),
+    pub maximized: bool,
+}
+
 pub struct App {
     client: Client,
     data_dir: PathBuf,
@@ -312,7 +323,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn boot() -> (Self, Task<Message>) {
+    pub fn boot(resumed: &Resumed) -> (Self, Task<Message>) {
         let data_dir = settings::data_dir();
         if let Err(e) = std::fs::create_dir_all(&data_dir) {
             fatal(&format!("cannot create {}: {e}", data_dir.display()));
@@ -412,7 +423,7 @@ impl App {
         {
             update::clean_leftovers(&program.path);
         }
-        if let Some(resume) = resume::take(&app.data_dir, now_ms()) {
+        if let Some(resume) = resumed.0.clone() {
             app.apply_resume(resume);
         }
         // Finds out-of-date plugins; with auto-update on, this refreshes them after an app
@@ -738,10 +749,14 @@ impl App {
                     iced::advanced::widget::operation::focusable::find_focused(),
                 )
                 .collect()
-                .map(|ids| Message::Restart(ids.into_iter().next()))
+                .then(|ids| {
+                    let focus = ids.into_iter().next();
+                    resume::placement()
+                        .map(move |placement| Message::Restart(focus.clone(), placement))
+                })
             }
-            Message::Restart(focus) => {
-                self.restart_for_update(focus.as_ref());
+            Message::Restart(focus, placement) => {
+                self.restart_for_update(focus.as_ref(), placement);
                 Task::none()
             }
             Message::AutoInstallUpdates(on) => {
@@ -2091,11 +2106,15 @@ impl App {
     /// Writes what the window shows for the new process, starts it and exits. The exit skips
     /// every destructor, so nothing of the old process removes what the new one already set up
     /// (the remote control socket).
-    fn restart_for_update(&mut self, focus: Option<&iced::advanced::widget::Id>) {
+    fn restart_for_update(
+        &mut self,
+        focus: Option<&iced::advanced::widget::Id>,
+        placement: Option<Placement>,
+    ) {
         let (UpdateState::Installed(_), Some(program)) = (&self.updater, &self.program) else {
             return;
         };
-        let snapshot = self.snapshot(focus);
+        let snapshot = self.snapshot(focus, placement);
         if let Err(e) = resume::write(&self.data_dir, &snapshot) {
             self.banner = Some(format!("Cannot restart: {e}"));
             return;

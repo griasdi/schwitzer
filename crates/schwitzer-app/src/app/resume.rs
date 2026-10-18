@@ -1,16 +1,18 @@
 //! What the window showed when the app restarted for an update, so the new process opens
-//! there: page, room, project, the open task or draft, unsaved text and the focused input.
+//! there: page, room, project, the open task or draft, unsaved text, the focused input and the
+//! window's place.
 
 use std::io;
 use std::path::Path;
 
 use iced::advanced::widget::Id;
 use iced::widget::text_editor::{self, Cursor, Position};
+use iced::{Task, window};
 use schwitzer_proto::{RoomId, now_ms};
 use serde::{Deserialize, Serialize};
 
 use super::logic::Group;
-use super::{App, Expanded, Page, PendingFocus, TaskDraft};
+use super::{App, Expanded, Page, PendingFocus, Placement, TaskDraft};
 use crate::update;
 
 /// The file in the data directory; written just before the restart, removed when read.
@@ -57,6 +59,9 @@ pub struct Resume {
     pub plan_draft: Option<Text>,
     /// Widget id of the focused input, one of [`FOCUSABLE`].
     pub focus: Option<String>,
+    /// The window's place; `None` in a file from a version without it.
+    #[serde(default)]
+    pub placement: Option<Placement>,
 }
 
 /// Every `Forms` string field by its name, `proposal_body` as [`Text`].
@@ -159,9 +164,62 @@ pub fn take(dir: &Path, now_ms: u64) -> Option<Resume> {
     }
 }
 
+/// Where the window is now: `None` without a window and for a minimized one, whose
+/// position is no place on screen (Windows reports -32000).
+pub(super) fn placement() -> Task<Option<Placement>> {
+    window::latest().then(|id| {
+        let Some(id) = id else {
+            return Task::done(None);
+        };
+        window::is_minimized(id).then(move |minimized| {
+            if minimized == Some(true) {
+                return Task::done(None);
+            }
+            window::position(id).then(move |position| {
+                window::size(id).then(move |size| {
+                    window::is_maximized(id).map(move |maximized| {
+                        Some(Placement {
+                            position: position.map(|p| (p.x, p.y)),
+                            size: (size.width, size.height),
+                            maximized,
+                        })
+                    })
+                })
+            })
+        })
+    })
+}
+
+/// The resume file of a restart for an update, taken in `main` before the window opens: it
+/// places the window, then `App::boot` opens the page.
+pub struct Resumed(pub(super) Option<Resume>);
+
+impl Resumed {
+    /// Takes the resume file from the data directory (see [`take`]).
+    pub fn take() -> Self {
+        Self(take(&crate::settings::data_dir(), now_ms()))
+    }
+
+    /// `settings` with the window's size, position and maximized state from before the
+    /// restart; unchanged without a file or without a placement in it.
+    pub fn place(&self, settings: window::Settings) -> window::Settings {
+        let Some(p) = self.0.as_ref().and_then(|r| r.placement) else {
+            return settings;
+        };
+        window::Settings {
+            size: iced::Size::new(p.size.0, p.size.1),
+            position: p.position.map_or(window::Position::Default, |(x, y)| {
+                window::Position::Specific(iced::Point::new(x, y))
+            }),
+            maximized: p.maximized,
+            ..settings
+        }
+    }
+}
+
 impl App {
     /// What the window shows now; `focus` is the focused widget.
-    pub(super) fn snapshot(&self, focus: Option<&Id>) -> Resume {
+    pub(super) fn snapshot(&self, focus: Option<&Id>, placement: Option<Placement>) -> Resume {
         let forms = &self.forms;
         Resume {
             from_version: update::CURRENT.to_owned(),
@@ -197,6 +255,7 @@ impl App {
             focus: focus
                 .and_then(|id| FOCUSABLE.into_iter().find(|f| *id == Id::new(f)))
                 .map(str::to_owned),
+            placement,
         }
     }
 
@@ -290,6 +349,11 @@ mod tests {
             task_draft: Some(("Title".to_owned(), text("body", 0, 4, Some((0, 1))))),
             plan_draft: None,
             focus: Some("proposal-body".to_owned()),
+            placement: Some(Placement {
+                position: Some((-8.0, 120.5)),
+                size: (520.0, 700.0),
+                maximized: true,
+            }),
         }
     }
 
@@ -311,6 +375,22 @@ mod tests {
         write(dir.path(), &resume(now - MAX_AGE_MS - 1)).unwrap();
         assert_eq!(take(dir.path(), now), None);
         assert!(!dir.path().join(FILE).exists());
+    }
+
+    #[test]
+    fn resume_from_a_version_without_placement_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = now_ms();
+        let mut old = serde_json::to_value(resume(now)).unwrap();
+        old.as_object_mut().unwrap().remove("placement");
+        std::fs::write(dir.path().join(FILE), old.to_string()).unwrap();
+        assert_eq!(
+            take(dir.path(), now + 1_000),
+            Some(Resume {
+                placement: None,
+                ..resume(now)
+            })
+        );
     }
 
     #[test]

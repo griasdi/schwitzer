@@ -33,24 +33,27 @@ fn main() -> iced::Result {
         .with_writer(std::io::stderr)
         .init();
 
-    let mut app = iced::application(App::boot, App::update, App::view)
+    // Before the window opens: after a restart for an update it opens where the old one was.
+    let resumed = app::Resumed::take();
+    // A narrow window beside the editor.
+    let window = resumed.place(iced::window::Settings {
+        size: iced::Size::new(400.0, 780.0),
+        min_size: Some(iced::Size::new(340.0, 520.0)),
+        icon: brand::window_icon(),
+        // Matches `StartupWMClass` in deploy/schwitzer.desktop: desktops find the icon by it.
+        #[cfg(target_os = "linux")]
+        platform_specific: iced::window::settings::PlatformSpecific {
+            application_id: "schwitzer".into(),
+            ..Default::default()
+        },
+        ..iced::window::Settings::default()
+    });
+    let mut app = iced::application(move || App::boot(&resumed), App::update, App::view)
         .title(App::title)
         .theme(App::theme)
         .subscription(App::subscription)
         .default_font(theme::REGULAR)
-        // A narrow window beside the editor.
-        .window(iced::window::Settings {
-            size: iced::Size::new(400.0, 780.0),
-            min_size: Some(iced::Size::new(340.0, 520.0)),
-            icon: brand::window_icon(),
-            // Matches `StartupWMClass` in deploy/schwitzer.desktop: desktops find the icon by it.
-            #[cfg(target_os = "linux")]
-            platform_specific: iced::window::settings::PlatformSpecific {
-                application_id: "schwitzer".into(),
-                ..Default::default()
-            },
-            ..iced::window::Settings::default()
-        });
+        .window(window);
     for font in theme::FONTS {
         app = app.font(font);
     }
