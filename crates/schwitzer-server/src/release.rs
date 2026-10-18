@@ -1,5 +1,5 @@
-//! The app release this server announces: the newest stable release on GitHub whose version is
-//! not above the server's own, so no app updates past the server it talks to.
+//! The app release this server announces: the newest stable release on GitHub, whatever the
+//! server's own version.
 
 use std::sync::PoisonError;
 use std::time::Duration;
@@ -14,7 +14,7 @@ use crate::State;
 pub const RELEASES_URL: &str = "https://api.github.com/repos/griasdi/schwitzer/releases";
 const CHECK_INTERVAL: Duration = Duration::from_secs(300);
 const MAX_JSON: u64 = 4 << 20;
-/// Releases asked for per check; the newest compatible one is among them.
+/// Releases asked for per check; the newest stable one is among them.
 const PER_PAGE: &str = "10";
 
 #[derive(Deserialize)]
@@ -26,12 +26,9 @@ struct Listed {
     prerelease: bool,
 }
 
-/// The newest stable release in GitHub's release list `json` whose version is not above
-/// `server`. Tags that are no version are skipped.
-pub(crate) fn newest_compatible(
-    json: &[u8],
-    server: &semver::Version,
-) -> Result<Option<semver::Version>, String> {
+/// The newest stable release in GitHub's release list `json`. Tags that are no version are
+/// skipped.
+pub(crate) fn newest_stable(json: &[u8]) -> Result<Option<semver::Version>, String> {
     let listed: Vec<Listed> =
         serde_json::from_slice(json).map_err(|e| format!("unreadable release list: {e}"))?;
     Ok(listed
@@ -44,11 +41,11 @@ pub(crate) fn newest_compatible(
                 .parse::<semver::Version>()
                 .ok()
         })
-        .filter(|v| v.pre.is_empty() && v <= server)
+        .filter(|v| v.pre.is_empty())
         .max())
 }
 
-fn fetch(url: &str, server: &semver::Version) -> Result<Option<semver::Version>, String> {
+fn fetch(url: &str) -> Result<Option<semver::Version>, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(30)))
         .user_agent(format!("schwitzer-server/{}", env!("CARGO_PKG_VERSION")))
@@ -67,21 +64,18 @@ fn fetch(url: &str, server: &semver::Version) -> Result<Option<semver::Version>,
         .limit(MAX_JSON)
         .read_to_vec()
         .map_err(|e| format!("GitHub: {e}"))?;
-    newest_compatible(&json, server)
+    newest_stable(&json)
 }
 
 /// Checks `url` every five minutes and announces a changed release to every stream. Stores the
 /// release before publishing it: `/events` reads it after subscribing, so no stream misses it.
 pub(crate) async fn watch(state: State, url: String) {
-    let server: semver::Version = env!("CARGO_PKG_VERSION")
-        .parse()
-        .expect("CARGO_PKG_VERSION is semver");
     let mut interval = tokio::time::interval(CHECK_INTERVAL);
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         interval.tick().await;
-        let (u, s) = (url.clone(), server.clone());
-        let found = match tokio::task::spawn_blocking(move || fetch(&u, &s)).await {
+        let u = url.clone();
+        let found = match tokio::task::spawn_blocking(move || fetch(&u)).await {
             Ok(found) => found,
             Err(e) => {
                 tracing::warn!("release check stopped: {e}");
@@ -90,7 +84,7 @@ pub(crate) async fn watch(state: State, url: String) {
         };
         let version = match found {
             Ok(Some(version)) => version,
-            // Nothing compatible listed: keep the last known release.
+            // No stable release listed: keep the last known release.
             Ok(None) => continue,
             Err(e) => {
                 tracing::warn!("release check failed: {e}");
@@ -130,16 +124,13 @@ mod tests {
     }
 
     #[test]
-    fn the_newest_release_not_above_the_server_wins() {
-        let server = v("0.2.0");
+    fn the_newest_stable_release_wins() {
         let json = list(&[
             ("v0.3.0", false, false),
             ("v0.2.0", false, false),
             ("v0.1.5", false, false),
         ]);
-        assert_eq!(newest_compatible(&json, &server), Ok(Some(v("0.2.0"))));
-        let json = list(&[("v0.3.0", false, false), ("v0.1.5", false, false)]);
-        assert_eq!(newest_compatible(&json, &server), Ok(Some(v("0.1.5"))));
+        assert_eq!(newest_stable(&json), Ok(Some(v("0.3.0"))));
     }
 
     #[test]
@@ -151,12 +142,12 @@ mod tests {
             ("nightly", false, false),
             ("v0.1.0", false, false),
         ]);
-        assert_eq!(newest_compatible(&json, &v("0.2.0")), Ok(Some(v("0.1.0"))));
+        assert_eq!(newest_stable(&json), Ok(Some(v("0.1.0"))));
     }
 
     #[test]
     fn no_release_or_a_bad_list() {
-        assert_eq!(newest_compatible(b"[]", &v("0.2.0")), Ok(None));
-        assert!(newest_compatible(b"not json", &v("0.2.0")).is_err());
+        assert_eq!(newest_stable(b"[]"), Ok(None));
+        assert!(newest_stable(b"not json").is_err());
     }
 }

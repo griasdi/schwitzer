@@ -1,6 +1,7 @@
-//! Self-update to the release the app's servers announced: fetch that release from GitHub,
-//! download its archive (or AppImage) for this platform, verify it against the digest GitHub
-//! publishes, swap the program file in place and start the new program.
+//! Self-update to the release the app's servers announced, or GitHub's latest release when no
+//! server announced one: fetch that release from GitHub, download its archive (or AppImage) for
+//! this platform, verify it against the digest GitHub publishes, swap the program file in place
+//! and start the new program.
 //!
 //! Only builds with the `self-update` feature use it ([`ENABLED`]); the module is compiled and
 //! tested in every build.
@@ -198,9 +199,12 @@ pub fn parse_release(
     }))
 }
 
-/// Asks GitHub for release `version`, which the servers announced; `None` when it is not newer
-/// than this build.
-pub async fn check(version: semver::Version, package: Package) -> Result<Option<Release>, String> {
+/// Asks GitHub for release `version`, which a server announced, or for its latest release when no
+/// server announced one; `None` when it is not newer than this build.
+pub async fn check(
+    version: Option<semver::Version>,
+    package: Package,
+) -> Result<Option<Release>, String> {
     let Some(platform) = PLATFORM else {
         return Err("No release is built for this platform".into());
     };
@@ -268,12 +272,15 @@ fn agent(timeout: Duration) -> ureq::Agent {
 }
 
 fn fetch_release(
-    version: semver::Version,
+    version: Option<semver::Version>,
     platform: &str,
     package: Package,
 ) -> Result<Option<Release>, String> {
     let base = std::env::var(URL_ENV).unwrap_or_else(|_| RELEASES_URL.to_owned());
-    let url = format!("{base}/tags/v{version}");
+    let url = match &version {
+        Some(v) => format!("{base}/tags/v{v}"),
+        None => format!("{base}/latest"),
+    };
     let response = agent(Duration::from_secs(30))
         .get(&url)
         .header("Accept", "application/vnd.github+json")
@@ -282,7 +289,10 @@ fn fetch_release(
     let mut response = match response {
         Ok(response) => response,
         Err(ureq::Error::StatusCode(404)) => {
-            return Err(format!("release v{version} is not on GitHub"));
+            return Err(match version {
+                Some(v) => format!("release v{v} is not on GitHub"),
+                None => "no release is on GitHub".to_owned(),
+            });
         }
         Err(e) => return Err(format!("GitHub: {e}")),
     };

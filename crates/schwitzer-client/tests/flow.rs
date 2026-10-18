@@ -509,7 +509,7 @@ fn serve_feed(body: String) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_server_announces_the_newest_release_not_above_its_own_version() {
+async fn the_server_announces_the_newest_release_even_above_its_own_version() {
     let own = env!("CARGO_PKG_VERSION");
     let release = |tag: &str| format!(r#"{{"tag_name":"{tag}","draft":false,"prerelease":false}}"#);
     let body = format!(
@@ -543,7 +543,7 @@ async fn the_server_announces_the_newest_release_not_above_its_own_version() {
     })
     .await
     .expect("no release announced");
-    assert_eq!(version, own);
+    assert_eq!(version, "999.0.0");
     assert_eq!(server_of, addr);
 
     a.shutdown();

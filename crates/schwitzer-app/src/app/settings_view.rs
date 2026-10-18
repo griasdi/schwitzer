@@ -639,9 +639,9 @@ fn updates(app: &App) -> Element<'_, Message> {
             Message::AutoRestartUpdates,
         ),
         muted(
-            "Installs the newest release your servers announce, never one newer than a \
-             server, and looks again every 5 minutes. After a restart you are back where you \
-             were, unsaved text included."
+            "Installs the newest release your servers announce, or GitHub's latest one when no \
+             server is reachable, and looks again every 5 minutes. After a restart you are back \
+             where you were, unsaved text included."
         ),
     ]
     .spacing(SP_3)

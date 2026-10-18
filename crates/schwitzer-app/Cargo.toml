@@ -12,7 +12,7 @@ path = "src/main.rs"
 [features]
 # Headless remote control (iced_impeccable): `schwitzer --headless --control <sock>`.
 remote = ["dep:iced_impeccable"]
-# Installs the releases its servers announce and restarts (release builds from CI).
+# Installs new releases and restarts (release builds from CI).
 self-update = []
 
 [dependencies]

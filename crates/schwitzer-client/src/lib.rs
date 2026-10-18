@@ -82,7 +82,7 @@ pub enum ClientEvent {
     Room(Box<RoomState>),
     /// The room is no longer kept: the user left it, or it was forgotten on this machine.
     RoomRemoved(RoomId),
-    /// The newest app release `server` is compatible with, as it announced it (unchecked text).
+    /// The newest app release, as `server` announced it (unchecked text).
     Release { server: ServerAddr, version: String },
 }
 
