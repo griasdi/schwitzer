@@ -18,9 +18,7 @@ RUST_LOG=debug cargo run -p schwitzer-app                  # verbose logging, to
 
 The server prints its URL (`server url: weida://sha256:…@host:port`) on stdout; that URL goes into the app's "Create room" dialog. The app keeps its data in the platform's data directory (`~/.local/share/schwitzer` on Linux), or in `$SCHWITZER_HOME` if set.
 
-`deploy/deploy.sh local` (Linux, systemd) builds the committed `HEAD` and runs it as the systemd user service `schwitzer-server-local` on `127.0.0.1:7444`, with its data in `~/.local/share/schwitzer-server`; it restarts the service only when the binary or unit changed.
-
-`deploy/deploy.sh stkn` builds the same way on this machine and deploys over ssh (`felix@stkn.org`) as the systemd user service `schwitzer-server` on UDP 7444 (IPv4 and IPv6) with public host `stkn.org`; it enables lingering there so the service runs without a login. The target needs `rsync` and the same or a newer glibc than the build machine.
+`deploy/deploy.sh stkn` (Linux, systemd) builds the committed `HEAD` in release mode on this machine and deploys it over ssh (`felix@stkn.org`) as the systemd user service `schwitzer-server` on UDP 7444 (IPv4 and IPv6) with public host `stkn.org` and its data in `~/.local/share/schwitzer-server` there. It restarts the service only when the binary or unit changed and enables lingering so the service runs without a login. The target needs `rsync` and the same or a newer glibc than the build machine. Every code change pushed to `main` ends with this deploy.
 
 ## Before pushing
 

@@ -1,22 +1,20 @@
 #!/bin/sh
 # Deploys the committed HEAD of this checkout as a systemd user service:
 #
-#   local    on this machine: `schwitzer-server-local` on 127.0.0.1:7444,
-#            for the user's own app.
 #   stkn     on stkn.org, over ssh as felix: `schwitzer-server` on UDP 7444
 #            (IPv4 and IPv6), public host stkn.org. Enables lingering there,
 #            so the service runs without a login and starts at boot.
 #
-# Both build the server in release mode on this machine, from an export of
+# It builds the server in release mode on this machine, from an export of
 # HEAD: uncommitted changes in the checkout are ignored, what runs is what is
 # committed. The service restarts only when binary or unit changed. On the
 # target the binary lives in ~/.local/state/<service>/bin, the data (identity,
 # rooms) in ~/.local/share/schwitzer-server.
 #
-# Usage: deploy.sh local|stkn
+# Usage: deploy.sh stkn
 #
-# `deploy.sh activate …` is the half that runs on the target; the two above
-# call it.
+# `deploy.sh activate …` is the half that runs on the target; `stkn` calls
+# it.
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -96,12 +94,6 @@ activate() {
     say "$label: $(journal --grep '^server url:' -n 1)"
 }
 
-deploy_local() {
-    build
-    activate local schwitzer-server-local 127.0.0.1:7444 127.0.0.1 \
-        "$built" "$src/deploy/schwitzer-server.service"
-}
-
 deploy_stkn() {
     build
     say "stkn: uploading to $stkn_ssh"
@@ -118,10 +110,6 @@ deploy_stkn() {
 }
 
 case "${1:-}" in
-local)
-    deploy_local
-    say "done"
-    ;;
 stkn)
     deploy_stkn
     say "done"
@@ -131,7 +119,7 @@ activate)
     activate "$@"
     ;;
 *)
-    say "usage: $0 local|stkn"
+    say "usage: $0 stkn"
     exit 2
     ;;
 esac
