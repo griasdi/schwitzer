@@ -177,9 +177,15 @@ pub enum Message {
     AddNote,
     NoteAdded(Result<Response, String>),
     Published(RoomId, Result<(), String>),
-    /// The five-minute update check and "Check now"; a server's announcement checks too.
+    /// The five-minute update check; a server's announcement checks too.
     CheckUpdate,
-    UpdateChecked(Result<Option<update::Release>, String>),
+    /// "Check now": asks GitHub for its latest release, whatever the servers announce.
+    CheckLatestUpdate,
+    /// `latest` is true when the check asked GitHub's latest release because of "Check now".
+    UpdateChecked {
+        latest: bool,
+        result: Result<Option<update::Release>, String>,
+    },
     InstallUpdate,
     UpdateInstalled(Result<semver::Version, String>),
     /// Restarts into the installed update; first asks which widget has the focus.
@@ -798,8 +804,9 @@ impl App {
                 }
                 Task::none()
             }
-            Message::CheckUpdate => self.check_update(),
-            Message::UpdateChecked(result) => self.update_checked(result),
+            Message::CheckUpdate => self.check_update(false),
+            Message::CheckLatestUpdate => self.check_update(true),
+            Message::UpdateChecked { latest, result } => self.update_checked(latest, result),
             Message::InstallUpdate => match &self.updater {
                 UpdateState::Available { release, .. } => {
                     let release = release.clone();
@@ -2140,15 +2147,16 @@ impl App {
     /// Checks again when the target moved.
     fn follow_release(&mut self, before: Option<semver::Version>) -> Task<Message> {
         if update::ENABLED && self.release_target() != before {
-            self.check_update()
+            self.check_update(false)
         } else {
             Task::none()
         }
     }
 
-    /// Looks up the release the servers announced, or GitHub's latest one when none did, unless a
-    /// check or an install is under way, or an update waits for its restart.
-    fn check_update(&mut self) -> Task<Message> {
+    /// Looks up the release the servers announced, or GitHub's latest one when none did or
+    /// `latest` asks for it, unless a check or an install is under way, or an update waits for
+    /// its restart.
+    fn check_update(&mut self, latest: bool) -> Task<Message> {
         if !update::ENABLED
             || matches!(
                 self.updater,
@@ -2162,7 +2170,14 @@ impl App {
             return Task::none();
         };
         let package = program.package;
-        let target = self.release_target();
+        let target = if latest { None } else { self.release_target() };
+        // A release "Check now" found above the announced one stays on offer.
+        if let UpdateState::Available { release, .. } = &self.updater
+            && !latest
+            && target.as_ref().is_some_and(|t| *t <= release.version)
+        {
+            return Task::none();
+        }
         if target
             .as_ref()
             .is_some_and(|version| *version <= update::current())
@@ -2171,23 +2186,30 @@ impl App {
             return Task::none();
         }
         self.updater = UpdateState::Checking;
-        Task::perform(update::check(target, package), Message::UpdateChecked)
+        Task::perform(update::check(target, package), move |result| {
+            Message::UpdateChecked { latest, result }
+        })
     }
 
-    fn update_checked(&mut self, result: Result<Option<update::Release>, String>) -> Task<Message> {
+    fn update_checked(
+        &mut self,
+        latest: bool,
+        result: Result<Option<update::Release>, String>,
+    ) -> Task<Message> {
         if self.updater != UpdateState::Checking {
             return Task::none();
         }
         match result {
             Ok(None) => self.updater = UpdateState::UpToDate,
             Ok(Some(release))
-                if self
-                    .release_target()
-                    .is_some_and(|target| target != release.version) =>
+                if !latest
+                    && self
+                        .release_target()
+                        .is_some_and(|target| target != release.version) =>
             {
                 // The announcements moved while GitHub answered: look up the new target.
                 self.updater = UpdateState::Idle;
-                return self.check_update();
+                return self.check_update(false);
             }
             Ok(Some(release)) => {
                 // A version that failed to install waits for the Install button.
