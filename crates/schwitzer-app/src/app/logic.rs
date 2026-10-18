@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use schwitzer_proto::{
     ClaimToken, Decision, Member, MemberId, RoomState, SessionInfo, Stage, Task, Work, caps,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::sessions::LocalSession;
 
@@ -15,7 +16,7 @@ pub const IDLE_AFTER_MS: u64 = 2 * 60 * 1000;
 /// The sections of the task list, in display order: what someone works on (planning or
 /// building), what can be picked, what waits for or in planning, what waits for a decision,
 /// the ideas, what is closed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Group {
     InProgress,
     Pickable,

@@ -12,6 +12,8 @@ path = "src/main.rs"
 [features]
 # Headless remote control (iced_impeccable): `schwitzer --headless --control <sock>`.
 remote = ["dep:iced_impeccable"]
+# Checks GitHub releases, installs them and restarts (release builds from CI).
+self-update = []
 
 [dependencies]
 schwitzer-proto.workspace = true
@@ -32,6 +34,16 @@ rand.workspace = true
 hex.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+ureq.workspace = true
+semver.workspace = true
+sha2.workspace = true
+
+[target.'cfg(not(windows))'.dependencies]
+tar.workspace = true
+flate2.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+zip.workspace = true
 
 [lints]
 workspace = true

@@ -14,6 +14,7 @@ mod omp_plugin;
 mod sessions;
 mod settings;
 mod theme;
+mod update;
 
 use app::App;
 #[cfg(feature = "remote")]
@@ -48,8 +49,17 @@ fn main() -> iced::Result {
     #[cfg(feature = "remote")]
     {
         iced_impeccable::Remote::new(app)
-            // The clock and the session scan mean "time passed", not activity, for `wait-idle`.
-            .heartbeat(|m| matches!(m, Message::Tick | Message::LocalSessions(_)))
+            // The clock, the session scan, the update check and the wait for a restored focus
+            // mean "time passed", not activity, for `wait-idle`.
+            .heartbeat(|m| {
+                matches!(
+                    m,
+                    Message::Tick
+                        | Message::LocalSessions(_)
+                        | Message::CheckUpdate
+                        | Message::ResumeFocus(false)
+                )
+            })
             .run()
     }
     #[cfg(not(feature = "remote"))]

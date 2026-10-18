@@ -6,6 +6,7 @@ mod list;
 mod live;
 pub mod logic;
 mod pages;
+mod resume;
 mod settings_view;
 mod task_view;
 mod widgets;
@@ -24,6 +25,7 @@ use schwitzer_proto::{
     Decision, Priority, Project, Request, Response, RoomId, RoomKey, RoomState, ServerAddr,
     SessionInfo, Stage, Task as RoomTask, Work, caps, now_ms,
 };
+use serde::{Deserialize, Serialize};
 
 use self::chrome::RoomChoice;
 use self::icons::{Icon, Tone};
@@ -34,6 +36,7 @@ use crate::omp_plugin::{self, PluginState};
 use crate::sessions::{self, LocalSession};
 use crate::settings::{self, Settings};
 use crate::theme::{self, SP_2};
+use crate::update::{self, UpdateState};
 
 /// The agent name a pick claims the build with; the picker's own agent finishes it.
 const PICK_AGENT: &str = "omp";
@@ -156,6 +159,19 @@ pub enum Message {
     AddNote,
     NoteAdded(Result<Response, String>),
     Published(RoomId, Result<(), String>),
+    /// The five-minute update check, the one at start, and "Check now".
+    CheckUpdate,
+    UpdateChecked(Result<Option<update::Release>, String>),
+    InstallUpdate,
+    UpdateInstalled(Result<semver::Version, String>),
+    /// Restarts into the installed update; first asks which widget has the focus.
+    RestartForUpdate,
+    /// The focused widget just before the restart.
+    Restart(Option<iced::advanced::widget::Id>),
+    AutoInstallUpdates(bool),
+    AutoRestartUpdates(bool),
+    /// Whether the element to focus after a restart is laid out yet.
+    ResumeFocus(bool),
 }
 
 /// Whether a server answers, with the reason when it does not.
@@ -166,14 +182,14 @@ struct ServerStatus {
 }
 
 /// Which page fills the window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum Page {
     Main,
     Settings,
 }
 
 /// The one element open in place in the task list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum Expanded {
     /// Task `n` shown in full: details, people, decisions, plan, priority, notes.
     Task(u64),
@@ -208,6 +224,12 @@ struct Forms {
 struct TaskDraft {
     title: String,
     body: text_editor::Content,
+}
+
+/// The element to focus or reveal once the restored page shows it.
+struct PendingFocus {
+    focus: Option<&'static str>,
+    until_ms: u64,
 }
 
 pub struct App {
@@ -254,6 +276,15 @@ pub struct App {
     auto_failed: BTreeSet<PathBuf>,
     /// When the plugins were last checked.
     plugins_checked_ms: u64,
+    /// This program's file as it was at start; the restart after an update runs it. (On Linux,
+    /// `current_exe` reads `… (deleted)` once the file is replaced.)
+    exe: Option<PathBuf>,
+    updater: UpdateState,
+    /// The version whose install failed and why, so the periodic check does not download it
+    /// again by itself.
+    update_failed: Option<(semver::Version, String)>,
+    /// What to focus or reveal after a restart for an update, once it shows.
+    resume_focus: Option<PendingFocus>,
     now_ms: u64,
 }
 
@@ -344,14 +375,34 @@ impl App {
             plugins: BTreeMap::new(),
             auto_failed: BTreeSet::new(),
             plugins_checked_ms: 0,
+            exe: std::env::current_exe().ok(),
+            updater: UpdateState::Idle,
+            update_failed: None,
+            resume_focus: None,
             now_ms: now_ms(),
         };
         app.read_project_dirs();
+        if update::ENABLED
+            && let Some(exe) = &app.exe
+        {
+            update::clean_leftovers(exe);
+        }
+        if let Some(resume) = resume::take(&app.data_dir, now_ms()) {
+            app.apply_resume(resume);
+        }
         // Finds out-of-date plugins; with auto-update on, this refreshes them after an app
         // update or a new MCP port.
         app.check_plugins();
         app.save_settings();
-        (app, iced::system::theme().map(Message::SystemMode))
+        let check = if update::ENABLED {
+            Task::done(Message::CheckUpdate)
+        } else {
+            Task::none()
+        };
+        (
+            app,
+            Task::batch([iced::system::theme().map(Message::SystemMode), check]),
+        )
     }
 
     pub fn title(&self) -> String {
@@ -379,6 +430,9 @@ impl App {
                 mcp::subscription(self.client.clone(), self.settings.mcp_port, token.clone())
                     .map(Message::Mcp),
             );
+        }
+        if update::ENABLED {
+            subs.push(iced::time::every(update::CHECK_INTERVAL).map(|_| Message::CheckUpdate));
         }
         Subscription::batch(subs)
     }
@@ -587,7 +641,7 @@ impl App {
                     self.check_plugins();
                     self.read_project_dirs();
                 }
-                Task::none()
+                self.pending_focus()
             }
             Message::SystemMode(mode) => {
                 self.theme = theme::for_mode(mode);
@@ -623,6 +677,56 @@ impl App {
                     self.published.remove(&room);
                 }
                 Task::none()
+            }
+            Message::CheckUpdate => self.check_update(),
+            Message::UpdateChecked(result) => self.update_checked(result),
+            Message::InstallUpdate => match &self.updater {
+                UpdateState::Available { release, .. } => {
+                    let release = release.clone();
+                    self.install_update(release)
+                }
+                _ => Task::none(),
+            },
+            Message::UpdateInstalled(result) => self.update_installed(result),
+            Message::RestartForUpdate => {
+                if !matches!(self.updater, UpdateState::Installed(_)) {
+                    return Task::none();
+                }
+                iced::advanced::widget::operate(
+                    iced::advanced::widget::operation::focusable::find_focused(),
+                )
+                .collect()
+                .map(|ids| Message::Restart(ids.into_iter().next()))
+            }
+            Message::Restart(focus) => {
+                self.restart_for_update(focus.as_ref());
+                Task::none()
+            }
+            Message::AutoInstallUpdates(on) => {
+                self.settings.auto_install_updates = on;
+                self.save_settings();
+                match &self.updater {
+                    UpdateState::Available {
+                        release,
+                        error: None,
+                    } if on => {
+                        let release = release.clone();
+                        self.install_update(release)
+                    }
+                    _ => Task::none(),
+                }
+            }
+            Message::AutoRestartUpdates(on) => {
+                self.settings.auto_restart_updates = on;
+                self.save_settings();
+                Task::none()
+            }
+            Message::ResumeFocus(shown) => {
+                if shown {
+                    self.apply_pending_focus()
+                } else {
+                    Task::none()
+                }
             }
 
             Message::OpenNewTask { idea } => {
@@ -1753,6 +1857,151 @@ impl App {
         self.task_draft = None;
         self.plan_draft = None;
         self.forms.note.clear();
+    }
+
+    // ---- self-update ----------------------------------------------------------------------
+
+    /// Asks GitHub for a newer release unless a check or an install is under way, or an
+    /// update waits for its restart.
+    fn check_update(&mut self) -> Task<Message> {
+        if !update::ENABLED
+            || matches!(
+                self.updater,
+                UpdateState::Checking | UpdateState::Installing(_) | UpdateState::Installed(_)
+            )
+        {
+            return Task::none();
+        }
+        if self.exe.is_none() {
+            self.updater = UpdateState::Failed("Cannot find this program's file".into());
+            return Task::none();
+        }
+        self.updater = UpdateState::Checking;
+        Task::perform(update::check(), Message::UpdateChecked)
+    }
+
+    fn update_checked(&mut self, result: Result<Option<update::Release>, String>) -> Task<Message> {
+        if self.updater != UpdateState::Checking {
+            return Task::none();
+        }
+        match result {
+            Ok(None) => self.updater = UpdateState::UpToDate,
+            Ok(Some(release)) => {
+                // A version that failed to install waits for the Install button.
+                let error = self
+                    .update_failed
+                    .as_ref()
+                    .filter(|(version, _)| *version == release.version)
+                    .map(|(_, e)| e.clone());
+                if error.is_none() && self.settings.auto_install_updates {
+                    return self.install_update(release);
+                }
+                self.updater = UpdateState::Available { release, error };
+            }
+            // No banner: an offline machine would get one every five minutes.
+            Err(e) => {
+                tracing::warn!("update check failed: {e}");
+                self.updater = UpdateState::Failed(e);
+            }
+        }
+        Task::none()
+    }
+
+    fn install_update(&mut self, release: update::Release) -> Task<Message> {
+        let Some(exe) = self.exe.clone() else {
+            return Task::none();
+        };
+        self.updater = UpdateState::Installing(release.clone());
+        Task::perform(update::install(release, exe), Message::UpdateInstalled)
+    }
+
+    fn update_installed(&mut self, result: Result<semver::Version, String>) -> Task<Message> {
+        let UpdateState::Installing(release) = &self.updater else {
+            return Task::none();
+        };
+        let release = release.clone();
+        match result {
+            Ok(version) => {
+                self.update_failed = None;
+                self.updater = UpdateState::Installed(version.clone());
+                if self.settings.auto_restart_updates {
+                    return self.handle(Message::RestartForUpdate);
+                }
+                self.notify(&format!("Version {version} installed, restart to use it"));
+            }
+            Err(e) => {
+                self.update_failed = Some((release.version.clone(), e.clone()));
+                self.updater = UpdateState::Available {
+                    release,
+                    error: Some(e),
+                };
+            }
+        }
+        Task::none()
+    }
+
+    /// Writes what the window shows for the new process, starts it and exits. The exit skips
+    /// every destructor, so nothing of the old process removes what the new one already set up
+    /// (the remote control socket).
+    fn restart_for_update(&mut self, focus: Option<&iced::advanced::widget::Id>) {
+        let (UpdateState::Installed(_), Some(exe)) = (&self.updater, &self.exe) else {
+            return;
+        };
+        let snapshot = self.snapshot(focus);
+        if let Err(e) = resume::write(&self.data_dir, &snapshot) {
+            self.banner = Some(format!("Cannot restart: {e}"));
+            return;
+        }
+        if let Err(e) = update::restart(exe) {
+            resume::remove(&self.data_dir);
+            self.banner = Some(format!("Cannot restart: {e}"));
+            return;
+        }
+        self.client.shutdown();
+        std::process::exit(0);
+    }
+
+    /// After a restart for an update: looks whether the element to focus or reveal shows yet;
+    /// gives up after a while (a task page needs the room from the server first).
+    fn pending_focus(&mut self) -> Task<Message> {
+        let Some(pending) = &self.resume_focus else {
+            return Task::none();
+        };
+        if self.now_ms > pending.until_ms {
+            self.resume_focus = None;
+            return Task::none();
+        }
+        let target = pending.focus.or(match self.expanded {
+            Some(Expanded::Task(_)) => Some("open-task"),
+            Some(Expanded::New { .. }) => Some("new-task"),
+            None => None,
+        });
+        let Some(target) = target else {
+            self.resume_focus = None;
+            return Task::none();
+        };
+        selector::find(selector::id(target)).map(|found| Message::ResumeFocus(found.is_some()))
+    }
+
+    /// Focuses and reveals what the window showed before the restart, now that it shows.
+    fn apply_pending_focus(&mut self) -> Task<Message> {
+        let Some(pending) = self.resume_focus.take() else {
+            return Task::none();
+        };
+        let mut tasks = Vec::new();
+        if let Some(id) = pending.focus {
+            tasks.push(operation::focus(id));
+            // iced cannot read a text input's cursor: those resume at the end.
+            if !resume::EDITORS.contains(&id) {
+                tasks.push(operation::move_cursor_to_end(id));
+            }
+        }
+        match self.expanded {
+            Some(Expanded::Task(_)) => tasks.push(reveal("open-task")),
+            Some(Expanded::New { .. }) => tasks.push(reveal("new-task")),
+            None => {}
+        }
+        Task::batch(tasks)
     }
 
     fn notify(&mut self, text: &str) {

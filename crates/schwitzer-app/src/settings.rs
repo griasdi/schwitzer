@@ -30,6 +30,10 @@ pub struct Settings {
     pub rooms: Vec<String>,
     /// Whether an out-of-date omp plugin in a shared repo is rewritten as soon as the app sees it.
     pub auto_update_plugins: bool,
+    /// Whether a new release is downloaded and installed as soon as the update check finds it.
+    pub auto_install_updates: bool,
+    /// Whether the app restarts by itself once an update is installed.
+    pub auto_restart_updates: bool,
     /// Per project (key `<room id hex>/<project id>`), the local repositories linked to it;
     /// omp sessions in them are shared with the project's room.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -50,6 +54,8 @@ impl Default for Settings {
             last_server: None,
             rooms: Vec::new(),
             auto_update_plugins: true,
+            auto_install_updates: true,
+            auto_restart_updates: true,
             repos: BTreeMap::new(),
             projects_dirs: None,
         }
@@ -224,6 +230,8 @@ mod tests {
         assert_eq!(settings.mcp_port, 13401);
         assert_eq!(settings.omp_sessions_dir, default_sessions_dir());
         assert!(settings.auto_update_plugins);
+        assert!(settings.auto_install_updates);
+        assert!(settings.auto_restart_updates);
     }
 
     #[test]
@@ -236,6 +244,8 @@ mod tests {
             last_server: Some("weida://sha256:00@host:7444".to_owned()),
             rooms: vec!["schwitzer://a".to_owned(), "schwitzer://b".to_owned()],
             auto_update_plugins: false,
+            auto_install_updates: false,
+            auto_restart_updates: false,
             repos: BTreeMap::from([(
                 format!("{}/1", "ab".repeat(32)),
                 vec![PathBuf::from("/code/x")],

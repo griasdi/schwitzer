@@ -1,6 +1,6 @@
 //! The settings page: your name, the projects folders, the selected room and its projects, the
-//! selected project and its linked repos, all rooms (switch, create, join) and the omp
-//! connection, each on its own slab.
+//! selected project and its linked repos, all rooms (switch, create, join), the omp connection
+//! and, in release builds, the updates, each on its own slab.
 
 use iced::widget::{Space, column, container, row, text};
 use iced::{Alignment, Element, Length};
@@ -16,6 +16,7 @@ use super::{App, Message, tilde};
 use crate::mcp::McpStatus;
 use crate::omp_plugin::PluginState;
 use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
+use crate::update::{self, UpdateState};
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let mut body = column![section(you(app)), section(projects_folders(app))].spacing(SP_4);
@@ -26,6 +27,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
         body = body.push(section(this_project(app)));
     }
     body = body.push(section(rooms(app))).push(section(agents(app)));
+    if update::ENABLED {
+        body = body.push(section(updates(app)));
+    }
     frame("settings-page", "Settings", body.into(), None)
 }
 
@@ -495,15 +499,13 @@ fn plugins(app: &App) -> Element<'_, Message> {
     } else {
         format!("Up to date in {}.", repos(installed))
     };
-    let segment = |id: &'static str, label: &'static str, value: bool| {
-        id_button(
-            id,
-            container(text(label).size(TS_12).font(MEDIUM)).padding([SP_1, SP_3]),
-            Some(Message::AutoUpdatePlugins(value)),
-            theme::button_segment(app.settings.auto_update_plugins == value),
-            Length::Shrink,
-        )
-    };
+    let auto = on_off(
+        "Update automatically",
+        "plugins-auto-on",
+        "plugins-auto-off",
+        app.settings.auto_update_plugins,
+        Message::AutoUpdatePlugins,
+    );
     column![
         text("omp plugin").size(TS_14).font(MEDIUM),
         row![
@@ -517,19 +519,113 @@ fn plugins(app: &App) -> Element<'_, Message> {
         ]
         .spacing(SP_2)
         .align_y(Alignment::Center),
-        row![
-            text("Update automatically").size(TS_14).width(Length::Fill),
-            segment("plugins-auto-on", "On", true),
-            segment("plugins-auto-off", "Off", false),
-        ]
-        .spacing(SP_1)
-        .align_y(Alignment::Center),
+        auto,
         muted(
             "Rewrites an out-of-date plugin as soon as this app sees it. omp loads the new one \
              when it starts next."
         ),
     ]
     .spacing(SP_2)
+    .into()
+}
+
+/// A label with On and Off segment buttons `on_id` and `off_id`.
+fn on_off<'a>(
+    label: &'a str,
+    on_id: &'static str,
+    off_id: &'static str,
+    value: bool,
+    message: fn(bool) -> Message,
+) -> Element<'a, Message> {
+    let segment = |id: &'static str, label: &'static str, v: bool| {
+        id_button(
+            id,
+            container(text(label).size(TS_12).font(MEDIUM)).padding([SP_1, SP_3]),
+            Some(message(v)),
+            theme::button_segment(value == v),
+            Length::Shrink,
+        )
+    };
+    row![
+        text(label).size(TS_14).width(Length::Fill),
+        segment(on_id, "On", true),
+        segment(off_id, "Off", false),
+    ]
+    .spacing(SP_1)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// This build's version, the update check and what it found, and the two update switches.
+fn updates(app: &App) -> Element<'_, Message> {
+    let check = |enabled: bool| {
+        text_button(
+            "update-check",
+            "Check now",
+            enabled.then_some(Message::CheckUpdate),
+            theme::button_secondary,
+        )
+    };
+    let (status, button) = match &app.updater {
+        UpdateState::Idle => ("Not checked yet".to_owned(), check(true)),
+        UpdateState::Checking => ("Checking for updates…".to_owned(), check(false)),
+        UpdateState::UpToDate => ("Up to date".to_owned(), check(true)),
+        UpdateState::Failed(e) => (format!("Cannot check for updates: {e}"), check(true)),
+        UpdateState::Available { release, error } => (
+            match error {
+                None => format!("Version {} is available", release.version),
+                Some(e) => format!("Version {} did not install: {e}", release.version),
+            },
+            text_button(
+                "update-install",
+                "Install",
+                Some(Message::InstallUpdate),
+                theme::button_secondary,
+            ),
+        ),
+        UpdateState::Installing(release) => (
+            format!("Installing version {}…", release.version),
+            check(false),
+        ),
+        UpdateState::Installed(version) => (
+            format!("Version {version} is installed. Restart to use it."),
+            text_button(
+                "update-restart",
+                "Restart now",
+                Some(Message::RestartForUpdate),
+                theme::button_secondary,
+            ),
+        ),
+    };
+    column![
+        row![
+            heading("Updates").width(Length::Fill),
+            muted(format!("Schwitzer {}", update::CURRENT)),
+        ]
+        .align_y(Alignment::Center),
+        row![text(status).size(TS_14).width(Length::Fill), button]
+            .spacing(SP_2)
+            .align_y(Alignment::Center),
+        on_off(
+            "Download and install",
+            "auto-install-on",
+            "auto-install-off",
+            app.settings.auto_install_updates,
+            Message::AutoInstallUpdates,
+        ),
+        on_off(
+            "Restart",
+            "auto-restart-on",
+            "auto-restart-off",
+            app.settings.auto_restart_updates,
+            Message::AutoRestartUpdates,
+        ),
+        muted(
+            "Checks GitHub for a new release every 5 minutes. After a restart you are back \
+             where you were, unsaved text included."
+        ),
+    ]
+    .spacing(SP_3)
     .into()
 }
 

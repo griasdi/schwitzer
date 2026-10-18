@@ -46,3 +46,9 @@ tempfile = "3"
 rmcp = { version = "3.5", default-features = false, features = ["server", "macros", "transport-streamable-http-server"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 tokio-util = "0.7"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+semver = "1"
+sha2 = "0.10"
+tar = "0.4"
+flate2 = "1"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
