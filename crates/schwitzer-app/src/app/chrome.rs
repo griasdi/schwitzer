@@ -2,15 +2,16 @@
 
 use std::fmt;
 
-use iced::widget::{Space, container, pick_list, row, text};
+use iced::widget::{Row, Space, container, pick_list, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::RoomId;
 
-use super::icons::{Icon, Tone};
-use super::widgets::{bar_icon_button, dot, muted, with_tip};
+use super::icons::{Icon, Tone, icon};
+use super::logic;
+use super::widgets::{bar_icon_button, bar_tip, dot, id_button, member_tag, muted, with_tip};
 use super::{App, Message};
 use crate::mcp::McpStatus;
-use crate::theme::{self, SEMIBOLD, SP_1, SP_2, TS_12, TS_14};
+use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, TS_12, TS_14};
 
 /// A room as the switcher lists it.
 #[derive(Debug, Clone)]
@@ -66,7 +67,8 @@ impl ProjectChoice {
     }
 }
 
-/// The header bar: room and project switchers on the left, invite and settings on the right.
+/// The header bar: room and project switchers on the left; members, invite and settings on the
+/// right.
 pub fn header(app: &App) -> Element<'_, Message> {
     let in_room = app.selected_state().is_some();
     let choices: Vec<RoomChoice> = app.room_choices();
@@ -86,7 +88,28 @@ pub fn header(app: &App) -> Element<'_, Message> {
         .into()
     };
     let mut bar = row![rooms];
+    let mut members = None;
     if let Some(state) = app.selected_state() {
+        let online = state.members.iter().filter(|m| m.online).count();
+        let total = state.members.len();
+        members = Some(bar_tip(
+            id_button(
+                "members",
+                container(
+                    row![
+                        icon(Icon::Users, 16.0, Tone::Text),
+                        text(format!("{online}/{total}")).size(TS_12).font(MEDIUM)
+                    ]
+                    .spacing(SP_1)
+                    .align_y(Alignment::Center),
+                )
+                .padding(SP_2),
+                Some(Message::ToggleMembers),
+                theme::button_ghost_open(app.members_open),
+                Length::Shrink,
+            ),
+            format!("Members: {online} of {total} online"),
+        ));
         let choices: Vec<ProjectChoice> = state
             .projects
             .iter()
@@ -112,6 +135,7 @@ pub fn header(app: &App) -> Element<'_, Message> {
     }
     container(
         bar.push(Space::new().width(Length::Fill))
+            .push(members)
             .push(bar_icon_button(
                 "copy-key",
                 Icon::UserPlus,
@@ -135,6 +159,50 @@ pub fn header(app: &App) -> Element<'_, Message> {
     .width(Length::Fill)
     .style(theme::bar)
     .into()
+}
+
+/// The member list under the header bar while it is unfolded: online members first, each as a
+/// presence dot and name tag; the tooltip says who it is and whether they are online.
+pub fn members(app: &App) -> Option<Element<'_, Message>> {
+    if !app.members_open {
+        return None;
+    }
+    let state = app.selected_state()?;
+    let me = app.client.member();
+    let entries = logic::members_by_presence(&state.members)
+        .into_iter()
+        .map(|m| {
+            // The server sends an empty name for a member that never said hello.
+            let name = if m.name.is_empty() {
+                m.id.to_hex()[..8].to_owned()
+            } else {
+                m.name.clone()
+            };
+            let presence = if m.online { "online" } else { "offline" };
+            let you = if m.id == me { " (you)" } else { "" };
+            with_tip(
+                row![
+                    dot(m.online.then_some(true)),
+                    member_tag(name.clone(), logic::member_hue(&m.id))
+                ]
+                .spacing(SP_1)
+                .align_y(Alignment::Center),
+                format!("{name}{you}, {presence}"),
+            )
+        });
+    Some(
+        container(
+            Row::with_children(entries)
+                .spacing(SP_2)
+                .wrap()
+                .vertical_spacing(SP_1),
+        )
+        .id("members-list")
+        .padding(SP_2)
+        .width(Length::Fill)
+        .style(theme::bar)
+        .into(),
+    )
 }
 
 /// The status bar: my name, server and omp connection.

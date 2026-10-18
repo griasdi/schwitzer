@@ -54,6 +54,9 @@ pub struct Resume {
     pub expanded: Option<Expanded>,
     pub collapsed: Vec<Group>,
     pub sessions_open: bool,
+    /// `false` in a file from a version without it.
+    #[serde(default)]
+    pub members_open: bool,
     pub forms: FormsSnapshot,
     pub task_draft: Option<(String, Text)>,
     pub plan_draft: Option<Text>,
@@ -234,6 +237,7 @@ impl App {
             expanded: self.expanded,
             collapsed: self.collapsed.iter().copied().collect(),
             sessions_open: self.sessions_open,
+            members_open: self.members_open,
             forms: FormsSnapshot {
                 server_url: forms.server_url.clone(),
                 room_name: forms.room_name.clone(),
@@ -264,6 +268,7 @@ impl App {
     pub(super) fn apply_resume(&mut self, r: Resume) {
         self.page = r.page;
         self.sessions_open = r.sessions_open;
+        self.members_open = r.members_open;
         self.collapsed = r.collapsed.into_iter().collect();
         let joined = r.selected.filter(|room| {
             self.rooms
@@ -333,6 +338,7 @@ mod tests {
             expanded: Some(Expanded::New { idea: true }),
             collapsed: vec![Group::Closed],
             sessions_open: false,
+            members_open: true,
             forms: FormsSnapshot {
                 server_url: "weida://x".to_owned(),
                 room_name: String::new(),
@@ -378,16 +384,19 @@ mod tests {
     }
 
     #[test]
-    fn resume_from_a_version_without_placement_is_read() {
+    fn resume_from_an_older_version_is_read() {
         let dir = tempfile::tempdir().unwrap();
         let now = now_ms();
         let mut old = serde_json::to_value(resume(now)).unwrap();
-        old.as_object_mut().unwrap().remove("placement");
+        let fields = old.as_object_mut().unwrap();
+        fields.remove("placement");
+        fields.remove("members_open");
         std::fs::write(dir.path().join(FILE), old.to_string()).unwrap();
         assert_eq!(
             take(dir.path(), now + 1_000),
             Some(Resume {
                 placement: None,
+                members_open: false,
                 ..resume(now)
             })
         );

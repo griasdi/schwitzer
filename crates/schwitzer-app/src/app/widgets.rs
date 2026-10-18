@@ -115,11 +115,15 @@ pub fn bar_icon_button<'a>(
     on_press: Option<Message>,
     style: impl Fn(&Theme, button::Status) -> button::Style + 'a,
 ) -> Element<'a, Message> {
-    tip_at(
-        icon_only(id, glyph, tone, on_press, style),
-        tip,
-        tooltip::Position::Bottom,
-    )
+    bar_tip(icon_only(id, glyph, tone, on_press, style), tip)
+}
+
+/// `content` with a tooltip below it: for controls in a bar at the top of the window.
+pub fn bar_tip<'a>(
+    content: impl Into<Element<'a, Message>>,
+    tip: impl text::IntoFragment<'a>,
+) -> Element<'a, Message> {
+    tip_at(content, tip, tooltip::Position::Bottom)
 }
 
 /// The 32x32 icon button without a tooltip; its glyph is muted while it is disabled.

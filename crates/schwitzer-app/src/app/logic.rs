@@ -192,6 +192,14 @@ pub fn member_hue(id: &MemberId) -> usize {
     usize::from(id.0[0] ^ id.0[31]) % 6
 }
 
+/// The members of a room as the member list shows them: online first, then by name
+/// regardless of case, ties by id.
+pub fn members_by_presence(members: &[Member]) -> Vec<&Member> {
+    let mut list: Vec<&Member> = members.iter().collect();
+    list.sort_by_cached_key(|m| (!m.online, m.name.to_lowercase(), m.id.0));
+    list
+}
+
 /// The sessions of `local` the room sees: those whose working directory lies in a repo linked
 /// to one of the room's projects; each names its projects, see `SessionInfo::projects`. A
 /// session that holds a claim of `me` on a task of the room (its latest such marker) is linked
@@ -346,6 +354,26 @@ mod tests {
 
     fn member(byte: u8) -> MemberId {
         MemberId([byte; 32])
+    }
+
+    #[test]
+    fn member_list_puts_online_first_then_names_without_case() {
+        let m = |byte, name: &str, online| Member {
+            id: member(byte),
+            name: name.to_owned(),
+            online,
+        };
+        let members = [
+            m(3, "carl", false),
+            m(1, "Bob", true),
+            m(2, "alice", true),
+            m(4, "Anna", false),
+        ];
+        let names: Vec<&str> = members_by_presence(&members)
+            .iter()
+            .map(|m| m.name.as_str())
+            .collect();
+        assert_eq!(names, ["alice", "Bob", "Anna", "carl"]);
     }
 
     #[test]

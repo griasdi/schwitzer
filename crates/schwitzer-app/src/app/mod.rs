@@ -90,6 +90,8 @@ pub enum Message {
     ToggleGroup(Group),
     /// Folds or unfolds the sessions panel.
     ToggleSessions,
+    /// Folds or unfolds the member list under the header bar.
+    ToggleMembers,
 
     SelectRoom(RoomId),
     ServerUrl(String),
@@ -327,6 +329,8 @@ pub struct App {
     collapsed: HashSet<Group>,
     /// Whether the sessions panel is unfolded.
     sessions_open: bool,
+    /// Whether the member list under the header bar is unfolded.
+    members_open: bool,
     /// The task whose pick is under way.
     picking: Option<u64>,
     /// Whether a folder dialog is open; its buttons are disabled meanwhile, so a second click
@@ -442,6 +446,7 @@ impl App {
             expanded: None,
             collapsed: HashSet::from([Group::Closed]),
             sessions_open: true,
+            members_open: false,
             picking: None,
             folder_dialog: false,
             task_draft: None,
@@ -519,7 +524,13 @@ impl App {
             page = page.push(container(widgets::banner(banner)).padding(SP_2));
         }
         let body: Element<'_, Message> = match self.page {
-            Page::Main => column![chrome::header(self), widgets::hrule(), self.main()].into(),
+            Page::Main => {
+                let mut main = column![chrome::header(self), widgets::hrule()];
+                if let Some(members) = chrome::members(self) {
+                    main = main.push(members).push(widgets::hrule());
+                }
+                main.push(self.main()).into()
+            }
             Page::Settings => settings_view::view(self),
         };
         container(
@@ -906,6 +917,10 @@ impl App {
                 Task::none()
             }
 
+            Message::ToggleMembers => {
+                self.members_open = !self.members_open;
+                Task::none()
+            }
             Message::SelectRoom(id) => {
                 self.select(Some(id));
                 Task::none()

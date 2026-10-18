@@ -558,6 +558,22 @@ pub fn button_ghost(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// A ghost button in a bar that unfolds something: while it is open it sits in `selected`,
+/// like the opened room switcher.
+pub fn button_ghost_open(open: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        if !open {
+            return button_ghost(theme, status);
+        }
+        let t = tokens(theme);
+        let none = Shadow::default();
+        match status {
+            button::Status::Disabled => face(None, t.muted, rounded(), none),
+            _ => face(Some(t.selected), t.text, rounded(), none),
+        }
+    }
+}
+
 /// A flat row inside a slab, such as a room in the settings.
 pub fn button_row(theme: &Theme, status: button::Status) -> button::Style {
     let t = tokens(theme);
