@@ -5,6 +5,10 @@
 //! `<repo>/.omp/plugins/omp-plugins.lock.json`, so omp started in the repo loads it as a
 //! project-scope plugin. It gives omp `/schwitzer`, which plans a task of the rooms the repo
 //! is shared with through the app's MCP server.
+//!
+//! Install also registers the app's MCP server as `schwitzer` in `<repo>/.omp/mcp.json`. The
+//! token stays in the data directory: the entry's `Authorization` header is a shell command
+//! that reads `<data_dir>/mcp-token` when omp connects.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -18,9 +22,12 @@ const NAME: &str = "schwitzer";
 const INDEX_TS: &str = include_str!("../omp-plugin/index.ts");
 const CONFIG_FILE: &str = "schwitzer.json";
 const LOCK_FILE: &str = "omp-plugins.lock.json";
+const MCP_FILE: &str = "mcp.json";
+const MCP_SCHEMA: &str = "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json";
 
 /// What the plugin reads from `schwitzer.json`. It holds no token: the plugin reads
-/// `<data_dir>/mcp-token` on every call.
+/// `<data_dir>/mcp-token` on every call, and so does the header of the `schwitzer` entry in
+/// `<repo>/.omp/mcp.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PluginConfig {
     pub data_dir: PathBuf,
@@ -37,6 +44,25 @@ fn lock_path(repo: &Path) -> PathBuf {
     repo.join(".omp/plugins").join(LOCK_FILE)
 }
 
+fn mcp_path(repo: &Path) -> PathBuf {
+    repo.join(".omp").join(MCP_FILE)
+}
+
+/// The `Authorization` header of the MCP entry: an omp header command that reads the token
+/// file with shell builtins only. The token has no trailing newline, so `read` returns 1 but
+/// still sets `t`; hence `;`, not `&&`.
+fn token_header(data_dir: &Path) -> String {
+    format!(
+        "!read -r t < {}; printf 'Bearer %s' \"$t\"",
+        sh_quote(&data_dir.join(crate::mcp::TOKEN_FILE))
+    )
+}
+
+/// `path` as one single-quoted POSIX shell word.
+fn sh_quote(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+}
+
 /// The rooms (keys of `repos`, in map order) that share `repo`.
 pub fn rooms_of(repos: &BTreeMap<String, Vec<PathBuf>>, repo: &Path) -> Vec<String> {
     repos
@@ -51,12 +77,16 @@ pub fn installed(repo: &Path) -> bool {
     plugin_dir(repo).join(CONFIG_FILE).is_file()
 }
 
-/// Writes the plugin into `repo` and enables it in the lock file. A lock file that is not an
-/// omp lock file is an error, and then nothing is written.
+/// Writes the plugin into `repo`, enables it in the lock file and registers the app's MCP
+/// server as `schwitzer` in `.omp/mcp.json`. A lock file that is not an omp lock file or an
+/// `mcp.json` that is not an omp MCP config is an error, and then nothing is written.
 pub fn install(repo: &Path, config: &PluginConfig) -> io::Result<()> {
     let lock_path = lock_path(repo);
-    let mut lock = read_lock(&lock_path)?.unwrap_or_default();
-    // `read_lock` accepts only an object as `plugins`.
+    let mut lock = read_json(&lock_path, "plugins", "an omp plugin lock file")?.unwrap_or_default();
+    let mcp_path = mcp_path(repo);
+    let mut mcp = read_json(&mcp_path, "mcpServers", "an omp MCP config")?
+        .unwrap_or_else(|| Map::from_iter([("$schema".to_owned(), json!(MCP_SCHEMA))]));
+    // `read_json` accepts only an object as `plugins`.
     if let Some(plugins) = lock
         .entry("plugins")
         .or_insert_with(|| Value::Object(Map::new()))
@@ -72,6 +102,21 @@ pub fn install(repo: &Path, config: &PluginConfig) -> io::Result<()> {
     }
     lock.entry("settings")
         .or_insert_with(|| Value::Object(Map::new()));
+    // `read_json` accepts only an object as `mcpServers`.
+    if let Some(servers) = mcp
+        .entry("mcpServers")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+    {
+        servers.insert(
+            NAME.to_owned(),
+            json!({
+                "type": "http",
+                "url": config.mcp_url,
+                "headers": { "Authorization": token_header(&config.data_dir) },
+            }),
+        );
+    }
 
     let dir = plugin_dir(repo);
     std::fs::create_dir_all(&dir)?;
@@ -85,51 +130,59 @@ pub fn install(repo: &Path, config: &PluginConfig) -> io::Result<()> {
     });
     write_if_changed(&dir.join("package.json"), pretty(&package)?.as_bytes())?;
     write_if_changed(&dir.join(CONFIG_FILE), pretty(config)?.as_bytes())?;
-    write_lock(&lock_path, lock)
+    write_json(&lock_path, lock)?;
+    write_json(&mcp_path, mcp)
 }
 
-/// Removes the plugin from `repo` and its entries from the lock file. A lock file that is not
-/// an omp lock file is left alone: omp skips an entry whose directory is gone.
+/// Removes the plugin from `repo`, its entries from the lock file and the `schwitzer` server
+/// from `.omp/mcp.json`. A file that omp would not read is left alone: omp skips a lock entry
+/// whose directory is gone.
 pub fn uninstall(repo: &Path) -> io::Result<()> {
     let dir = plugin_dir(repo);
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;
     }
     let lock_path = lock_path(repo);
-    let Ok(Some(mut lock)) = read_lock(&lock_path) else {
-        return Ok(());
-    };
-    for section in ["plugins", "settings"] {
-        if let Some(Value::Object(entries)) = lock.get_mut(section) {
-            entries.remove(NAME);
+    if let Ok(Some(mut lock)) = read_json(&lock_path, "plugins", "an omp plugin lock file") {
+        for section in ["plugins", "settings"] {
+            if let Some(Value::Object(entries)) = lock.get_mut(section) {
+                entries.remove(NAME);
+            }
         }
+        write_json(&lock_path, lock)?;
     }
-    write_lock(&lock_path, lock)
+    let mcp_path = mcp_path(repo);
+    if let Ok(Some(mut mcp)) = read_json(&mcp_path, "mcpServers", "an omp MCP config") {
+        if let Some(Value::Object(servers)) = mcp.get_mut("mcpServers") {
+            servers.remove(NAME);
+        }
+        write_json(&mcp_path, mcp)?;
+    }
+    Ok(())
 }
 
-/// The lock file as an object whose `plugins` is missing or an object; `None` when it does
-/// not exist.
-fn read_lock(path: &Path) -> io::Result<Option<Map<String, Value>>> {
+/// The JSON file at `path` as an object whose `section` is missing or an object; `None` when
+/// it does not exist. Anything else is an `InvalidData` error saying the file is not `what`.
+fn read_json(path: &Path, section: &str, what: &str) -> io::Result<Option<Map<String, Value>>> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
     match serde_json::from_str(&text) {
-        Ok(Value::Object(lock)) if lock.get("plugins").is_none_or(Value::is_object) => {
-            Ok(Some(lock))
-        }
+        Ok(Value::Object(map)) if map.get(section).is_none_or(Value::is_object) => Ok(Some(map)),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("{} is not an omp plugin lock file", path.display()),
+            format!("{} is not {what}", path.display()),
         )),
     }
 }
 
-/// Writes the lock file through a temporary file and a rename.
-fn write_lock(path: &Path, lock: Map<String, Value>) -> io::Result<()> {
-    let tmp = path.with_file_name(format!("{LOCK_FILE}.tmp"));
-    std::fs::write(&tmp, pretty(&Value::Object(lock))?)?;
+/// Writes the JSON file at `path` through a temporary file and a rename.
+fn write_json(path: &Path, value: Map<String, Value>) -> io::Result<()> {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let tmp = path.with_file_name(format!("{name}.tmp"));
+    std::fs::write(&tmp, pretty(&Value::Object(value))?)?;
     std::fs::rename(&tmp, path)
 }
 
@@ -159,6 +212,14 @@ mod tests {
 
     fn lock(repo: &Path) -> Value {
         serde_json::from_str(&std::fs::read_to_string(lock_path(repo)).unwrap()).unwrap()
+    }
+
+    fn mcp(repo: &Path) -> Value {
+        serde_json::from_str(&std::fs::read_to_string(mcp_path(repo)).unwrap()).unwrap()
+    }
+
+    fn griasdi() -> Value {
+        json!({ "mcpServers": { "griasdi": { "type": "http", "url": "http://127.0.0.1:13337/mcp" } } })
     }
 
     fn write(path: &Path, text: &str) {
@@ -193,6 +254,19 @@ mod tests {
                 "settings": {},
             })
         );
+        assert_eq!(
+            mcp(repo.path()),
+            json!({
+                "$schema": MCP_SCHEMA,
+                "mcpServers": { "schwitzer": {
+                    "type": "http",
+                    "url": "http://127.0.0.1:13401/mcp",
+                    "headers": {
+                        "Authorization": "!read -r t < '/data/mcp-token'; printf 'Bearer %s' \"$t\"",
+                    },
+                } },
+            })
+        );
         assert!(installed(repo.path()));
     }
 
@@ -211,7 +285,18 @@ mod tests {
             })
             .to_string(),
         );
+        write(&mcp_path(repo.path()), &griasdi().to_string());
         install(repo.path(), &config()).unwrap();
+        let mcp = mcp(repo.path());
+        assert_eq!(
+            mcp["mcpServers"]["griasdi"],
+            griasdi()["mcpServers"]["griasdi"]
+        );
+        assert_eq!(
+            mcp["mcpServers"]["schwitzer"]["url"],
+            json!("http://127.0.0.1:13401/mcp")
+        );
+        assert!(mcp.get("$schema").is_none());
         let lock = lock(repo.path());
         assert_eq!(lock["plugins"]["other"], other);
         assert_eq!(lock["settings"], json!({ "other": { "k": 1 } }));
@@ -236,6 +321,20 @@ mod tests {
     }
 
     #[test]
+    fn install_refuses_malformed_mcp_config() {
+        let repo = tempfile::tempdir().unwrap();
+        write(&mcp_path(repo.path()), "not json");
+        let e = install(repo.path(), &config()).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            std::fs::read_to_string(mcp_path(repo.path())).unwrap(),
+            "not json"
+        );
+        assert!(!plugin_dir(repo.path()).exists());
+        assert!(!lock_path(repo.path()).exists());
+    }
+
+    #[test]
     fn uninstall_keeps_other_plugins() {
         let repo = tempfile::tempdir().unwrap();
         let other = json!({ "version": "1.0.0", "enabledFeatures": null, "enabled": true });
@@ -247,6 +346,7 @@ mod tests {
             })
             .to_string(),
         );
+        write(&mcp_path(repo.path()), &griasdi().to_string());
         install(repo.path(), &config()).unwrap();
         uninstall(repo.path()).unwrap();
         assert!(!plugin_dir(repo.path()).exists());
@@ -254,6 +354,24 @@ mod tests {
         assert_eq!(
             lock(repo.path()),
             json!({ "plugins": { "other": other }, "settings": { "other": {} } })
+        );
+        assert_eq!(mcp(repo.path()), griasdi());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn token_header_reads_the_token() {
+        let base = tempfile::tempdir().unwrap();
+        let dir = base.path().join("it's here");
+        write(&dir.join(crate::mcp::TOKEN_FILE), &"ab".repeat(32));
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&token_header(&dir)[1..])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            format!("Bearer {}", "ab".repeat(32))
         );
     }
 
