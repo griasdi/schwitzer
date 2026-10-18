@@ -22,7 +22,7 @@ The server prints its URL (`server url: weida://sha256:…@host:port`) on stdout
 
 ## Before pushing
 
-There is no CI: these checks are the only ones, run them before every commit that touches code:
+GitHub Actions (`.github/workflows/ci.yml`) runs these checks on every push to `main` and every pull request, and app clippy and the updater tests on macOS and Windows. Run them before every commit that touches code all the same:
 
 ```sh
 cargo fmt --all --check
@@ -47,6 +47,16 @@ Conventions:
 - Log with `tracing`, not `println!`; stdout is reserved for the server URL and `ctl` replies.
 - postcard is positional: enum variants on the wire are only ever appended; an incompatible change bumps `PROTOCOL_VERSION`.
 - Keep pure logic (`app/logic.rs`, the store, the protocol) free of iced types so it can be unit tested.
+
+## Releases
+
+```sh
+deploy/release.sh 0.2.0
+```
+
+Run it on `main` with `HEAD` pushed and no uncommitted changes to tracked files. It sets the workspace version (a `Release 0.2.0` commit when it changes), prints the release notes and pushes the tag `v0.2.0`. The tag starts `.github/workflows/release.yml`, which builds the app with `--features self-update` for linux-x86_64, linux-aarch64, macos-aarch64 and windows-x86_64, packs it with `deploy/package.sh` and publishes a GitHub release with notes from `deploy/changelog.sh`.
+
+Release builds check the latest GitHub release every 5 minutes, install a newer one in place and restart into it, back on the page and draft they showed (Settings → Updates switches this off). Builds without `self-update` never update themselves. `SCHWITZER_UPDATE_URL` replaces the GitHub API URL, for a local test feed.
 
 ## Commits & changelog
 
@@ -107,13 +117,13 @@ feat(app): show member tag
 fix: reconnect
 ```
 
-### Listing changelog entries
+### Release notes
 
 ```sh
-git log --grep='^Changelog:' --format='%(trailers:key=Changelog,valueonly,separator=%x2C)%x09%s' <from>..HEAD | sort
+deploy/changelog.sh v0.1.0..HEAD
 ```
 
-This prints one line per entry, category then subject; leave out `<from>..HEAD` for the whole history.
+This prints Markdown release notes, one section per category, oldest commit first; leave out the range for the whole history.
 
 ### Pull requests
 

@@ -1,4 +1,5 @@
 /target
+/dist
 /.omp/mcp.json
 /.omp/skills/impeccable/scripts/bin/
 

@@ -1,0 +1,71 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: ubuntu-22.04, platform: linux-x86_64 }
+          - { os: ubuntu-22.04-arm, platform: linux-aarch64 }
+          - { os: macos-14, platform: macos-aarch64 }
+          - { os: windows-latest, platform: windows-x86_64 }
+    runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform }}
+      - name: Tag matches the workspace version
+        shell: bash
+        run: test "v$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)" = "$GITHUB_REF_NAME"
+      - run: cargo build --release --locked -p schwitzer-app --features self-update
+      - shell: bash
+        run: deploy/package.sh ${{ matrix.platform }} "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: schwitzer-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: schwitzer-*
+          merge-multiple: true
+          path: dist
+      - name: Notes and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          deploy/changelog.sh "${prev:+$prev..}$GITHUB_REF_NAME" > notes.md
+          cat >> notes.md <<'EOF'
+
+          ### Install
+
+          - Linux: unpack the `linux-x86_64` or `linux-aarch64` archive and run `schwitzer`.
+          - macOS (Apple silicon): unpack, move `Schwitzer.app` to Applications and run `xattr -dr com.apple.quarantine /Applications/Schwitzer.app` once; the app is not notarized.
+          - Windows: unpack the zip and run `schwitzer.exe`; SmartScreen asks once because the app is not signed.
+
+          Keep the app in a folder you can write to: it installs new releases in place and restarts.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* --title "Schwitzer ${GITHUB_REF_NAME#v}" --notes-file notes.md
