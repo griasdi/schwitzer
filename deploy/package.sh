@@ -24,6 +24,8 @@ macos-aarch64)
     # binary inside, which would break it.
     stage=$(mktemp -d)
     mkdir -p "$stage/Schwitzer.app/Contents/MacOS"
+    mkdir -p "$stage/Schwitzer.app/Contents/Resources"
+    cp "$root/crates/schwitzer-app/assets/logo/schwitzer.icns" "$stage/Schwitzer.app/Contents/Resources/schwitzer.icns"
     cp "$root/target/release/schwitzer" "$stage/Schwitzer.app/Contents/MacOS/schwitzer"
     cat >"$stage/Schwitzer.app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -31,6 +33,8 @@ macos-aarch64)
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
+    <string>schwitzer</string>
+    <key>CFBundleIconFile</key>
     <string>schwitzer</string>
     <key>CFBundleIdentifier</key>
     <string>net.griasdi.schwitzer</string>

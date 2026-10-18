@@ -8,6 +8,7 @@
 )]
 
 mod app;
+mod brand;
 mod bridge;
 mod mcp;
 mod omp_plugin;
@@ -40,6 +41,7 @@ fn main() -> iced::Result {
         .window(iced::window::Settings {
             size: iced::Size::new(400.0, 780.0),
             min_size: Some(iced::Size::new(340.0, 520.0)),
+            icon: brand::window_icon(),
             ..iced::window::Settings::default()
         });
     for font in theme::FONTS {
