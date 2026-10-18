@@ -21,8 +21,8 @@ use iced::widget::{column, container, markdown, operation, text_editor};
 use iced::{Element, Length, Subscription, Task, Theme};
 use schwitzer_client::{Client, ClientError, ClientEvent};
 use schwitzer_proto::{
-    Decision, Priority, Request, Response, RoomId, RoomKey, RoomState, ServerAddr, SessionInfo,
-    Stage, Task as RoomTask, Work, caps, now_ms,
+    Decision, Priority, Project, Request, Response, RoomId, RoomKey, RoomState, ServerAddr,
+    SessionInfo, Stage, Task as RoomTask, Work, caps, now_ms,
 };
 
 use self::chrome::RoomChoice;
@@ -94,14 +94,31 @@ pub enum Message {
     Left(Result<(), String>),
     NameInput(String),
     SubmitName,
+    /// Shows project `id` of the selected room.
+    SelectProject(u64),
+    /// Opens Settings with the focus on the new project's name.
+    OpenNewProject,
+    NewProjectName(String),
+    CreateProject,
+    ProjectCreated(RoomId, Result<Response, String>),
+    ProjectNameInput(String),
+    RenameProject,
+    ProjectRenamed(Result<Response, String>),
+    /// Moves the open task into project `id`.
+    MoveTask(u64),
+    TaskMoved(Result<Response, String>),
+    ProjectsDirInput(String),
+    SaveProjectsDir,
     RepoInput(String),
     AddRepo,
+    /// Links a suggested folder to the selected project.
+    LinkRepo(PathBuf),
     RemoveRepo(usize),
-    /// Index into the selected room's repos.
+    /// Index into the selected project's repos.
     InstallPlugin(usize),
-    /// Index into the selected room's repos.
+    /// Index into the selected project's repos.
     RemovePlugin(usize),
-    /// Index into the selected room's repos.
+    /// Index into the selected project's repos.
     UpdatePlugin(usize),
     UpdateAllPlugins,
     AutoUpdatePlugins(bool),
@@ -171,6 +188,10 @@ struct Forms {
     room_key: String,
     name: String,
     repo: String,
+    new_project: String,
+    /// The rename input of the selected project.
+    project_name: String,
+    projects_dir: String,
     proposal_title: String,
     proposal_body: text_editor::Content,
     note: String,
@@ -193,6 +214,10 @@ pub struct App {
     rooms: Vec<(RoomKey, Option<RoomState>)>,
     servers: HashMap<ServerAddr, ServerStatus>,
     selected: Option<RoomId>,
+    /// The project last picked per room; in memory only.
+    chosen_projects: HashMap<RoomId, u64>,
+    /// The subfolders of the projects folder, for suggestions; read outside `view`.
+    project_dirs: Vec<PathBuf>,
     page: Page,
     /// The task or draft open in place in the list.
     expanded: Option<Expanded>,
@@ -262,10 +287,22 @@ impl App {
                 room_key: String::new(),
                 name: settings.name.clone(),
                 repo: String::new(),
+                new_project: String::new(),
+                project_name: String::new(),
+                projects_dir: settings
+                    .projects_dir
+                    .as_ref()
+                    .map(|dir| dir.display().to_string())
+                    .unwrap_or_default(),
                 proposal_title: String::new(),
                 proposal_body: text_editor::Content::new(),
                 note: String::new(),
             },
+            project_dirs: settings
+                .projects_dir
+                .as_deref()
+                .map(subdirs)
+                .unwrap_or_default(),
             saved: settings.clone(),
             settings,
             theme: theme::for_mode(iced::theme::Mode::Dark),
@@ -274,6 +311,7 @@ impl App {
             rooms,
             servers: HashMap::new(),
             selected,
+            chosen_projects: HashMap::new(),
             page: Page::Main,
             expanded: None,
             collapsed: HashSet::from([Group::Closed]),
@@ -352,12 +390,16 @@ impl App {
     /// The main page below the header bar: list and sessions, or an empty state.
     fn main(&self) -> Element<'_, Message> {
         match (self.selected_state(), self.selected) {
-            (Some(state), _) => column![
-                container(list::view(self, state)).height(Length::Fill),
-                widgets::hrule(),
-                live::view(self, state),
-            ]
-            .into(),
+            (Some(state), _) => match self.selected_project() {
+                None => self.no_projects(),
+                Some(project) if self.project_repos().is_empty() => self.link_view(project),
+                Some(project) => column![
+                    container(list::view(self, state, project)).height(Length::Fill),
+                    widgets::hrule(),
+                    live::view(self, state),
+                ]
+                .into(),
+            },
             (None, Some(_)) => list::empty(
                 Icon::Plug,
                 "Connecting…",
@@ -387,6 +429,97 @@ impl App {
         }
     }
 
+    /// The selected room has no project yet: create the first one.
+    fn no_projects(&self) -> Element<'_, Message> {
+        let filled = !self.forms.new_project.trim().is_empty();
+        list::empty(
+            Icon::FolderPlus,
+            "No projects yet",
+            "A project holds a part of the room's tasks, for example one repo. Create the first \
+             one.",
+            iced::widget::row![
+                widgets::input(
+                    "new-project-name",
+                    "Project name",
+                    &self.forms.new_project,
+                    Message::NewProjectName,
+                    Message::CreateProject,
+                ),
+                widgets::text_button(
+                    "create-project",
+                    "Create",
+                    filled.then_some(Message::CreateProject),
+                    theme::button_primary,
+                ),
+            ]
+            .spacing(SP_2)
+            .align_y(iced::Alignment::Center)
+            .into(),
+        )
+    }
+
+    /// The selected project has no repo on this machine yet: link one, from the suggestions
+    /// out of the projects folder or by path.
+    fn link_view<'a>(&'a self, project: &'a Project) -> Element<'a, Message> {
+        let suggested =
+            logic::suggested_repos(&project.name, &self.project_dirs, self.project_repos());
+        let mut col = column![].spacing(SP_2).width(Length::Fill);
+        for (index, path) in suggested.iter().enumerate() {
+            col = col.push(
+                iced::widget::row![
+                    icons::icon(Icon::Folder, 16.0, Tone::Muted),
+                    iced::widget::text(path.display().to_string())
+                        .size(theme::TS_14)
+                        .width(Length::Fill),
+                    widgets::text_button(
+                        format!("link-suggested-{index}"),
+                        "Link",
+                        Some(Message::LinkRepo((*path).clone())),
+                        theme::button_primary,
+                    ),
+                ]
+                .spacing(SP_2)
+                .align_y(iced::Alignment::Center),
+            );
+        }
+        let filled = !self.forms.repo.trim().is_empty();
+        col = col.push(
+            iced::widget::row![
+                widgets::input(
+                    "repo-input",
+                    "/path/to/repo",
+                    &self.forms.repo,
+                    Message::RepoInput,
+                    Message::AddRepo,
+                ),
+                widgets::text_button(
+                    "repo-add",
+                    "Link",
+                    filled.then_some(Message::AddRepo),
+                    if suggested.is_empty() {
+                        theme::button_primary
+                    } else {
+                        theme::button_secondary
+                    },
+                ),
+            ]
+            .spacing(SP_2)
+            .align_y(iced::Alignment::Center),
+        );
+        if self.settings.projects_dir.is_none() {
+            col = col.push(widgets::muted(
+                "Set a projects folder in Settings to get matching repos suggested.",
+            ));
+        }
+        list::empty(
+            Icon::FolderPlus,
+            format!("Link a repo to {}", project.name),
+            "Its tasks show up once a repo on this machine is linked to it. omp sessions \
+             running in linked repos are shared with the room.",
+            col.into(),
+        )
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
         self.refresh_plan();
@@ -406,6 +539,7 @@ impl App {
                 }
                 if self.now_ms >= self.plugins_checked_ms + PLUGIN_CHECK_MS {
                     self.check_plugins();
+                    self.read_project_dirs();
                 }
                 Task::none()
             }
@@ -446,7 +580,7 @@ impl App {
             }
 
             Message::OpenNewTask { idea } => {
-                if self.selected_state().is_none() {
+                if self.selected_project().is_none() || self.project_repos().is_empty() {
                     return Task::none();
                 }
                 if self.page != Page::Main {
@@ -470,16 +604,19 @@ impl App {
                 }
                 self.expanded = None;
                 self.page = Page::Settings;
+                self.sync_project_form();
                 Task::none()
             }
             Message::OpenTask(number) => {
-                let Some(group) = self
-                    .selected_state()
-                    .and_then(|s| s.tasks.iter().find(|t| t.number == number))
-                    .map(Group::of)
-                else {
+                let Some((room, project, group)) = self.selected_state().and_then(|s| {
+                    let task = s.tasks.iter().find(|t| t.number == number)?;
+                    Some((s.id, task.project, Group::of(task)))
+                }) else {
                     return Task::none();
                 };
+                if self.chosen_projects.insert(room, project) != Some(project) {
+                    self.sync_project_form();
+                }
                 self.page = Page::Main;
                 if self.expanded != Some(Expanded::Task(number)) {
                     self.reset_drafts();
@@ -569,12 +706,19 @@ impl App {
                 self.forms.repo = s;
                 Task::none()
             }
-            Message::AddRepo => self.add_repo(),
+            Message::AddRepo => match self.link_repo(expand_home(self.forms.repo.trim())) {
+                Some(task) => {
+                    self.forms.repo.clear();
+                    task
+                }
+                None => Task::none(),
+            },
+            Message::LinkRepo(path) => self.link_repo(path).unwrap_or_else(Task::none),
             Message::RemoveRepo(index) => {
-                let Some(room) = self.selected else {
+                let (Some(room), Some(project)) = (self.selected, self.selected_project()) else {
                     return Task::none();
                 };
-                let key = room.to_hex();
+                let key = settings::repo_key(&room, project.id);
                 if let Some(repos) = self.settings.repos.get_mut(&key) {
                     if index < repos.len() {
                         repos.remove(index);
@@ -589,7 +733,7 @@ impl App {
             Message::InstallPlugin(index) => self.install_plugin(index),
             Message::RemovePlugin(index) => self.remove_plugin(index),
             Message::UpdatePlugin(index) => {
-                if let Some(repo) = self.room_repos().get(index).cloned() {
+                if let Some(repo) = self.project_repos().get(index).cloned() {
                     match self.update_plugin(&repo) {
                         Ok(()) => self.notify("omp plugin updated"),
                         Err(e) => self.banner = Some(update_failed(&repo, &e)),
@@ -608,6 +752,144 @@ impl App {
                     self.auto_failed.clear();
                     self.check_plugins();
                 }
+                Task::none()
+            }
+
+            Message::SelectProject(id) => {
+                if let Some(room) = self.selected {
+                    self.chosen_projects.insert(room, id);
+                }
+                self.expanded = None;
+                self.reset_drafts();
+                self.sync_project_form();
+                Task::none()
+            }
+            Message::OpenNewProject => {
+                if self.page != Page::Settings {
+                    self.reset_drafts();
+                }
+                self.expanded = None;
+                self.page = Page::Settings;
+                self.sync_project_form();
+                operation::focus("new-project-name")
+            }
+            Message::NewProjectName(s) => {
+                self.forms.new_project = s;
+                Task::none()
+            }
+            Message::CreateProject => {
+                let name = logic::truncate(self.forms.new_project.trim(), caps::PROJECT_NAME);
+                let Some(room) = self.selected.filter(|_| !name.is_empty()) else {
+                    return Task::none();
+                };
+                call(
+                    self.request(room, Request::CreateProject { room, name }),
+                    move |result| Message::ProjectCreated(room, result),
+                )
+            }
+            Message::ProjectCreated(room, result) => {
+                match result {
+                    Ok(Response::Project(project)) => {
+                        self.forms.new_project.clear();
+                        self.chosen_projects.insert(room, project.id);
+                        if self.selected == Some(room) {
+                            self.page = Page::Main;
+                            self.expanded = None;
+                            self.reset_drafts();
+                        }
+                        self.sync_project_form();
+                        self.notify("Project created");
+                    }
+                    Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
+                    Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
+            Message::ProjectNameInput(s) => {
+                self.forms.project_name = s;
+                Task::none()
+            }
+            Message::RenameProject => {
+                let name = logic::truncate(self.forms.project_name.trim(), caps::PROJECT_NAME);
+                let (Some(room), Some(project)) = (self.selected, self.selected_project()) else {
+                    return Task::none();
+                };
+                if name.is_empty() || name == project.name {
+                    return Task::none();
+                }
+                let req = Request::RenameProject {
+                    room,
+                    project: project.id,
+                    name,
+                };
+                call(self.request(room, req), Message::ProjectRenamed)
+            }
+            Message::ProjectRenamed(result) => {
+                match result {
+                    Ok(Response::Project(project)) => {
+                        // The rename event may come after the reply: show the new name now.
+                        self.forms.project_name = project.name;
+                        self.notify("Project renamed");
+                    }
+                    Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
+                    Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
+            Message::MoveTask(project) => {
+                let Some((state, task)) = self.open() else {
+                    return Task::none();
+                };
+                if task.project == project {
+                    return Task::none();
+                }
+                let room = state.id;
+                let req = Request::MoveTask {
+                    room,
+                    task: task.number,
+                    project,
+                };
+                call(self.request(room, req), Message::TaskMoved)
+            }
+            Message::TaskMoved(result) => {
+                match result {
+                    Ok(Response::Task(task)) => {
+                        let target = self
+                            .selected_state()
+                            .and_then(|s| s.projects.iter().find(|p| p.id == task.project))
+                            .map_or_else(|| format!("#{}", task.project), |p| p.name.clone());
+                        if self.expanded == Some(Expanded::Task(task.number)) {
+                            self.expanded = None;
+                            self.reset_drafts();
+                        }
+                        self.notify(&format!("#{} moved to {target}", task.number));
+                    }
+                    Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
+                    Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
+            Message::ProjectsDirInput(s) => {
+                self.forms.projects_dir = s;
+                Task::none()
+            }
+            Message::SaveProjectsDir => {
+                let input = self.forms.projects_dir.trim();
+                if input.is_empty() {
+                    self.settings.projects_dir = None;
+                } else {
+                    let path = expand_home(input);
+                    if !path.is_absolute() || !path.is_dir() {
+                        self.banner =
+                            Some(format!("Not a folder on this machine: {}", path.display()));
+                        return Task::none();
+                    }
+                    self.forms.projects_dir = path.display().to_string();
+                    self.settings.projects_dir = Some(path);
+                }
+                self.save_settings();
+                self.read_project_dirs();
+                self.notify("Projects folder saved");
                 Task::none()
             }
 
@@ -812,11 +1094,46 @@ impl App {
             .collect()
     }
 
-    /// The repos this member shares with the selected room.
-    fn room_repos(&self) -> &[PathBuf] {
-        self.selected
-            .and_then(|room| self.settings.repos.get(&room.to_hex()))
-            .map_or(&[], Vec::as_slice)
+    /// The project shown for the selected room: the one last picked, else the first one this
+    /// member has linked a repo to, else the first one; `None` while the room has none.
+    fn selected_project(&self) -> Option<&Project> {
+        let state = self.selected_state()?;
+        let chosen = self.chosen_projects.get(&state.id);
+        chosen
+            .and_then(|id| state.projects.iter().find(|p| p.id == *id))
+            .or_else(|| {
+                state
+                    .projects
+                    .iter()
+                    .find(|p| !self.settings.project_repos(&state.id, p.id).is_empty())
+            })
+            .or_else(|| state.projects.first())
+    }
+
+    /// The repos this member has linked to the selected project.
+    fn project_repos(&self) -> &[PathBuf] {
+        match (self.selected, self.selected_project()) {
+            (Some(room), Some(project)) => self.settings.project_repos(&room, project.id),
+            _ => &[],
+        }
+    }
+
+    /// Puts the selected project's name into the rename input.
+    fn sync_project_form(&mut self) {
+        self.forms.project_name = self
+            .selected_project()
+            .map(|p| p.name.clone())
+            .unwrap_or_default();
+    }
+
+    /// Reads the subfolders of the projects folder.
+    fn read_project_dirs(&mut self) {
+        self.project_dirs = self
+            .settings
+            .projects_dir
+            .as_deref()
+            .map(subdirs)
+            .unwrap_or_default();
     }
 
     /// The selected room and the open task.
@@ -931,26 +1248,28 @@ impl App {
         })
     }
 
-    fn add_repo(&mut self) -> Task<Message> {
-        let Some(room) = self.selected else {
-            return Task::none();
-        };
-        let path = expand_home(self.forms.repo.trim());
+    /// Links `path` to the selected project; `None` when nothing was linked.
+    fn link_repo(&mut self, path: PathBuf) -> Option<Task<Message>> {
+        let room = self.selected?;
+        let project = self.selected_project()?.id;
         if !path.is_absolute() || !path.is_dir() {
             self.banner = Some(format!("Not a folder on this machine: {}", path.display()));
-            return Task::none();
+            return None;
         }
-        let repos = self.settings.repos.entry(room.to_hex()).or_default();
+        let repos = self
+            .settings
+            .repos
+            .entry(settings::repo_key(&room, project))
+            .or_default();
         if !repos.contains(&path) {
             repos.push(path);
         }
-        self.forms.repo.clear();
         self.save_settings();
-        self.publish()
+        Some(self.publish())
     }
 
     fn install_plugin(&mut self, index: usize) -> Task<Message> {
-        let Some(repo) = self.room_repos().get(index).cloned() else {
+        let Some(repo) = self.project_repos().get(index).cloned() else {
             return Task::none();
         };
         match self.update_plugin(&repo) {
@@ -968,7 +1287,7 @@ impl App {
     }
 
     fn remove_plugin(&mut self, index: usize) -> Task<Message> {
-        let Some(repo) = self.room_repos().get(index).cloned() else {
+        let Some(repo) = self.project_repos().get(index).cloned() else {
             return Task::none();
         };
         match omp_plugin::uninstall(&repo) {
@@ -987,18 +1306,18 @@ impl App {
         Task::none()
     }
 
-    fn plugin_config(&self, rooms: Vec<String>) -> omp_plugin::PluginConfig {
+    fn plugin_config(&self, projects: Vec<omp_plugin::PluginProject>) -> omp_plugin::PluginConfig {
         omp_plugin::PluginConfig {
             data_dir: self.data_dir.clone(),
             mcp_url: mcp::url(self.settings.mcp_port),
-            rooms,
+            projects,
         }
     }
 
-    /// Writes the plugin into `repo` for the rooms that share it and marks it current.
+    /// Writes the plugin into `repo` for the projects it is linked to and marks it current.
     fn update_plugin(&mut self, repo: &Path) -> std::io::Result<()> {
-        let rooms = omp_plugin::rooms_of(&self.settings.repos, repo);
-        omp_plugin::install(repo, &self.plugin_config(rooms))?;
+        let projects = omp_plugin::projects_of(&self.settings.repos, repo);
+        omp_plugin::install(repo, &self.plugin_config(projects))?;
         self.plugins.insert(repo.to_owned(), PluginState::Current);
         self.auto_failed.remove(repo);
         Ok(())
@@ -1038,8 +1357,8 @@ impl App {
         self.plugins_checked_ms = now_ms();
         let shared: BTreeSet<PathBuf> = self.settings.repos.values().flatten().cloned().collect();
         for repo in &shared {
-            let rooms = omp_plugin::rooms_of(&self.settings.repos, repo);
-            match omp_plugin::state(repo, &self.plugin_config(rooms)) {
+            let projects = omp_plugin::projects_of(&self.settings.repos, repo);
+            match omp_plugin::state(repo, &self.plugin_config(projects)) {
                 Some(state) => {
                     self.plugins.insert(repo.clone(), state);
                 }
@@ -1079,10 +1398,11 @@ impl App {
     }
 
     /// Rewrites the plugin in every repo that has it, and removes it from a repo no room
-    /// shares any more. Runs regardless of auto-update: `schwitzer.json` lists the rooms.
+    /// is linked to any more. Runs regardless of auto-update: `schwitzer.json` lists the
+    /// projects.
     fn sync_plugins(&mut self) {
         for repo in self.plugins.keys().cloned().collect::<Vec<_>>() {
-            let result = if omp_plugin::rooms_of(&self.settings.repos, &repo).is_empty() {
+            let result = if omp_plugin::projects_of(&self.settings.repos, &repo).is_empty() {
                 omp_plugin::uninstall(&repo).map(|()| {
                     self.plugins.remove(&repo);
                     self.auto_failed.remove(&repo);
@@ -1100,7 +1420,11 @@ impl App {
         let Some(Expanded::New { idea }) = self.expanded else {
             return Task::none();
         };
-        let (Some(room), title) = (self.selected, self.forms.proposal_title.trim()) else {
+        let (Some(room), Some(project), title) = (
+            self.selected,
+            self.selected_project().map(|p| p.id),
+            self.forms.proposal_title.trim(),
+        ) else {
             return Task::none();
         };
         if title.is_empty() {
@@ -1108,9 +1432,19 @@ impl App {
         }
         let (title, body) = (title.to_owned(), self.forms.proposal_body.text());
         let req = if idea {
-            Request::AddIdea { room, title, body }
+            Request::AddIdea {
+                room,
+                project,
+                title,
+                body,
+            }
         } else {
-            Request::Propose { room, title, body }
+            Request::Propose {
+                room,
+                project,
+                title,
+                body,
+            }
         };
         call(self.request(room, req), Message::Proposed)
     }
@@ -1151,6 +1485,7 @@ impl App {
                 let claim = Request::Claim {
                     room,
                     work: Work::Build,
+                    project: None,
                     task: Some(number),
                     agent: PICK_AGENT.to_owned(),
                 };
@@ -1311,7 +1646,9 @@ impl App {
             .iter()
             .map(|(key, _)| RoomId::of(&key.token).to_hex())
             .collect();
-        self.settings.repos.retain(|room, _| joined.contains(room));
+        self.settings.repos.retain(|key, _| {
+            settings::parse_repo_key(key).is_some_and(|(room, _)| joined.contains(room))
+        });
         self.save_settings();
     }
 
@@ -1320,6 +1657,7 @@ impl App {
             self.selected = room;
             self.expanded = None;
             self.reset_drafts();
+            self.sync_project_form();
         }
     }
 
@@ -1372,13 +1710,9 @@ impl App {
         for (key, state) in &self.rooms {
             let Some(state) = state else { continue };
             let room = RoomId::of(&key.token);
-            let repos = self
-                .settings
-                .repos
-                .get(&room.to_hex())
-                .map_or(&[][..], Vec::as_slice);
+            let repos = self.settings.room_repos(&room);
             let sessions =
-                logic::shared_sessions(&self.local_sessions, state, self.client.member(), repos);
+                logic::shared_sessions(&self.local_sessions, state, self.client.member(), &repos);
             if self.published.get(&room) == Some(&sessions) {
                 continue;
             }
@@ -1454,6 +1788,22 @@ fn expand_home(path: &str) -> PathBuf {
             .map_or_else(|| PathBuf::from(path), |dirs| dirs.home_dir().join(rest)),
         None => Path::new(path).to_path_buf(),
     }
+}
+
+/// The visible subfolders of `dir`, sorted. Errors give none: a missing folder only means no
+/// suggestions.
+fn subdirs(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    dirs.sort();
+    dirs
 }
 
 /// The banner text for a plugin update that failed.

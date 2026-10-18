@@ -77,15 +77,44 @@ pub fn pickable(task: &Task) -> bool {
     Group::of(task) == Group::Pickable
 }
 
-/// The tasks of `group`, high priority first, then by number.
-pub fn tasks_in(state: &RoomState, group: Group) -> Vec<&Task> {
+/// The tasks of `project` in `group`, high priority first, then by number.
+pub fn tasks_in(state: &RoomState, project: u64, group: Group) -> Vec<&Task> {
     let mut tasks: Vec<&Task> = state
         .tasks
         .iter()
-        .filter(|t| Group::of(t) == group)
+        .filter(|t| t.project == project && Group::of(t) == group)
         .collect();
     tasks.sort_by_key(|t| (t.priority, t.number));
     tasks
+}
+
+/// The folders of `dirs` whose name matches `project` loosely (letters and digits only,
+/// ignoring case), without those already `linked`.
+pub fn suggested_repos<'a>(
+    project: &str,
+    dirs: &'a [PathBuf],
+    linked: &[PathBuf],
+) -> Vec<&'a PathBuf> {
+    let key = name_key(project);
+    if key.is_empty() {
+        return Vec::new();
+    }
+    dirs.iter()
+        .filter(|dir| {
+            dir.file_name()
+                .is_some_and(|name| name_key(&name.to_string_lossy()) == key)
+        })
+        .filter(|dir| !linked.contains(dir))
+        .collect()
+}
+
+/// A name reduced to its letters and digits, lowercased: "Schwitzer App" and `schwitzer-app`
+/// give the same key.
+fn name_key(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// The decisions the server accepts for `task` right now (plan §3, `Decide`), in button order.
@@ -243,7 +272,7 @@ pub fn ago(ms: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use schwitzer_proto::{Claim, Priority};
+    use schwitzer_proto::{Claim, Priority, Project};
 
     use super::*;
 
@@ -254,6 +283,7 @@ mod tests {
     fn task(number: u64, stage: Stage, claim: Option<Claim>) -> Task {
         Task {
             number,
+            project: 1,
             title: format!("task {number}"),
             body: String::new(),
             plan: String::new(),
@@ -281,6 +311,10 @@ mod tests {
         RoomState {
             id: schwitzer_proto::RoomId([0; 32]),
             name: "room".to_owned(),
+            projects: vec![Project {
+                id: 1,
+                name: "app".to_owned(),
+            }],
             members: Vec::new(),
             tasks,
             sessions: Vec::new(),
@@ -332,12 +366,34 @@ mod tests {
         let mut high = task(3, Stage::Proposed, None);
         high.priority = Priority::High;
         let normal = task(2, Stage::Proposed, None);
-        let state = room(vec![low, normal, high]);
-        let numbers: Vec<u64> = tasks_in(&state, Group::Proposals)
+        let mut elsewhere = task(4, Stage::Proposed, None);
+        elsewhere.project = 2;
+        let state = room(vec![low, normal, high, elsewhere]);
+        let numbers: Vec<u64> = tasks_in(&state, 1, Group::Proposals)
             .iter()
             .map(|t| t.number)
             .collect();
         assert_eq!(numbers, [3, 2, 1]);
+    }
+
+    #[test]
+    fn suggestions_match_names_loosely_and_skip_linked_repos() {
+        let dirs: Vec<PathBuf> = [
+            "/code/schwitzer-app",
+            "/code/SchwitzerApp",
+            "/code/schwitzer-app-old",
+            "/code/other",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+        let linked = [PathBuf::from("/code/SchwitzerApp")];
+        assert_eq!(
+            suggested_repos("Schwitzer App", &dirs, &[]),
+            [&dirs[0], &dirs[1]]
+        );
+        assert_eq!(suggested_repos("Schwitzer App", &dirs, &linked), [&dirs[0]]);
+        assert!(suggested_repos("--", &dirs, &[]).is_empty());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! SQLite store: rooms, members, tasks and notes.
+//! SQLite store: rooms, projects, members, tasks and notes.
 //!
 //! The functions below take a plain `&Connection`; the caller wraps each
 //! mutation in one transaction, which is what makes claim selection plus the
@@ -12,28 +12,41 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use schwitzer_proto::{
-    ApiError, Claim, ClaimToken, Decision, Member, MemberId, Note, Priority, RoomId, RoomState,
-    Stage, Task, Work,
+    ApiError, Claim, ClaimToken, Decision, Member, MemberId, Note, Priority, Project, RoomId,
+    RoomState, Stage, Task, Work,
 };
 
 /// Version stored in `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA: &str = "
 CREATE TABLE people(member BLOB PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE rooms(id BLOB PRIMARY KEY, name TEXT NOT NULL, created_ms INTEGER NOT NULL,
-    next_number INTEGER NOT NULL DEFAULT 1);
+    next_number INTEGER NOT NULL DEFAULT 1, next_project INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE projects(room BLOB NOT NULL, id INTEGER NOT NULL, name TEXT NOT NULL,
+    created_ms INTEGER NOT NULL, PRIMARY KEY(room, id));
 CREATE TABLE members(room BLOB NOT NULL, member BLOB NOT NULL, joined_ms INTEGER NOT NULL,
     PRIMARY KEY(room, member));
 CREATE INDEX members_by_member ON members(member);
-CREATE TABLE tasks(room BLOB NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL,
-    body TEXT NOT NULL, plan TEXT NOT NULL, stage INTEGER NOT NULL, priority INTEGER NOT NULL,
-    author BLOB NOT NULL, created_ms INTEGER NOT NULL, updated_ms INTEGER NOT NULL,
-    claim_member BLOB, claim_agent TEXT, claim_work INTEGER, claim_since_ms INTEGER,
-    claim_token BLOB, PRIMARY KEY(room, number));
+CREATE TABLE tasks(room BLOB NOT NULL, number INTEGER NOT NULL, project INTEGER NOT NULL,
+    title TEXT NOT NULL, body TEXT NOT NULL, plan TEXT NOT NULL, stage INTEGER NOT NULL,
+    priority INTEGER NOT NULL, author BLOB NOT NULL, created_ms INTEGER NOT NULL,
+    updated_ms INTEGER NOT NULL, claim_member BLOB, claim_agent TEXT, claim_work INTEGER,
+    claim_since_ms INTEGER, claim_token BLOB, PRIMARY KEY(room, number));
 CREATE TABLE notes(room BLOB NOT NULL, number INTEGER NOT NULL, at_ms INTEGER NOT NULL,
     author BLOB NOT NULL, agent TEXT, text TEXT NOT NULL);
 CREATE INDEX notes_by_task ON notes(room, number);
+";
+
+/// From schema 1 (before projects): every room gets project 1, named like the room, holding
+/// all its tasks. Room names are capped like project names, so they fit.
+const MIGRATE_1: &str = "
+ALTER TABLE rooms ADD COLUMN next_project INTEGER NOT NULL DEFAULT 1;
+CREATE TABLE projects(room BLOB NOT NULL, id INTEGER NOT NULL, name TEXT NOT NULL,
+    created_ms INTEGER NOT NULL, PRIMARY KEY(room, id));
+INSERT INTO projects(room, id, name, created_ms) SELECT id, 1, name, created_ms FROM rooms;
+UPDATE rooms SET next_project = 2;
+ALTER TABLE tasks ADD COLUMN project INTEGER NOT NULL DEFAULT 1;
 ";
 
 /// Why a store closure failed.
@@ -85,8 +98,8 @@ impl Store {
         Self::init(conn)
     }
 
-    /// Applies the pragmas, then creates or checks the schema.
-    fn init(conn: Connection) -> anyhow::Result<Store> {
+    /// Applies the pragmas, then creates, migrates or checks the schema.
+    fn init(mut conn: Connection) -> anyhow::Result<Store> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.busy_timeout(Duration::from_secs(5))?;
@@ -95,6 +108,14 @@ impl Store {
             0 => {
                 conn.execute_batch(SCHEMA).context("applying schema")?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            }
+            1 => {
+                let tx = conn.transaction()?;
+                tx.execute_batch(MIGRATE_1)
+                    .context("migrating from schema version 1")?;
+                tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+                tx.commit()?;
+                tracing::info!("migrated the database to schema version 2 (projects)");
             }
             SCHEMA_VERSION => {}
             other => bail!("unsupported database schema version {other}"),
@@ -374,15 +395,115 @@ pub fn room_state(conn: &Connection, room: &RoomId) -> R<RoomState> {
         id: *room,
         name,
         members,
+        projects: read_projects(conn, room)?,
         tasks: read_tasks(conn, room)?,
         sessions: Vec::new(),
     })
 }
 
+// ------------------------------------------------------------------- projects
+
+fn project_from_row(row: &Row<'_>) -> rusqlite::Result<Project> {
+    Ok(Project {
+        id: uns(row.get(0)?),
+        name: row.get(1)?,
+    })
+}
+
+/// Every project of a room, by id.
+pub fn read_projects(conn: &Connection, room: &RoomId) -> R<Vec<Project>> {
+    let mut stmt = conn.prepare("SELECT id, name FROM projects WHERE room = ?1 ORDER BY id")?;
+    let projects = stmt
+        .query_map([room.as_bytes().as_slice()], project_from_row)?
+        .collect::<rusqlite::Result<Vec<Project>>>()?;
+    Ok(projects)
+}
+
+/// The project, or `NoSuchProject`.
+fn require_project(conn: &Connection, room: &RoomId, id: u64) -> R<Project> {
+    let project = conn
+        .query_row(
+            "SELECT id, name FROM projects WHERE room = ?1 AND id = ?2",
+            params![room.as_bytes().as_slice(), int(id)],
+            project_from_row,
+        )
+        .optional()?;
+    Ok(project.ok_or(ApiError::NoSuchProject)?)
+}
+
+/// Whether another project than `except` has `name`, ignoring case.
+fn name_taken(conn: &Connection, room: &RoomId, name: &str, except: Option<u64>) -> R<bool> {
+    // Ids start at 1, so 0 excludes nothing.
+    let found: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM projects WHERE room = ?1 AND name = ?2 COLLATE NOCASE AND id != ?3",
+            params![room.as_bytes().as_slice(), name, except.map_or(0, int)],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(found.is_some())
+}
+
+/// A new project with the room's next project id; its name is unique in the room.
+pub fn create_project(conn: &Connection, room: &RoomId, name: &str, now: u64) -> R<Project> {
+    if name_taken(conn, room, name, None)? {
+        return Err(ApiError::ProjectExists.into());
+    }
+    let id: i64 = conn.query_row(
+        "SELECT next_project FROM rooms WHERE id = ?1",
+        [room.as_bytes().as_slice()],
+        |r| r.get(0),
+    )?;
+    conn.execute(
+        "UPDATE rooms SET next_project = next_project + 1 WHERE id = ?1",
+        [room.as_bytes().as_slice()],
+    )?;
+    conn.execute(
+        "INSERT INTO projects(room, id, name, created_ms) VALUES (?1, ?2, ?3, ?4)",
+        params![room.as_bytes().as_slice(), id, name, int(now)],
+    )?;
+    Ok(Project {
+        id: uns(id),
+        name: name.to_owned(),
+    })
+}
+
+/// Renames a project; the new name is unique in the room.
+pub fn rename_project(conn: &Connection, room: &RoomId, id: u64, name: &str) -> R<Project> {
+    require_project(conn, room, id)?;
+    if name_taken(conn, room, name, Some(id))? {
+        return Err(ApiError::ProjectExists.into());
+    }
+    conn.execute(
+        "UPDATE projects SET name = ?3 WHERE room = ?1 AND id = ?2",
+        params![room.as_bytes().as_slice(), int(id), name],
+    )?;
+    Ok(Project {
+        id,
+        name: name.to_owned(),
+    })
+}
+
+/// Moves a task into another project; any stage may move, so mixed rooms can be sorted out.
+pub fn move_task(conn: &Connection, room: &RoomId, number: u64, project: u64, now: u64) -> R<Task> {
+    require_task(conn, room, number)?;
+    require_project(conn, room, project)?;
+    conn.execute(
+        "UPDATE tasks SET project = ?3, updated_ms = ?4 WHERE room = ?1 AND number = ?2",
+        params![
+            room.as_bytes().as_slice(),
+            int(number),
+            int(project),
+            int(now)
+        ],
+    )?;
+    require_task(conn, room, number)
+}
+
 // ---------------------------------------------------------------------- tasks
 
 const TASK_COLUMNS: &str = "number, title, body, plan, stage, priority, author, created_ms, \
-     updated_ms, claim_member, claim_agent, claim_work, claim_since_ms, claim_token";
+     updated_ms, claim_member, claim_agent, claim_work, claim_since_ms, claim_token, project";
 
 /// Decodes a task row of [`TASK_COLUMNS`]; the notes are filled in by the caller.
 fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
@@ -418,6 +539,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         author: blob(row, 6)?,
         created_ms: uns(row.get(7)?),
         updated_ms: uns(row.get(8)?),
+        project: uns(row.get(14)?),
         claim,
         notes: Vec::new(),
     })
@@ -539,16 +661,19 @@ fn set_stage(conn: &Connection, room: &RoomId, number: u64, stage: Stage, now: u
     Ok(())
 }
 
-/// A new task in `stage` (`Idea` or `Proposed`) with priority `Normal`.
+/// A new task of `project` in `stage` (`Idea` or `Proposed`) with priority `Normal`.
+#[allow(clippy::too_many_arguments)]
 pub fn create_task(
     conn: &Connection,
     room: &RoomId,
     author: &MemberId,
+    project: u64,
     stage: Stage,
     title: &str,
     body: &str,
     now: u64,
 ) -> R<Task> {
+    require_project(conn, room, project)?;
     let number: i64 = conn.query_row(
         "SELECT next_number FROM rooms WHERE id = ?1",
         [room.as_bytes().as_slice()],
@@ -559,11 +684,13 @@ pub fn create_task(
         [room.as_bytes().as_slice()],
     )?;
     conn.execute(
-        "INSERT INTO tasks(room, number, title, body, plan, stage, priority, author, created_ms, updated_ms)
-         VALUES (?1, ?2, ?3, ?4, '', ?5, ?6, ?7, ?8, ?8)",
+        "INSERT INTO tasks(room, number, project, title, body, plan, stage, priority, author,
+             created_ms, updated_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, '', ?6, ?7, ?8, ?9, ?9)",
         params![
             room.as_bytes().as_slice(),
             number,
+            int(project),
             title,
             body,
             stage_to_int(stage),
@@ -692,13 +819,15 @@ pub fn decide(
 }
 
 /// Claims a task for `member`: `Plan` takes from `Accepted`, `Build` from `Ready`.
-/// Without a number the first unclaimed task by (priority, number) is taken and
-/// `None` means there is none.
+/// Without a number the first unclaimed task by (priority, number) is taken, from
+/// `project` if given, and `None` means there is none. With a number, `project` is ignored.
+#[allow(clippy::too_many_arguments)]
 pub fn claim(
     conn: &Connection,
     room: &RoomId,
     member: &MemberId,
     work: Work,
+    project: Option<u64>,
     number: Option<u64>,
     agent: &str,
     now: u64,
@@ -719,12 +848,20 @@ pub fn claim(
             n
         }
         None => {
+            if let Some(project) = project {
+                require_project(conn, room, project)?;
+            }
             let next: Option<i64> = conn
                 .query_row(
                     "SELECT number FROM tasks
                      WHERE room = ?1 AND stage = ?2 AND claim_member IS NULL
+                         AND (?3 IS NULL OR project = ?3)
                      ORDER BY priority, number LIMIT 1",
-                    params![room.as_bytes().as_slice(), stage_to_int(target)],
+                    params![
+                        room.as_bytes().as_slice(),
+                        stage_to_int(target),
+                        project.map(int)
+                    ],
                     |r| r.get(0),
                 )
                 .optional()?;
@@ -861,17 +998,22 @@ mod tests {
         MemberId([n; 32])
     }
 
-    /// A store connection with one room and member 1 in it.
-    fn setup() -> (Connection, RoomId, MemberId) {
-        let store = Store::init(Connection::open_in_memory().unwrap()).unwrap();
-        let conn = Arc::try_unwrap(store.conn)
+    /// The connection of a store that nothing else holds.
+    fn into_conn(store: Store) -> Connection {
+        Arc::try_unwrap(store.conn)
             .ok()
             .unwrap()
             .into_inner()
-            .unwrap();
+            .unwrap()
+    }
+
+    /// A store connection with one room, its project 1 ("app") and member 1 in it.
+    fn setup() -> (Connection, RoomId, MemberId) {
+        let conn = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
         let room = RoomId([7; 32]);
         let me = member(1);
         create_room(&conn, &room, "room", &me, NOW).unwrap();
+        create_project(&conn, &room, "app", NOW).unwrap();
         (conn, room, me)
     }
 
@@ -882,7 +1024,7 @@ mod tests {
         } else {
             Stage::Proposed
         };
-        let n = create_task(conn, room, me, first, "t", "", NOW)
+        let n = create_task(conn, room, me, 1, first, "t", "", NOW)
             .unwrap()
             .number;
         let steps: &[Decision] = match stage {
@@ -896,7 +1038,7 @@ mod tests {
             decide(conn, room, n, *d, NOW).unwrap();
         }
         if matches!(stage, Stage::Planned | Stage::Ready) {
-            claim(conn, room, me, Work::Plan, Some(n), "a", NOW).unwrap();
+            claim(conn, room, me, Work::Plan, None, Some(n), "a", NOW).unwrap();
             submit_plan(conn, room, me, n, "plan", NOW).unwrap();
         }
         if stage == Stage::Ready {
@@ -915,7 +1057,7 @@ mod tests {
         set_priority(&conn, &room, nums[0], Priority::Low, NOW).unwrap();
 
         let mut order = Vec::new();
-        while let Some(t) = claim(&conn, &room, &me, Work::Plan, None, "a", NOW).unwrap() {
+        while let Some(t) = claim(&conn, &room, &me, Work::Plan, None, None, "a", NOW).unwrap() {
             assert_eq!(t.claim.as_ref().unwrap().work, Work::Plan);
             order.push(t.number);
         }
@@ -929,16 +1071,16 @@ mod tests {
         let accepted = task_in(&conn, &room, &me, Stage::Accepted);
         let ready = task_in(&conn, &room, &me, Stage::Ready);
 
-        let built = claim(&conn, &room, &me, Work::Build, None, "a", NOW)
+        let built = claim(&conn, &room, &me, Work::Build, None, None, "a", NOW)
             .unwrap()
             .unwrap();
         assert_eq!(built.number, ready);
         assert!(
-            claim(&conn, &room, &me, Work::Build, None, "a", NOW)
+            claim(&conn, &room, &me, Work::Build, None, None, "a", NOW)
                 .unwrap()
                 .is_none()
         );
-        let planned = claim(&conn, &room, &me, Work::Plan, None, "a", NOW)
+        let planned = claim(&conn, &room, &me, Work::Plan, None, None, "a", NOW)
             .unwrap()
             .unwrap();
         assert_eq!(planned.number, accepted);
@@ -949,16 +1091,25 @@ mod tests {
         let (conn, room, me) = setup();
         let n = task_in(&conn, &room, &me, Stage::Accepted);
         assert!(matches!(
-            claim(&conn, &room, &me, Work::Build, Some(n), "a", NOW),
+            claim(&conn, &room, &me, Work::Build, None, Some(n), "a", NOW),
             Err(Fail::Api(ApiError::WrongStage(Stage::Accepted)))
         ));
-        claim(&conn, &room, &me, Work::Plan, Some(n), "a", NOW).unwrap();
+        claim(&conn, &room, &me, Work::Plan, None, Some(n), "a", NOW).unwrap();
         assert!(matches!(
-            claim(&conn, &room, &member(2), Work::Plan, Some(n), "b", NOW),
+            claim(
+                &conn,
+                &room,
+                &member(2),
+                Work::Plan,
+                None,
+                Some(n),
+                "b",
+                NOW
+            ),
             Err(Fail::Api(ApiError::Claimed))
         ));
         assert!(matches!(
-            claim(&conn, &room, &me, Work::Plan, Some(99), "a", NOW),
+            claim(&conn, &room, &me, Work::Plan, None, Some(99), "a", NOW),
             Err(Fail::Api(ApiError::NoSuchTask))
         ));
     }
@@ -968,7 +1119,7 @@ mod tests {
         let (conn, room, me) = setup();
         let n = task_in(&conn, &room, &me, Stage::Idea);
         assert!(matches!(
-            claim(&conn, &room, &me, Work::Plan, Some(n), "a", NOW),
+            claim(&conn, &room, &me, Work::Plan, None, Some(n), "a", NOW),
             Err(Fail::Api(ApiError::WrongStage(Stage::Idea)))
         ));
         let task = propose_idea(&conn, &room, n, "T2", "b2", NOW + 1).unwrap();
@@ -1020,7 +1171,7 @@ mod tests {
         assert_eq!(decide_from(rejected, Reopen), Ok(Proposed));
         let done = |c: &Connection, r: &RoomId, m: &MemberId| {
             let n = task_in(c, r, m, Ready);
-            claim(c, r, m, Work::Build, Some(n), "a", NOW).unwrap();
+            claim(c, r, m, Work::Build, None, Some(n), "a", NOW).unwrap();
             finish(c, r, m, n, "", NOW).unwrap();
             n
         };
@@ -1063,7 +1214,7 @@ mod tests {
     fn replan_of_a_claimed_ready_task_is_wrong_stage() {
         let claimed = |c: &Connection, r: &RoomId, m: &MemberId| {
             let n = task_in(c, r, m, Stage::Ready);
-            claim(c, r, m, Work::Build, Some(n), "a", NOW).unwrap();
+            claim(c, r, m, Work::Build, None, Some(n), "a", NOW).unwrap();
             n
         };
         assert_eq!(
@@ -1083,7 +1234,7 @@ mod tests {
         ));
 
         let n = task_in(&conn, &room, &me, Stage::Accepted);
-        claim(&conn, &room, &me, Work::Plan, Some(n), "a", NOW).unwrap();
+        claim(&conn, &room, &me, Work::Plan, None, Some(n), "a", NOW).unwrap();
         let task = decide(&conn, &room, n, Decision::Reject, NOW).unwrap();
         assert_eq!(task.stage, Stage::Rejected);
         assert!(task.claim.is_none());
@@ -1091,7 +1242,7 @@ mod tests {
 
     #[test]
     fn newer_schema_versions_are_refused() {
-        for version in [2, 99, -1] {
+        for version in [3, 99, -1] {
             let conn = Connection::open_in_memory().unwrap();
             conn.pragma_update(None, "user_version", version).unwrap();
             let err = Store::init(conn).err().expect("refused");
@@ -1103,7 +1254,124 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .unwrap();
-        // Version 1 is used as is.
+        // The current version is used as is.
         assert!(Store::init(conn).is_ok());
+    }
+
+    /// Schema version 1 as it was before projects, verbatim.
+    const SCHEMA_V1: &str = "
+CREATE TABLE people(member BLOB PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE rooms(id BLOB PRIMARY KEY, name TEXT NOT NULL, created_ms INTEGER NOT NULL,
+    next_number INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE members(room BLOB NOT NULL, member BLOB NOT NULL, joined_ms INTEGER NOT NULL,
+    PRIMARY KEY(room, member));
+CREATE INDEX members_by_member ON members(member);
+CREATE TABLE tasks(room BLOB NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL,
+    body TEXT NOT NULL, plan TEXT NOT NULL, stage INTEGER NOT NULL, priority INTEGER NOT NULL,
+    author BLOB NOT NULL, created_ms INTEGER NOT NULL, updated_ms INTEGER NOT NULL,
+    claim_member BLOB, claim_agent TEXT, claim_work INTEGER, claim_since_ms INTEGER,
+    claim_token BLOB, PRIMARY KEY(room, number));
+CREATE TABLE notes(room BLOB NOT NULL, number INTEGER NOT NULL, at_ms INTEGER NOT NULL,
+    author BLOB NOT NULL, agent TEXT, text TEXT NOT NULL);
+CREATE INDEX notes_by_task ON notes(room, number);
+";
+
+    #[test]
+    fn migration_puts_every_room_and_its_tasks_into_project_one() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        let room = RoomId([7; 32]);
+        conn.execute(
+            "INSERT INTO rooms(id, name, created_ms, next_number) VALUES (?1, 'crew', 5, 2)",
+            [room.as_bytes().as_slice()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks(room, number, title, body, plan, stage, priority, author,
+                 created_ms, updated_ms) VALUES (?1, 1, 't', '', '', 0, 1, ?2, 5, 5)",
+            [room.as_bytes().as_slice(), member(1).as_bytes().as_slice()],
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+
+        let conn = into_conn(Store::init(conn).unwrap());
+        assert_eq!(
+            read_projects(&conn, &room).unwrap(),
+            vec![Project {
+                id: 1,
+                name: "crew".into()
+            }]
+        );
+        assert_eq!(read_task(&conn, &room, 1).unwrap().unwrap().project, 1);
+        assert_eq!(create_project(&conn, &room, "web", NOW).unwrap().id, 2);
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn project_names_are_unique_case_insensitively() {
+        let (conn, room, _) = setup();
+        assert!(matches!(
+            create_project(&conn, &room, "App", NOW),
+            Err(Fail::Api(ApiError::ProjectExists))
+        ));
+        let site = create_project(&conn, &room, "site", NOW).unwrap();
+        assert_eq!(site.id, 2);
+        assert!(matches!(
+            rename_project(&conn, &room, 2, "APP"),
+            Err(Fail::Api(ApiError::ProjectExists))
+        ));
+        assert_eq!(rename_project(&conn, &room, 1, "App").unwrap().name, "App");
+        assert!(matches!(
+            rename_project(&conn, &room, 9, "x"),
+            Err(Fail::Api(ApiError::NoSuchProject))
+        ));
+    }
+
+    #[test]
+    fn claim_without_number_stays_in_its_project() {
+        let (conn, room, me) = setup();
+        create_project(&conn, &room, "site", NOW).unwrap();
+        let first = task_in(&conn, &room, &me, Stage::Accepted);
+        let second = task_in(&conn, &room, &me, Stage::Accepted);
+        move_task(&conn, &room, second, 2, NOW).unwrap();
+
+        let taken = claim(&conn, &room, &me, Work::Plan, Some(2), None, "a", NOW)
+            .unwrap()
+            .unwrap();
+        assert_eq!(taken.number, second);
+        assert!(
+            claim(&conn, &room, &me, Work::Plan, Some(2), None, "a", NOW)
+                .unwrap()
+                .is_none()
+        );
+        assert!(matches!(
+            claim(&conn, &room, &me, Work::Plan, Some(9), None, "a", NOW),
+            Err(Fail::Api(ApiError::NoSuchProject))
+        ));
+        let rest = claim(&conn, &room, &me, Work::Plan, Some(1), None, "a", NOW)
+            .unwrap()
+            .unwrap();
+        assert_eq!(rest.number, first);
+    }
+
+    #[test]
+    fn move_task_needs_an_existing_project() {
+        let (conn, room, me) = setup();
+        create_project(&conn, &room, "site", NOW).unwrap();
+        let n = task_in(&conn, &room, &me, Stage::Proposed);
+        let moved = move_task(&conn, &room, n, 2, NOW + 5).unwrap();
+        assert_eq!((moved.project, moved.updated_ms), (2, NOW + 5));
+        assert!(matches!(
+            move_task(&conn, &room, n, 9, NOW),
+            Err(Fail::Api(ApiError::NoSuchProject))
+        ));
+
+        let done = task_in(&conn, &room, &me, Stage::Ready);
+        claim(&conn, &room, &me, Work::Build, None, Some(done), "a", NOW).unwrap();
+        finish(&conn, &room, &me, done, "", NOW).unwrap();
+        assert_eq!(move_task(&conn, &room, done, 2, NOW).unwrap().project, 2);
     }
 }

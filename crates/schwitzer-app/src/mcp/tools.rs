@@ -12,7 +12,8 @@ use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabiliti
 use rmcp::{ServerHandler, schemars, tool, tool_handler, tool_router};
 use schwitzer_client::Client;
 use schwitzer_proto::{
-    Claim, Member, MemberId, Priority, Request, Response, RoomId, RoomState, Stage, Task, Work,
+    Claim, Member, MemberId, Priority, Project, Request, Response, RoomId, RoomState, Stage, Task,
+    Work,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -80,6 +81,9 @@ struct ListTasksArgs {
     /// Only tasks in this stage.
     #[serde(default)]
     stage: Option<StageArg>,
+    /// Project name or number; omitted, the tasks of every project.
+    #[serde(default)]
+    project: Option<String>,
 }
 
 /// Arguments of `get_task`.
@@ -98,6 +102,10 @@ struct ProposeArgs {
     /// Room name or id prefix; may be omitted when exactly one room is joined.
     #[serde(default)]
     room: Option<String>,
+    /// Project name or number of the new task; may be omitted when the room has exactly one
+    /// project. Ignored with `idea`: the idea keeps its project.
+    #[serde(default)]
+    project: Option<String>,
     /// One-line title.
     title: String,
     /// What should be done and why (Markdown).
@@ -114,6 +122,10 @@ struct AddIdeaArgs {
     /// Room name or id prefix; may be omitted when exactly one room is joined.
     #[serde(default)]
     room: Option<String>,
+    /// Project name or number of the new task; may be omitted when the room has exactly one
+    /// project.
+    #[serde(default)]
+    project: Option<String>,
     /// One-line idea.
     title: String,
     /// A few more words (optional).
@@ -133,6 +145,9 @@ struct ClaimArgs {
     /// Task number; omitted, the next free task of that kind is claimed.
     #[serde(default)]
     task: Option<u64>,
+    /// Only tasks of this project (name or number) when `task` is omitted.
+    #[serde(default)]
+    project: Option<String>,
     /// Name of this agent, shown to the room.
     agent: String,
 }
@@ -211,6 +226,11 @@ impl RoomRef {
     fn members(&self) -> &[Member] {
         self.state.as_ref().map_or(&[], |s| &s.members)
     }
+
+    /// The room's projects; empty while the room is not loaded.
+    fn projects(&self) -> &[Project] {
+        self.state.as_ref().map_or(&[], |s| &s.projects)
+    }
 }
 
 fn id8(id: &RoomId) -> String {
@@ -270,6 +290,62 @@ fn resolve_room<'a>(rooms: &'a [RoomRef], arg: Option<&str>) -> Result<&'a RoomR
     }
 }
 
+/// The name of project `id`, or `#id` when the project is not known.
+fn project_name(projects: &[Project], id: u64) -> String {
+    projects
+        .iter()
+        .find(|p| p.id == id)
+        .map_or_else(|| format!("#{id}"), |p| p.name.clone())
+}
+
+/// The names of `projects`, for error messages.
+fn project_list(projects: &[Project]) -> String {
+    projects
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The project `arg` means: a project name (case-insensitive, exact) or a project number.
+fn find_project<'a>(projects: &'a [Project], arg: &str) -> Result<&'a Project, String> {
+    if projects.is_empty() {
+        return Err(
+            "This room has no projects yet; a member creates one in the Schwitzer app.".into(),
+        );
+    }
+    let arg = arg.trim();
+    let wanted = arg.to_lowercase();
+    projects
+        .iter()
+        .find(|p| p.name.to_lowercase() == wanted)
+        .or_else(|| {
+            let id = arg.parse::<u64>().ok()?;
+            projects.iter().find(|p| p.id == id)
+        })
+        .ok_or_else(|| {
+            format!(
+                "No project matches \"{arg}\". Projects: {}",
+                project_list(projects)
+            )
+        })
+}
+
+/// The project a new task goes to: `arg` when given, else the room's only project.
+fn target_project<'a>(projects: &'a [Project], arg: Option<&str>) -> Result<&'a Project, String> {
+    if let Some(arg) = arg.map(str::trim).filter(|a| !a.is_empty()) {
+        return find_project(projects, arg);
+    }
+    match projects {
+        [] => find_project(projects, ""),
+        [only] => Ok(only),
+        _ => Err(format!(
+            "Several projects; pass `project`. Projects: {}",
+            project_list(projects)
+        )),
+    }
+}
+
 /// The name of member `id`, or its short id when the member is not known.
 fn member_name(members: &[Member], id: &MemberId) -> String {
     members
@@ -318,10 +394,11 @@ fn claim_json(claim: &Claim, members: &[Member]) -> Value {
 }
 
 /// A task as one row of `list_tasks`.
-fn task_row(task: &Task, members: &[Member]) -> Value {
+fn task_row(task: &Task, members: &[Member], projects: &[Project]) -> Value {
     json!({
         "number": task.number,
         "title": task.title,
+        "project": project_name(projects, task.project),
         "stage": stage_of(task).name(),
         "priority": priority_name(task.priority),
         "claim": task.claim.as_ref().map(|c| claim_json(c, members)),
@@ -329,7 +406,7 @@ fn task_row(task: &Task, members: &[Member]) -> Value {
 }
 
 /// A task with body, plan and notes.
-fn task_json(task: &Task, members: &[Member]) -> Value {
+fn task_json(task: &Task, members: &[Member], projects: &[Project]) -> Value {
     let notes: Vec<Value> = task
         .notes
         .iter()
@@ -345,6 +422,7 @@ fn task_json(task: &Task, members: &[Member]) -> Value {
     json!({
         "number": task.number,
         "title": task.title,
+        "project": project_name(projects, task.project),
         "body": task.body,
         "plan": task.plan,
         "stage": stage_of(task).name(),
@@ -365,6 +443,7 @@ fn room_row(room: &RoomRef, me: MemberId) -> Value {
             "name": null,
             "online": false,
             "members": [],
+            "projects": [],
             "counts": null,
         });
     };
@@ -374,6 +453,11 @@ fn room_row(room: &RoomRef, me: MemberId) -> Value {
         "name": state.name,
         "online": state.members.iter().any(|m| m.id == me && m.online),
         "members": state.members.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
+        "projects": state
+            .projects
+            .iter()
+            .map(|p| json!({"id": p.id, "name": p.name}))
+            .collect::<Vec<_>>(),
         "counts": {
             "ideas": count(StageArg::Idea),
             "proposed": count(StageArg::Proposed),
@@ -387,7 +471,7 @@ fn room_row(room: &RoomRef, me: MemberId) -> Value {
 
 /// The answer of `claim` for a claimed `task`: the marker line the agent echoes into its session
 /// log, what to do next, then the task.
-fn claim_text(task: &Task, members: &[Member]) -> Result<String, String> {
+fn claim_text(task: &Task, members: &[Member], projects: &[Project]) -> Result<String, String> {
     let claim = task
         .claim
         .as_ref()
@@ -399,7 +483,7 @@ fn claim_text(task: &Task, members: &[Member]) -> Result<String, String> {
     Ok(format!(
         "schwitzer-claim: {}\n{next}\n{}",
         claim.token,
-        pretty(&task_json(task, members))?
+        pretty(&task_json(task, members, projects))?
     ))
 }
 
@@ -474,22 +558,23 @@ impl Tools {
         }
     }
 
-    /// Sends `request` for the room `arg` names and shows the updated task.
+    /// Sends the request `request` builds for the room `arg` names and shows the updated task.
     async fn update_task(
         &self,
         arg: Option<String>,
-        request: impl FnOnce(RoomId) -> Request,
+        request: impl FnOnce(&RoomRef) -> Result<Request, String>,
     ) -> Result<String, String> {
         let room = self.room(arg.as_deref())?;
-        let task = self.task_request(&room, request(room.id)).await?;
-        pretty(&task_json(&task, room.members()))
+        let request = request(&room)?;
+        let task = self.task_request(&room, request).await?;
+        pretty(&task_json(&task, room.members(), room.projects()))
     }
 }
 
 #[tool_router]
 impl Tools {
     #[tool(
-        description = "List the rooms of this user: id, name, whether connected, member names and how many tasks are ideas, proposed, in planning (accepted or planned), ready to build and in progress."
+        description = "List the rooms of this user: id, name, whether connected, member names, its projects (id and name) and how many tasks are ideas, proposed, in planning (accepted or planned), ready to build and in progress."
     )]
     async fn list_rooms(&self) -> CallToolResult {
         Self::bounded(async {
@@ -501,17 +586,27 @@ impl Tools {
     }
 
     #[tool(
-        description = "List the tasks of a room: number, title, stage, priority and who claims it. Stages: idea (a rough sketch, not proposed yet), proposed, accepted, planned, ready (approved, nobody builds it yet), in_progress, done, rejected."
+        description = "List the tasks of a room, or of one of its projects: number, title, project, stage, priority and who claims it. Stages: idea (a rough sketch, not proposed yet), proposed, accepted, planned, ready (approved, nobody builds it yet), in_progress, done, rejected."
     )]
     async fn list_tasks(&self, Parameters(args): Parameters<ListTasksArgs>) -> CallToolResult {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
             let state = room.loaded()?;
+            let project = match args
+                .project
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+            {
+                Some(arg) => Some(find_project(&state.projects, arg)?.id),
+                None => None,
+            };
             let rows: Vec<Value> = state
                 .tasks
                 .iter()
                 .filter(|t| args.stage.is_none_or(|s| stage_of(t) == s))
-                .map(|t| task_row(t, &state.members))
+                .filter(|t| project.is_none_or(|id| t.project == id))
+                .map(|t| task_row(t, &state.members, &state.projects))
                 .collect();
             pretty(&Value::Array(rows))
         })
@@ -530,7 +625,7 @@ impl Tools {
                 .iter()
                 .find(|t| t.number == args.task)
                 .ok_or_else(|| schwitzer_proto::ApiError::NoSuchTask.to_string())?;
-            pretty(&task_json(task, &state.members))
+            pretty(&task_json(task, &state.members, &state.projects))
         })
         .await
     }
@@ -539,18 +634,21 @@ impl Tools {
         description = "Propose a task to a room, or write up one of its ideas into a proposal (pass `idea`). Room members accept or reject it; you cannot."
     )]
     async fn propose(&self, Parameters(args): Parameters<ProposeArgs>) -> CallToolResult {
-        Self::bounded(self.update_task(args.room, |room| match args.idea {
-            Some(task) => Request::ProposeIdea {
-                room,
-                task,
-                title: args.title,
-                body: args.body,
-            },
-            None => Request::Propose {
-                room,
-                title: args.title,
-                body: args.body,
-            },
+        Self::bounded(self.update_task(args.room, |room| {
+            Ok(match args.idea {
+                Some(task) => Request::ProposeIdea {
+                    room: room.id,
+                    task,
+                    title: args.title,
+                    body: args.body,
+                },
+                None => Request::Propose {
+                    room: room.id,
+                    project: target_project(&room.loaded()?.projects, args.project.as_deref())?.id,
+                    title: args.title,
+                    body: args.body,
+                },
+            })
         }))
         .await
     }
@@ -559,10 +657,13 @@ impl Tools {
         description = "Note an idea for a room: a rough task that someone writes up into a proposal later (propose with `idea`)."
     )]
     async fn add_idea(&self, Parameters(args): Parameters<AddIdeaArgs>) -> CallToolResult {
-        Self::bounded(self.update_task(args.room, |room| Request::AddIdea {
-            room,
-            title: args.title,
-            body: args.body,
+        Self::bounded(self.update_task(args.room, |room| {
+            Ok(Request::AddIdea {
+                room: room.id,
+                project: target_project(&room.loaded()?.projects, args.project.as_deref())?.id,
+                title: args.title,
+                body: args.body,
+            })
         }))
         .await
     }
@@ -573,6 +674,15 @@ impl Tools {
     async fn claim(&self, Parameters(args): Parameters<ClaimArgs>) -> CallToolResult {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
+            let project = match args
+                .project
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+            {
+                Some(arg) => Some(find_project(&room.loaded()?.projects, arg)?.id),
+                None => None,
+            };
             let response = self
                 .client
                 .request(
@@ -580,6 +690,7 @@ impl Tools {
                     Request::Claim {
                         room: room.id,
                         work: args.work.into(),
+                        project,
                         task: args.task,
                         agent: args.agent,
                     },
@@ -587,7 +698,7 @@ impl Tools {
                 .await
                 .map_err(|e| e.to_string())?;
             match response {
-                Response::Claimed(Some(task)) => claim_text(&task, room.members()),
+                Response::Claimed(Some(task)) => claim_text(&task, room.members(), room.projects()),
                 Response::Claimed(None) => Ok("No free task.".into()),
                 _ => Err(unexpected()),
             }
@@ -599,10 +710,12 @@ impl Tools {
         description = "Hand in the plan for a task you claimed with work \"plan\". Room members then approve it or ask for a new plan."
     )]
     async fn submit_plan(&self, Parameters(args): Parameters<SubmitPlanArgs>) -> CallToolResult {
-        Self::bounded(self.update_task(args.room, |room| Request::SubmitPlan {
-            room,
-            task: args.task,
-            plan: args.plan,
+        Self::bounded(self.update_task(args.room, |room| {
+            Ok(Request::SubmitPlan {
+                room: room.id,
+                task: args.task,
+                plan: args.plan,
+            })
         }))
         .await
     }
@@ -611,10 +724,12 @@ impl Tools {
         description = "Finish a task you claimed with work \"build\", with a note on what was done."
     )]
     async fn finish(&self, Parameters(args): Parameters<NoteArgs>) -> CallToolResult {
-        Self::bounded(self.update_task(args.room, |room| Request::Finish {
-            room,
-            task: args.task,
-            note: args.note,
+        Self::bounded(self.update_task(args.room, |room| {
+            Ok(Request::Finish {
+                room: room.id,
+                task: args.task,
+                note: args.note,
+            })
         }))
         .await
     }
@@ -623,21 +738,25 @@ impl Tools {
         description = "Give a claimed task back without finishing it, with a note on why; someone else can claim it."
     )]
     async fn release(&self, Parameters(args): Parameters<NoteArgs>) -> CallToolResult {
-        Self::bounded(self.update_task(args.room, |room| Request::Release {
-            room,
-            task: args.task,
-            note: args.note,
+        Self::bounded(self.update_task(args.room, |room| {
+            Ok(Request::Release {
+                room: room.id,
+                task: args.task,
+                note: args.note,
+            })
         }))
         .await
     }
 
     #[tool(description = "Add a note to a task, for example progress or a question for the room.")]
     async fn add_note(&self, Parameters(args): Parameters<AddNoteArgs>) -> CallToolResult {
-        Self::bounded(self.update_task(args.room, |room| Request::AddNote {
-            room,
-            task: args.task,
-            text: args.text,
-            agent: args.agent,
+        Self::bounded(self.update_task(args.room, |room| {
+            Ok(Request::AddNote {
+                room: room.id,
+                task: args.task,
+                text: args.text,
+                agent: args.agent,
+            })
         }))
         .await
     }
@@ -650,7 +769,8 @@ impl ServerHandler for Tools {
             .with_server_info(Implementation::new("schwitzer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "schwitzer is a task manager for coding agents and their humans. A room holds \
-                 tasks. Anyone proposes a task (propose); a rough idea can be noted first \
+                 projects, and every task belongs to one of them. Anyone proposes a task \
+                 (propose); a rough idea can be noted first \
                  (add_idea) and written up into a proposal later (propose with idea); a human \
                  accepts it; an agent claims it to write a plan (claim with work \"plan\", then \
                  submit_plan); a human approves the plan; an agent claims it to build (claim \
@@ -680,6 +800,7 @@ mod tests {
     fn task(number: u64, stage: Stage, claim: Option<Claim>) -> Task {
         Task {
             number,
+            project: 1,
             title: format!("task {number}"),
             body: "body".into(),
             plan: "plan".into(),
@@ -715,6 +836,16 @@ mod tests {
             state: Some(RoomState {
                 id,
                 name: name.into(),
+                projects: vec![
+                    Project {
+                        id: 1,
+                        name: "app".into(),
+                    },
+                    Project {
+                        id: 2,
+                        name: "site".into(),
+                    },
+                ],
                 members: vec![member(1, "alice", true), member(2, "bob", false)],
                 tasks,
                 sessions: Vec::new(),
@@ -786,16 +917,19 @@ mod tests {
 
     #[test]
     fn tasks_show_their_stage_and_hide_the_claim_token() {
-        let members = room(1, "r", vec![]).state.unwrap().members;
+        let state = room(1, "r", vec![]).state.unwrap();
+        let (members, projects) = (state.members, state.projects);
         let building = task(1, Stage::Ready, Some(claim(Work::Build)));
         assert_eq!(stage_of(&building), StageArg::InProgress);
         assert_eq!(stage_of(&task(2, Stage::Ready, None)), StageArg::Ready);
         assert_eq!(stage_of(&task(3, Stage::Idea, None)), StageArg::Idea);
-        let row = task_row(&building, &members);
+        let row = task_row(&building, &members, &projects);
+        assert_eq!(row["project"], "app");
         assert_eq!(row["stage"], "in_progress");
         assert_eq!(row["claim"]["member"], "bob");
         assert!(!row.to_string().contains("abab"));
-        let full = task_json(&building, &members);
+        let full = task_json(&building, &members, &projects);
+        assert_eq!(full["project"], "app");
         assert_eq!(full["author"], "alice");
         assert_eq!(full["notes"][0]["author"], "bob");
         assert!(!full.to_string().contains("abab"));
@@ -818,6 +952,10 @@ mod tests {
         assert_eq!(row["online"], true);
         assert_eq!(row["members"], json!(["alice", "bob"]));
         assert_eq!(
+            row["projects"],
+            json!([{"id": 1, "name": "app"}, {"id": 2, "name": "site"}])
+        );
+        assert_eq!(
             row["counts"],
             json!({"ideas": 1, "proposed": 1, "planning": 3, "ready": 1, "in_progress": 1})
         );
@@ -825,9 +963,14 @@ mod tests {
 
     #[test]
     fn a_claim_starts_with_the_marker_line() {
-        let members = room(1, "r", vec![]).state.unwrap().members;
-        let text =
-            claim_text(&task(1, Stage::Accepted, Some(claim(Work::Plan))), &members).unwrap();
+        let state = room(1, "r", vec![]).state.unwrap();
+        let (members, projects) = (state.members, state.projects);
+        let text = claim_text(
+            &task(1, Stage::Accepted, Some(claim(Work::Plan))),
+            &members,
+            &projects,
+        )
+        .unwrap();
         let mut lines = text.lines();
         assert_eq!(
             lines.next(),
@@ -838,12 +981,46 @@ mod tests {
             Some("Write a plan for this task and call submit_plan.")
         );
         assert!(text.contains("\"number\": 1"));
-        let build = claim_text(&task(1, Stage::Ready, Some(claim(Work::Build))), &members).unwrap();
+        let build = claim_text(
+            &task(1, Stage::Ready, Some(claim(Work::Build))),
+            &members,
+            &projects,
+        )
+        .unwrap();
         assert!(
             build.contains(
                 "Implement the approved plan, then call finish (or release if you stop)."
             )
         );
-        assert!(claim_text(&task(1, Stage::Ready, None), &members).is_err());
+        assert!(claim_text(&task(1, Stage::Ready, None), &members, &projects).is_err());
+    }
+
+    #[test]
+    fn a_project_is_found_by_name_or_number_and_named_when_there_are_several() {
+        let projects = room(1, "r", vec![]).state.unwrap().projects;
+        assert_eq!(find_project(&projects, " SITE ").unwrap().id, 2);
+        assert_eq!(find_project(&projects, "1").unwrap().name, "app");
+        let err = find_project(&projects, "nope").unwrap_err();
+        assert_eq!(err, "No project matches \"nope\". Projects: app, site");
+        assert!(find_project(&projects, "9").is_err());
+        assert!(
+            find_project(&[], "app")
+                .unwrap_err()
+                .contains("no projects yet")
+        );
+
+        let err = target_project(&projects, None).unwrap_err();
+        assert_eq!(err, "Several projects; pass `project`. Projects: app, site");
+        assert_eq!(target_project(&projects, Some("  ")).unwrap_err(), err);
+        assert_eq!(target_project(&projects, Some("site")).unwrap().id, 2);
+        assert_eq!(target_project(&projects[..1], None).unwrap().id, 1);
+        assert!(
+            target_project(&[], None)
+                .unwrap_err()
+                .contains("no projects")
+        );
+
+        assert_eq!(project_name(&projects, 2), "site");
+        assert_eq!(project_name(&projects, 7), "#7");
     }
 }

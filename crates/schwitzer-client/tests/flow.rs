@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use schwitzer_client::{Client, ClientError, ClientEvent};
 use schwitzer_proto::{
-    ApiError, Decision, MemberId, Priority, Request, Response, RoomId, RoomKey, RoomState,
+    ApiError, Decision, MemberId, Priority, Project, Request, Response, RoomId, RoomKey, RoomState,
     ServerAddr, Stage, Task, Work,
 };
 use schwitzer_server::{Options, Server};
@@ -68,6 +68,13 @@ fn claimed(response: Response) -> Task {
     }
 }
 
+fn project(response: Response) -> Project {
+    match response {
+        Response::Project(project) => project,
+        other => panic!("expected a project, got {other:?}"),
+    }
+}
+
 fn api_error(result: Result<Response, ClientError>) -> ApiError {
     match result {
         Err(ClientError::Api(e)) => e,
@@ -104,12 +111,69 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
     assert_eq!(a.rooms().len(), 1);
     assert_eq!(b.rooms()[0].0, key);
 
-    // 2. Two proposals, the second made High.
+    // 2. A creates the projects "app" and "site"; B sees them. "site" gets an accepted High
+    // task, numbered before the ones of "app".
+    let app = project(
+        a.request(
+            room,
+            Request::CreateProject {
+                room,
+                name: "app".into(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(app.id, 1);
+    room_where(&mut rx_b, |s| s.projects.contains(&app)).await;
+    let site = project(
+        a.request(
+            room,
+            Request::CreateProject {
+                room,
+                name: "site".into(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(site.id, 2);
+    let site_task = task(
+        a.request(
+            room,
+            Request::Propose {
+                room,
+                project: site.id,
+                title: "new landing page".into(),
+                body: String::new(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(site_task.project, site.id);
+    for request in [
+        Request::SetPriority {
+            room,
+            task: site_task.number,
+            priority: Priority::High,
+        },
+        Request::Decide {
+            room,
+            task: site_task.number,
+            decision: Decision::Accept,
+        },
+    ] {
+        task(a.request(room, request).await.unwrap());
+    }
+
+    // Two proposals in "app", the second made High.
     let normal = task(
         a.request(
             room,
             Request::Propose {
                 room,
+                project: app.id,
                 title: "tidy up".into(),
                 body: String::new(),
             },
@@ -122,6 +186,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
             room,
             Request::Propose {
                 room,
+                project: app.id,
                 title: "fix the build".into(),
                 body: String::new(),
             },
@@ -149,6 +214,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
             Request::Claim {
                 room,
                 work: Work::Build,
+                project: None,
                 task: Some(normal.number),
                 agent: "bob-agent".into(),
             },
@@ -162,6 +228,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
             room,
             Request::AddIdea {
                 room,
+                project: app.id,
                 title: "faster sync".into(),
                 body: String::new(),
             },
@@ -186,7 +253,8 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
         ApiError::WrongStage(Stage::Proposed)
     );
 
-    // 5. After both are accepted, B's next plan claim is the High one.
+    // 5. After both are accepted, B's next plan claim in "app" is its High one, not the
+    // older High one of "site".
     for number in [normal.number, urgent.number] {
         let accepted = task(
             a.request(
@@ -208,6 +276,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
             Request::Claim {
                 room,
                 work: Work::Plan,
+                project: Some(app.id),
                 task: None,
                 agent: "bob-agent".into(),
             },
@@ -217,6 +286,45 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
     );
     assert_eq!(plan_claim.number, urgent.number);
     assert_eq!(plan_claim.claim.as_ref().unwrap().member, b.member());
+
+    // The "site" task moves to "app"; "site" is renamed to "web", whose name then is taken
+    // in any case.
+    let moved = task(
+        a.request(
+            room,
+            Request::MoveTask {
+                room,
+                task: site_task.number,
+                project: app.id,
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(moved.project, app.id);
+    let web = project(
+        a.request(
+            room,
+            Request::RenameProject {
+                room,
+                project: site.id,
+                name: "web".into(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(web.id, site.id);
+    let taken = b
+        .request(
+            room,
+            Request::CreateProject {
+                room,
+                name: "WEB".into(),
+            },
+        )
+        .await;
+    assert_eq!(api_error(taken), ApiError::ProjectExists);
 
     // 6. A cannot submit a plan on B's claim.
     let stolen = a
@@ -266,6 +374,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
             Request::Claim {
                 room,
                 work: Work::Build,
+                project: None,
                 task: None,
                 agent: "bob-agent".into(),
             },
@@ -302,7 +411,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
     assert!(finished.notes.iter().any(|n| n.text == "shipped"));
 
     // 9. The server restarts on its port with the same data: the key still joins and the
-    // tasks are still there.
+    // projects and tasks are still there.
     let port = addr.port;
     server.shutdown().await;
     let mut rx_b = b.subscribe();
@@ -311,13 +420,16 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
     assert_eq!(server.addr, addr);
     assert_eq!(b.join_room(key.clone()).await.unwrap(), room);
     let state = room_where(&mut rx_b, |s| {
-        s.tasks.len() == 3
+        s.tasks.len() == 4
             && s.tasks
                 .iter()
                 .any(|t| t.number == urgent.number && t.stage == Stage::Done)
     })
     .await;
     assert_eq!(state.id, room);
+    assert_eq!(state.projects, [app.clone(), web]);
+    let moved = state.tasks.iter().find(|t| t.number == site_task.number);
+    assert_eq!(moved.map(|t| t.project), Some(app.id));
     let kept: Vec<RoomKey> = b.rooms().into_iter().map(|(key, _)| key).collect();
     assert_eq!(kept, [key]);
 

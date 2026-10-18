@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use schwitzer_proto::RoomId;
 use serde::{Deserialize, Serialize};
 
 /// The port of the MCP server unless `settings.toml` says otherwise.
@@ -29,9 +30,14 @@ pub struct Settings {
     pub rooms: Vec<String>,
     /// Whether an out-of-date omp plugin in a shared repo is rewritten as soon as the app sees it.
     pub auto_update_plugins: bool,
-    /// Per room (id in hex), the local repositories whose omp sessions are shared with it.
+    /// Per project (key `<room id hex>/<project id>`), the local repositories linked to it;
+    /// omp sessions in them are shared with the project's room.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub repos: BTreeMap<String, Vec<PathBuf>>,
+    /// Where the member keeps repos; subfolders whose name matches a project are suggested for
+    /// linking.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projects_dir: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -44,6 +50,7 @@ impl Default for Settings {
             rooms: Vec::new(),
             auto_update_plugins: true,
             repos: BTreeMap::new(),
+            projects_dir: None,
         }
     }
 }
@@ -55,13 +62,59 @@ impl Settings {
     pub fn load(dir: &Path) -> (Self, Option<String>) {
         let path = dir.join(FILE);
         match std::fs::read_to_string(&path) {
-            Ok(text) => match toml::from_str(&text) {
-                Ok(settings) => (settings, None),
+            Ok(text) => match toml::from_str::<Settings>(&text) {
+                Ok(mut settings) => {
+                    settings.migrate_room_keys();
+                    (settings, None)
+                }
                 Err(e) => (Self::default(), Some(format!("{}: {e}", path.display()))),
             },
             Err(e) if e.kind() == io::ErrorKind::NotFound => (Self::default(), None),
             Err(e) => (Self::default(), Some(format!("{}: {e}", path.display()))),
         }
+    }
+
+    /// Before projects, a `repos` key was the room alone; the server's schema migration gave
+    /// every room of that time project 1, so such keys move there.
+    fn migrate_room_keys(&mut self) {
+        let old: Vec<String> = self
+            .repos
+            .keys()
+            .filter(|key| !key.contains('/'))
+            .cloned()
+            .collect();
+        for key in old {
+            let Some(paths) = self.repos.remove(&key) else {
+                continue;
+            };
+            let linked = self.repos.entry(format!("{key}/1")).or_default();
+            for path in paths {
+                if !linked.contains(&path) {
+                    linked.push(path);
+                }
+            }
+        }
+    }
+
+    /// The repos linked to `project` of `room`.
+    pub fn project_repos(&self, room: &RoomId, project: u64) -> &[PathBuf] {
+        self.repos
+            .get(&repo_key(room, project))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The repos linked to any project of `room`, sorted and without duplicates.
+    pub fn room_repos(&self, room: &RoomId) -> Vec<PathBuf> {
+        let hex = room.to_hex();
+        let mut repos: Vec<PathBuf> = self
+            .repos
+            .iter()
+            .filter(|(key, _)| parse_repo_key(key).is_some_and(|(r, _)| r == hex))
+            .flat_map(|(_, paths)| paths.iter().cloned())
+            .collect();
+        repos.sort();
+        repos.dedup();
+        repos
     }
 
     /// Writes `settings.toml` into `dir` through a temporary file and a rename.
@@ -72,6 +125,21 @@ impl Settings {
         std::fs::write(&tmp, text)?;
         std::fs::rename(&tmp, dir.join(FILE))
     }
+}
+
+/// The `repos` key of `project` in `room`: `<room id hex>/<project id>`.
+pub fn repo_key(room: &RoomId, project: u64) -> String {
+    format!("{}/{project}", room.to_hex())
+}
+
+/// The room id in hex and the project id of a `repos` key; `None` if it is malformed.
+pub fn parse_repo_key(key: &str) -> Option<(&str, u64)> {
+    let (room, project) = key.rsplit_once('/')?;
+    let hex = room.len() == 64 && room.bytes().all(|b| b.is_ascii_hexdigit());
+    if !hex {
+        return None;
+    }
+    Some((room, project.parse().ok()?))
 }
 
 /// `$SCHWITZER_HOME`, else the platform's data directory for the app.
@@ -158,10 +226,48 @@ mod tests {
             last_server: Some("weida://sha256:00@host:7444".to_owned()),
             rooms: vec!["schwitzer://a".to_owned(), "schwitzer://b".to_owned()],
             auto_update_plugins: false,
-            repos: BTreeMap::from([("ab".to_owned(), vec![PathBuf::from("/code/x")])]),
+            repos: BTreeMap::from([(
+                format!("{}/1", "ab".repeat(32)),
+                vec![PathBuf::from("/code/x")],
+            )]),
+            projects_dir: Some(PathBuf::from("/code")),
         };
         settings.save(dir.path()).unwrap();
         assert!(!dir.path().join("settings.toml.tmp").exists());
         assert_eq!(Settings::load(dir.path()), (settings, None));
+    }
+
+    #[test]
+    fn room_keys_from_before_projects_move_to_project_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let hex = "ab".repeat(32);
+        std::fs::write(
+            dir.path().join(FILE),
+            format!("[repos]\n\"{hex}\" = [\"/a\"]\n\"{hex}/1\" = [\"/a\", \"/b\"]\n"),
+        )
+        .unwrap();
+        let (settings, problem) = Settings::load(dir.path());
+        assert_eq!(problem, None);
+        assert_eq!(
+            settings.repos,
+            BTreeMap::from([(
+                format!("{hex}/1"),
+                vec![PathBuf::from("/a"), PathBuf::from("/b")]
+            )])
+        );
+    }
+
+    #[test]
+    fn repo_keys_need_a_room_id_and_a_project_number() {
+        let hex = "ab".repeat(32);
+        assert_eq!(parse_repo_key(&format!("{hex}/3")), Some((hex.as_str(), 3)));
+        for bad in [
+            hex.clone(),
+            format!("{hex}/x"),
+            "ab/1".to_owned(),
+            format!("{}/1", "zz".repeat(32)),
+        ] {
+            assert_eq!(parse_repo_key(&bad), None, "{bad}");
+        }
     }
 }

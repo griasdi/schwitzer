@@ -31,7 +31,42 @@ impl fmt::Display for RoomChoice {
     }
 }
 
-/// The header bar: room switcher on the left, invite and settings on the right.
+/// A project as the project picker lists it, and the entry that creates one.
+#[derive(Debug, Clone)]
+pub enum ProjectChoice {
+    Project { id: u64, name: String },
+    New,
+}
+
+impl PartialEq for ProjectChoice {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Project { id: a, .. }, Self::Project { id: b, .. }) => a == b,
+            (Self::New, Self::New) => true,
+            _ => false,
+        }
+    }
+}
+
+impl fmt::Display for ProjectChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Project { name, .. } => f.write_str(name),
+            Self::New => f.write_str("New project…"),
+        }
+    }
+}
+
+impl ProjectChoice {
+    pub fn of(project: &schwitzer_proto::Project) -> Self {
+        Self::Project {
+            id: project.id,
+            name: project.name.clone(),
+        }
+    }
+}
+
+/// The header bar: room and project switchers on the left, invite and settings on the right.
 pub fn header(app: &App) -> Element<'_, Message> {
     let in_room = app.selected_state().is_some();
     let choices: Vec<RoomChoice> = app.room_choices();
@@ -50,29 +85,51 @@ pub fn header(app: &App) -> Element<'_, Message> {
         .id("room-picker")
         .into()
     };
+    let mut bar = row![rooms];
+    if let Some(state) = app.selected_state() {
+        let choices: Vec<ProjectChoice> = state
+            .projects
+            .iter()
+            .map(ProjectChoice::of)
+            .chain([ProjectChoice::New])
+            .collect();
+        let selected = app.selected_project().map(ProjectChoice::of);
+        bar = bar.push(
+            container(
+                pick_list(choices, selected, |choice| match choice {
+                    ProjectChoice::Project { id, .. } => Message::SelectProject(id),
+                    ProjectChoice::New => Message::OpenNewProject,
+                })
+                .placeholder("Project")
+                .text_size(TS_14)
+                .font(SEMIBOLD)
+                .padding([SP_1, SP_2])
+                .style(theme::picker)
+                .menu_style(theme::picker_menu),
+            )
+            .id("project-picker"),
+        );
+    }
     container(
-        row![
-            rooms,
-            Space::new().width(Length::Fill),
-            bar_icon_button(
+        bar.push(Space::new().width(Length::Fill))
+            .push(bar_icon_button(
                 "copy-key",
                 Icon::UserPlus,
                 Tone::Text,
                 "Copy room key to invite someone",
                 in_room.then_some(Message::CopyKey),
                 theme::button_ghost,
-            ),
-            bar_icon_button(
+            ))
+            .push(bar_icon_button(
                 "settings",
                 Icon::Settings,
                 Tone::Text,
                 "Settings  (Ctrl+,)",
                 Some(Message::OpenSettings),
                 theme::button_ghost,
-            ),
-        ]
-        .spacing(SP_1)
-        .align_y(Alignment::Center),
+            ))
+            .spacing(SP_1)
+            .align_y(Alignment::Center),
     )
     .padding([SP_2, SP_2])
     .width(Length::Fill)

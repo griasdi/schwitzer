@@ -3,7 +3,7 @@
 
 use iced::widget::{Space, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{Decision, RoomState, Stage, Task};
+use schwitzer_proto::{Decision, Project, RoomState, Stage, Task};
 
 use super::icons::{Icon, Tone, icon};
 use super::logic::{self, Group};
@@ -18,10 +18,10 @@ use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14}
 /// The widget id of the task list's scrollable.
 pub const LIST_ID: &str = "tasks";
 
-pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
+pub fn view<'a>(app: &'a App, state: &'a RoomState, project: &Project) -> Element<'a, Message> {
     let mut list = column![].spacing(SP_3).width(Length::Fill);
     for group in Group::ALL {
-        let tasks = logic::tasks_in(state, group);
+        let tasks = logic::tasks_in(state, project.id, group);
         // Proposals and ideas stay visible, so their `+` is always reachable.
         if tasks.is_empty() && !matches!(group, Group::Proposals | Group::Ideas) {
             continue;
@@ -47,7 +47,7 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
         }
         list = list.push(slabs);
     }
-    if state.tasks.is_empty() {
+    if !state.tasks.iter().any(|t| t.project == project.id) {
         list = list.push(
             container(muted(
                 "No tasks yet. Add a proposal with +; agents pick it up once it has a plan.",
@@ -66,8 +66,8 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
 /// A centred empty state with one action.
 pub fn empty<'a>(
     glyph: Icon,
-    title: &'a str,
-    hint: &'a str,
+    title: impl text::IntoFragment<'a>,
+    hint: impl text::IntoFragment<'a>,
     action: Element<'a, Message>,
 ) -> Element<'a, Message> {
     container(

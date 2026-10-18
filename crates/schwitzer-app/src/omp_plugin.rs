@@ -4,7 +4,7 @@
 //! into `<repo>/.omp/plugins/node_modules/schwitzer/` and enters it in
 //! `<repo>/.omp/plugins/omp-plugins.lock.json`, so omp started in the repo loads it as a
 //! project-scope plugin. It gives omp `/schwitzer plan`, `build`, `propose` and `idea`, which
-//! plan, build and propose tasks of the rooms the repo is shared with and note ideas for them
+//! plan, build and propose tasks of the projects the repo is linked to and note ideas for them
 //! through the app's MCP server. `omp-plugin/README.md` describes the plugin.
 //!
 //! The plugin gives omp's agent the app's tools itself and reaches the app's MCP server with
@@ -22,6 +22,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
+use crate::settings;
+
 /// The package name, and its key in the lock file.
 const NAME: &str = "schwitzer";
 const INDEX_TS: &str = include_str!("../omp-plugin/index.ts");
@@ -35,8 +37,16 @@ const MCP_FILE: &str = "mcp.json";
 pub struct PluginConfig {
     pub data_dir: PathBuf,
     pub mcp_url: String,
-    /// The rooms (id in hex) the repo is shared with.
-    pub rooms: Vec<String>,
+    /// The projects the repo is linked to.
+    pub projects: Vec<PluginProject>,
+}
+
+/// One project a repo is linked to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginProject {
+    /// The room id in hex.
+    pub room: String,
+    pub project: u64,
 }
 
 fn plugin_dir(repo: &Path) -> PathBuf {
@@ -51,12 +61,17 @@ fn mcp_path(repo: &Path) -> PathBuf {
     repo.join(".omp").join(MCP_FILE)
 }
 
-/// The rooms (keys of `repos`, in map order) that share `repo`.
-pub fn rooms_of(repos: &BTreeMap<String, Vec<PathBuf>>, repo: &Path) -> Vec<String> {
+/// The projects (keys of `repos`, in map order) that `repo` is linked to; malformed keys are
+/// skipped.
+pub fn projects_of(repos: &BTreeMap<String, Vec<PathBuf>>, repo: &Path) -> Vec<PluginProject> {
     repos
         .iter()
         .filter(|(_, paths)| paths.iter().any(|path| path == repo))
-        .map(|(room, _)| room.clone())
+        .filter_map(|(key, _)| settings::parse_repo_key(key))
+        .map(|(room, project)| PluginProject {
+            room: room.to_owned(),
+            project,
+        })
         .collect()
 }
 
@@ -261,7 +276,10 @@ mod tests {
         PluginConfig {
             data_dir: PathBuf::from("/data"),
             mcp_url: "http://127.0.0.1:13401/mcp".to_owned(),
-            rooms: vec!["ab".repeat(32)],
+            projects: vec![PluginProject {
+                room: "ab".repeat(32),
+                project: 1,
+            }],
         }
     }
 
@@ -408,17 +426,26 @@ mod tests {
     }
 
     #[test]
-    fn rooms_of_matches_whole_paths() {
+    fn projects_of_matches_whole_paths() {
+        let (a, c) = ("aa".repeat(32), "cc".repeat(32));
         let repos = BTreeMap::from([
-            ("a".to_owned(), vec![PathBuf::from("/code/app")]),
-            ("b".to_owned(), vec![PathBuf::from("/code/app-old")]),
+            (format!("{a}/1"), vec![PathBuf::from("/code/app")]),
+            (format!("{a}/2"), vec![PathBuf::from("/code/app-old")]),
             (
-                "c".to_owned(),
+                format!("{c}/3"),
                 vec![PathBuf::from("/code/x"), PathBuf::from("/code/app")],
             ),
+            ("malformed".to_owned(), vec![PathBuf::from("/code/app")]),
         ]);
-        assert_eq!(rooms_of(&repos, Path::new("/code/app")), ["a", "c"]);
-        assert!(rooms_of(&repos, Path::new("/code/other")).is_empty());
+        let linked = |room: &str, project| PluginProject {
+            room: room.to_owned(),
+            project,
+        };
+        assert_eq!(
+            projects_of(&repos, Path::new("/code/app")),
+            [linked(&a, 1), linked(&c, 3)]
+        );
+        assert!(projects_of(&repos, Path::new("/code/other")).is_empty());
     }
 
     #[test]

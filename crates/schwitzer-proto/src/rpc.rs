@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Decision, MemberId, Priority, RoomId, RoomToken, SessionInfo, Stage, Task, Work};
+use crate::{
+    Decision, MemberId, Priority, Project, RoomId, RoomToken, SessionInfo, Stage, Task, Work,
+};
 
 // Postcard is positional: enum variants are append-only.
 
@@ -26,6 +28,7 @@ pub enum Request {
     },
     Propose {
         room: RoomId,
+        project: u64,
         title: String,
         body: String,
     },
@@ -49,6 +52,8 @@ pub enum Request {
     Claim {
         room: RoomId,
         work: Work,
+        /// Restricts only the automatic choice (`task: None`); ignored when `task` is given.
+        project: Option<u64>,
         task: Option<u64>,
         agent: String,
     },
@@ -80,6 +85,7 @@ pub enum Request {
     /// A new task in stage `Idea`.
     AddIdea {
         room: RoomId,
+        project: u64,
         title: String,
         body: String,
     },
@@ -90,6 +96,23 @@ pub enum Request {
         title: String,
         body: String,
     },
+    /// A new project; its name is unique in the room, ignoring case.
+    CreateProject {
+        room: RoomId,
+        name: String,
+    },
+    /// Renames a project; the new name is unique in the room, ignoring case.
+    RenameProject {
+        room: RoomId,
+        project: u64,
+        name: String,
+    },
+    /// Moves a task, in any stage, into another project of its room.
+    MoveTask {
+        room: RoomId,
+        task: u64,
+        project: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +122,7 @@ pub enum Response {
     Room { id: RoomId, token: RoomToken },
     Task(Task),
     Claimed(Option<Task>),
+    Project(Project),
 }
 
 /// Shown verbatim by the UI and over MCP.
@@ -124,6 +148,10 @@ pub enum ApiError {
     Invalid(String),
     #[error("internal server error")]
     Internal,
+    #[error("no such project")]
+    NoSuchProject,
+    #[error("a project with this name already exists")]
+    ProjectExists,
 }
 
 pub type Reply = Result<Response, ApiError>;

@@ -3,7 +3,7 @@
 //! iced 0.14 buttons carry no id, so a button that has to be addressed (by tests, by the
 //! headless control) sits in a container that has one.
 
-use iced::widget::{Space, button, container, row, text, tooltip};
+use iced::widget::{Space, button, container, row, text, text_input, tooltip};
 use iced::{Alignment, Element, Length, Theme};
 use schwitzer_proto::{Priority, Stage, Task};
 
@@ -11,6 +11,23 @@ use super::Message;
 use super::icons::{Icon, Tone, icon};
 use super::logic;
 use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
+
+/// A text input with a widget id that submits with Enter.
+pub fn input<'a>(
+    id: &'static str,
+    placeholder: &'a str,
+    value: &'a str,
+    on_input: fn(String) -> Message,
+    on_submit: Message,
+) -> text_input::TextInput<'a, Message> {
+    text_input(placeholder, value)
+        .id(id)
+        .on_input(on_input)
+        .on_submit(on_submit)
+        .padding(SP_2)
+        .size(TS_14)
+        .style(theme::input)
+}
 
 /// A button with a widget id. `on_press: None` shows it disabled. The button itself has no
 /// padding: the content brings its own.

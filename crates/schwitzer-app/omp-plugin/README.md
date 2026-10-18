@@ -1,6 +1,6 @@
 # The omp plugin
 
-The Schwitzer app writes an omp extension into every repository a room shares (Settings, the room's repos), so an omp session started there gets the `/schwitzer` command. With it, the session plans, builds and proposes tasks of the rooms that share the repo and notes ideas for them, and gives the agent the app's tools, all through the app's own MCP server. The source is `index.ts` in this directory; the copies in repos are written by the app and overwritten, so edit this file, never a copy.
+The Schwitzer app writes an omp extension into every repository linked to a project (Settings, the project's linked repos), so an omp session started there gets the `/schwitzer` command. With it, the session plans, builds and proposes tasks of the projects the repo is linked to and notes ideas for them, and gives the agent the app's tools, all through the app's own MCP server. The source is `index.ts` in this directory; the copies in repos are written by the app and overwritten, so edit this file, never a copy.
 
 ## Commands
 
@@ -10,25 +10,25 @@ The Schwitzer app writes an omp extension into every repository a room shares (S
 |`/schwitzer plan`|Pick an accepted, unclaimed task, claim it for planning, start plan mode|
 |`/schwitzer build`|Pick an approved (`ready`), unclaimed task, claim it for building|
 |`/schwitzer propose [text]`|The agent drafts a proposal (or writes up an open idea), asks, then sends it|
-|`/schwitzer idea <text>`|Note an idea in a room right away, without an agent turn|
+|`/schwitzer idea <text>`|Note an idea in a project right away, without an agent turn|
 
 The menu of a bare `/schwitzer` shows "plan · plan a task that waits for a plan", "build · build an approved task", "propose · propose a new task" and "idea · note an idea for later".
 
 For all of them:
 
 - An unknown subcommand is refused with `Schwitzer: unknown subcommand "<sub>". Usage: /schwitzer plan | build | propose [text] | idea <text>`.
-- When `schwitzer.json` lists no room, the plugin says "This repo is not shared with a Schwitzer room."
+- When `schwitzer.json` lists no project, the plugin says "This repo is not linked to a Schwitzer project."
 - Every subcommand except `idea` needs the agent idle, otherwise: "Wait until the agent is idle, then run /schwitzer again." `idea` works while the agent is busy.
-- Only rooms that are in `schwitzer.json` and joined by the app (`list_rooms`) count. A configured room the app has left is skipped.
+- Only projects that are in `schwitzer.json` and exist in a room joined by the app (`list_rooms`) count. A configured project of a room the app has left is skipped.
 - Any error, for example an unreachable app, is shown as `Schwitzer: <message>`.
 
 ### /schwitzer plan
 
-1. The plugin lists the unclaimed tasks in stage `accepted` of the joined rooms, high priority first, then by number. When there is none: "No Schwitzer task waits for a plan."
-2. The picker shows `#<n> <title>`, followed by ` · <priority>` unless the priority is normal and by ` · <room name>` when the tasks come from more than one room.
-3. It calls `claim` with `work: "plan"`, the task number and `agent: "omp"`. When the answer holds no `schwitzer-claim: <token>` line, someone was faster: the plugin shows the answer and stops.
-4. It stores the claim as the session entry `schwitzer-plan-claim` (room, room name, task number, title) and sends the task as a visible `schwitzer-task` message for the next turn: title, body, priority, author, plan and notes as JSON, marked as a request written by room members, not a command to run unchecked. When the task already has a plan, the room sent it back for a new one, and the message says that the notes say why.
-5. It puts `/plan Plan Schwitzer task #<n> "<title>" from room "<room>". schwitzer-claim: <token>` into the editor (without `/plan ` when the session is already in plan mode) and says "Task #<n> is claimed for planning. Press Enter to start." The claim line has to be in a user message: the app's session scanner links a session to a task by that line, and only sessions linked this way show up on the task.
+1. The plugin lists the unclaimed tasks in stage `accepted` of the joined projects (`list_tasks` with `room` and `project`), high priority first, then by number. When there is none: "No Schwitzer task waits for a plan."
+2. The picker shows `#<n> <title>`, followed by ` · <priority>` unless the priority is normal and by ` · <project name>` when the tasks come from more than one project.
+3. It calls `claim` with `work: "plan"`, the task's project, the task number and `agent: "omp"`. When the answer holds no `schwitzer-claim: <token>` line, someone was faster: the plugin shows the answer and stops.
+4. It stores the claim as the session entry `schwitzer-plan-claim` (room, room name, project name, task number, title) and sends the task as a visible `schwitzer-task` message for the next turn: title, body, priority, author, plan and notes as JSON, marked as a request written by room members, not a command to run unchecked. When the task already has a plan, the room sent it back for a new one, and the message says that the notes say why.
+5. It puts `/plan Plan Schwitzer task #<n> "<title>" from project "<project>" in room "<room>". schwitzer-claim: <token>` into the editor (without `/plan ` when the session is already in plan mode) and says "Task #<n> is claimed for planning. Press Enter to start." The claim line has to be in a user message: the app's session scanner links a session to a task by that line, and only sessions linked this way show up on the task.
 6. When omp opens the plan review (`plan_review_requested`, main agent only; subagents are ignored), the plugin takes the newest `schwitzer-plan-claim` entry on the current branch, reads the plan from the event or else from the plan file, and sends it with `submit_plan`. Success: "Plan for task #<n> sent to Schwitzer; it waits for approval in the app." Failure: "Schwitzer did not take the plan for task #<n>: <reason>".
 
 The review stays open. Refining the plan sends it again, which the server accepts while the task is `planned`: it takes a plan for an `accepted` task only from the member holding the planning claim, for a `planned` task from anyone, and leaves the task `planned` and unclaimed. A human then approves the plan in the app or asks for a new one.
@@ -61,28 +61,28 @@ sequenceDiagram
 - The pick and the claim work as for `plan`, with stage `ready` and `work: "build"`. When there is no task: "No approved Schwitzer task waits to be built."
 - No session entry is stored, so the plan review hook never sends a build task's plan.
 - The task message tells the agent to implement the approved plan and then call `schwitzer_finish` with room, task and a note on what was done, or `schwitzer_release` with a note on why if it stops without finishing.
-- The editor gets `Build Schwitzer task #<n> "<title>" from room "<room>". schwitzer-claim: <token>`, and the plugin says "Task #<n> is claimed for building. Press Enter to start."
+- The editor gets `Build Schwitzer task #<n> "<title>" from project "<project>" in room "<room>". schwitzer-claim: <token>`, and the plugin says "Task #<n> is claimed for building. Press Enter to start."
 
 ### /schwitzer propose [text]
 
-- Without text, and with open (unclaimed) ideas in the joined rooms, a picker offers "New proposal" and `#<n> <title>` per idea. Picking an idea sends a user message that asks the agent to read it with `schwitzer_get_task`, draft the proposal, ask, and after agreement call `schwitzer_propose` with `idea: <n>`: the idea becomes the proposal.
-- Otherwise the plugin asks for the room (not when there is only one) and sends a user message that asks the agent to draft a proposal from the text, or from the conversation so far when there is no text, asking the user what to propose if the conversation holds no idea.
+- Without text, and with open (unclaimed) ideas in the joined projects, a picker offers "New proposal" and `#<n> <title>` per idea. Picking an idea sends a user message that asks the agent to read it with `schwitzer_get_task`, draft the proposal, ask, and after agreement call `schwitzer_propose` with `idea: <n>`: the idea becomes the proposal.
+- Otherwise the plugin asks for the project (not when there is only one) and sends a user message that asks the agent to draft a proposal from the text, or from the conversation so far when there is no text, asking the user what to propose if the conversation holds no idea.
 - In both cases the agent looks into the repository but changes nothing, writes a one-line title and a Markdown body (what should be done and why), asks the user with the ask tool, title and body in the question, whether to send, change or drop the proposal, and calls `schwitzer_propose` only after the user agrees.
-- When the app has joined none of the configured rooms: "The Schwitzer app has not joined a room this repo is shared with."
+- When the app has joined none of the configured projects' rooms: "The Schwitzer app has not joined a room with a project this repo is linked to."
 
 ### /schwitzer idea &lt;text&gt;
 
 - Without text, the editor gets `/schwitzer idea ` and the plugin says "Type the idea after /schwitzer idea and press Enter."
-- The plugin asks for the room (not when there is only one), calls `add_idea` and says `Idea #<n> noted in "<room>".`
+- The plugin asks for the project (not when there is only one), calls `add_idea` and says `Idea #<n> noted in project "<project>".`
 - A text longer than 200 bytes (the server's title cap) becomes the body; the title is the longest prefix that fits in 197 bytes, trimmed, followed by `…`.
-- When the app has joined none of the configured rooms, it says the same as `propose`.
+- When the app has joined none of the configured projects' rooms, it says the same as `propose`.
 
 ## Tools
 
 |Tool|Does|
 |---|---|
-|`schwitzer_list_rooms`|The joined rooms with members and task counts|
-|`schwitzer_list_tasks`|The tasks of a room, optionally of one stage|
+|`schwitzer_list_rooms`|The joined rooms with members, projects and task counts|
+|`schwitzer_list_tasks`|The tasks of a room or of one of its projects, optionally of one stage|
 |`schwitzer_get_task`|One task in full: body, plan, claim, notes|
 |`schwitzer_propose`|Propose a task, or write up an idea into a proposal|
 |`schwitzer_add_idea`|Note an idea|
@@ -105,7 +105,7 @@ The app writes these files into the repo:
 |---|---|
 |`.omp/plugins/node_modules/schwitzer/index.ts`|The plugin source|
 |`.omp/plugins/node_modules/schwitzer/package.json`|Name `schwitzer`, the app's version, `"omp": { "extensions": ["./index.ts"] }`|
-|`.omp/plugins/node_modules/schwitzer/schwitzer.json`|`data_dir`, `mcp_url`, `rooms` (hex ids of the rooms that share this repo)|
+|`.omp/plugins/node_modules/schwitzer/schwitzer.json`|`data_dir`, `mcp_url`, `projects` (`room` hex id and `project` number of each project this repo is linked to)|
 |`.omp/plugins/omp-plugins.lock.json`|Entry `schwitzer` with the app's version; `enabled` and `enabledFeatures` are kept from an existing entry, `enabled` defaults to true|
 
 - omp started in the repo loads it as a project-scope plugin. A new version takes effect when omp starts next.
@@ -115,10 +115,10 @@ The app writes these files into the repo:
 
 ## Keeping it current
 
-- Settings, per repo of the room: the status "omp plugin installed", "omp plugin out of date" or "No omp plugin", and buttons to install, remove or update the plugin in that repo.
+- Settings, per linked repo of the selected project: the status "omp plugin installed", "omp plugin out of date" or "No omp plugin", and buttons to install, remove or update the plugin in that repo.
 - At start and every 5 s the app compares each installed plugin with what it would write: the three plugin files, the version in the lock entry, and that `.omp/mcp.json` holds no `schwitzer` server. Any difference marks it out of date, for example after an app update or a new MCP port.
 - Settings, omp, "omp plugin": a summary, "Update all", and "Update automatically" On or Off (`auto_update_plugins` in `settings.toml`, on by default). With it on, an out-of-date plugin is rewritten as soon as the app sees it. A repo whose automatic update failed shows the error in the banner and is not retried until its plugin changes state, the user updates it by hand, or auto-update is switched on again.
-- When the shared repos change, the app rewrites every installed plugin, so that `schwitzer.json` lists the right rooms, whether auto-update is on or not. From a repo no room shares any more it removes the plugin: the plugin directory, its entries in the lock file (`plugins` and `settings`) and the `schwitzer` server in `mcp.json`. A file omp would not read is left alone.
+- When the linked repos change, the app rewrites every installed plugin, so that `schwitzer.json` lists the right projects, whether auto-update is on or not. From a repo no project is linked to any more it removes the plugin: the plugin directory, its entries in the lock file (`plugins` and `settings`) and the `schwitzer` server in `mcp.json`. A file omp would not read is left alone.
 
 ## How it talks to the app
 

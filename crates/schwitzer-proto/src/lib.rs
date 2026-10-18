@@ -16,11 +16,11 @@ pub use events::{Event, Subscribe};
 pub use frame::{FrameError, encode_frame, read_frame};
 pub use ids::{ClaimToken, IdParseError, MemberId, RoomId, RoomToken};
 pub use model::{
-    Claim, Decision, Member, Note, Priority, RoomState, SessionInfo, Stage, Task, Work,
+    Claim, Decision, Member, Note, Priority, Project, RoomState, SessionInfo, Stage, Task, Work,
 };
 pub use rpc::{ApiError, Reply, Request, Response};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 pub const PATH_RPC: &str = "/rpc";
 pub const PATH_EVENTS: &str = "/events";
@@ -32,6 +32,7 @@ pub const RPC_TIMEOUT: Duration = Duration::from_secs(15);
 /// Field caps, in bytes.
 pub mod caps {
     pub const ROOM_NAME: usize = 100;
+    pub const PROJECT_NAME: usize = 100;
     pub const TITLE: usize = 200;
     pub const BODY: usize = 64 * 1024;
     pub const PLAN: usize = 256 * 1024;

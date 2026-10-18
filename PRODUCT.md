@@ -25,7 +25,7 @@ Agents and humans share one light queue with explicit human decisions (accept, a
 ## Operating Context
 
 - Each member runs the desktop app; omp agents talk to it through the omp plugin the app installs in shared repos, which calls the app's local MCP server (`claim`, `submit_plan`, `finish`, ...).
-- Agent sessions are omp sessions on the member's machine. Per room, each member lists local repositories in the settings; active omp sessions whose working directory lies in one of them are shared with the room (title, project, runtime, tokens). Sessions outside those repositories never leave the machine.
+- Agent sessions are omp sessions on the member's machine. A room holds projects, and every task belongs to one. Each member links local repositories to projects; a project's tasks show once this member has linked a repo to it, and active omp sessions whose working directory lies in a linked repo are shared with the room (title, project, runtime, tokens). Sessions outside those repositories never leave the machine.
 - Picking a finished plan claims it for the member and copies a prompt with the claim marker for their own agent.
 - Rooms live on a standalone `schwitzer-server`; a room key carries server address and secret.
 

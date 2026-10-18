@@ -1,41 +1,32 @@
-//! The settings page: your name, the selected room and its shared repos, all rooms (switch,
-//! create, join) and the omp connection, each on its own slab.
+//! The settings page: your name, the projects folder, the selected room and its projects, the
+//! selected project and its linked repos, all rooms (switch, create, join) and the omp
+//! connection, each on its own slab.
 
-use iced::widget::{Space, column, container, row, text, text_input};
+use iced::widget::{Space, column, container, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::RoomId;
 
 use super::icons::{Icon, Tone, icon};
+use super::logic;
 use super::pages::{frame, section};
-use super::widgets::{dot, heading, icon_button, icon_text_button, id_button, muted, text_button};
+use super::widgets::{
+    dot, heading, icon_button, icon_text_button, id_button, input, muted, text_button,
+};
 use super::{App, Message};
 use crate::mcp::McpStatus;
 use crate::omp_plugin::PluginState;
 use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let mut body = column![section(you(app))].spacing(SP_4);
+    let mut body = column![section(you(app)), section(projects_folder(app))].spacing(SP_4);
     if app.selected_state().is_some() {
         body = body.push(section(this_room(app)));
     }
+    if app.selected_project().is_some() {
+        body = body.push(section(this_project(app)));
+    }
     body = body.push(section(rooms(app))).push(section(agents(app)));
     frame("settings-page", "Settings", body.into(), None)
-}
-
-fn input<'a>(
-    id: &'static str,
-    placeholder: &'a str,
-    value: &'a str,
-    on_input: fn(String) -> Message,
-    on_submit: Message,
-) -> text_input::TextInput<'a, Message> {
-    text_input(placeholder, value)
-        .id(id)
-        .on_input(on_input)
-        .on_submit(on_submit)
-        .padding(SP_2)
-        .size(TS_14)
-        .style(theme::input)
 }
 
 fn you(app: &App) -> Element<'_, Message> {
@@ -65,12 +56,127 @@ fn you(app: &App) -> Element<'_, Message> {
     .into()
 }
 
+fn projects_folder(app: &App) -> Element<'_, Message> {
+    let saved = app
+        .settings
+        .projects_dir
+        .as_ref()
+        .map(|dir| dir.display().to_string())
+        .unwrap_or_default();
+    let changed = app.forms.projects_dir.trim() != saved;
+    column![
+        heading("Projects folder"),
+        row![
+            input(
+                "projects-dir-input",
+                "~/code",
+                &app.forms.projects_dir,
+                Message::ProjectsDirInput,
+                Message::SaveProjectsDir
+            ),
+            text_button(
+                "save-projects-dir",
+                "Save",
+                changed.then_some(Message::SaveProjectsDir),
+                theme::button_secondary
+            ),
+        ]
+        .spacing(SP_2)
+        .align_y(Alignment::Center),
+        muted("Folders in it whose name matches a project are suggested when you link a repo."),
+    ]
+    .spacing(SP_2)
+    .into()
+}
+
 fn this_room(app: &App) -> Element<'_, Message> {
     let Some(state) = app.selected_state() else {
         return Space::new().into();
     };
+    let selected = app.selected_project().map(|p| p.id);
+    let mut projects = column![].spacing(2);
+    for project in &state.projects {
+        let linked = match app.settings.project_repos(&state.id, project.id).len() {
+            0 => "No repo linked".to_owned(),
+            1 => "1 repo linked".to_owned(),
+            n => format!("{n} repos linked"),
+        };
+        let mut line = row![
+            icon(Icon::Folder, 16.0, Tone::Muted),
+            column![text(&project.name).size(TS_14), muted(linked)]
+                .spacing(2)
+                .width(Length::Fill),
+        ]
+        .spacing(SP_2)
+        .align_y(Alignment::Center);
+        if selected == Some(project.id) {
+            line = line.push(icon(Icon::Check, 16.0, Tone::Ink));
+        }
+        projects = projects.push(id_button(
+            format!("project-{}", project.id),
+            container(line).padding([6.0, SP_2]),
+            Some(Message::SelectProject(project.id)),
+            theme::button_row,
+            Length::Fill,
+        ));
+    }
+    if state.projects.is_empty() {
+        projects = projects.push(muted("No projects yet."));
+    }
+    let filled = !app.forms.new_project.trim().is_empty();
+    column![
+        row![
+            heading(&state.name).width(Length::Fill),
+            icon_text_button(
+                "settings-copy-key",
+                Icon::Copy,
+                Tone::Text,
+                "Copy key",
+                Some(Message::CopyKey),
+                theme::button_secondary,
+            ),
+            icon_text_button(
+                "leave-room",
+                Icon::Leave,
+                Tone::Danger,
+                "Leave",
+                Some(Message::LeaveRoom),
+                theme::button_danger,
+            ),
+        ]
+        .spacing(SP_2)
+        .align_y(Alignment::Center),
+        text("Projects").size(TS_14).font(MEDIUM),
+        projects,
+        row![
+            input(
+                "new-project-name",
+                "New project",
+                &app.forms.new_project,
+                Message::NewProjectName,
+                Message::CreateProject
+            ),
+            text_button(
+                "create-project",
+                "Create",
+                filled.then_some(Message::CreateProject),
+                theme::button_secondary
+            ),
+        ]
+        .spacing(SP_2)
+        .align_y(Alignment::Center),
+    ]
+    .spacing(SP_3)
+    .into()
+}
+
+fn this_project(app: &App) -> Element<'_, Message> {
+    let Some(project) = app.selected_project() else {
+        return Space::new().into();
+    };
+    let linked = app.project_repos();
     let mut repos = column![].spacing(2);
-    for (index, repo) in app.room_repos().iter().enumerate() {
+    for (index, repo) in linked.iter().enumerate() {
         let state = app.plugins.get(repo).copied();
         let installed = state.is_some();
         let mut line = row![
@@ -119,47 +225,67 @@ fn this_room(app: &App) -> Element<'_, Message> {
                 format!("repo-remove-{index}"),
                 Icon::Trash,
                 Tone::Muted,
-                "Stop sharing this repo",
+                "Unlink this repo",
                 Some(Message::RemoveRepo(index)),
                 theme::button_ghost,
             )),
         );
     }
-    if app.room_repos().is_empty() {
-        repos = repos.push(muted("No repos shared with this room yet."));
+    if linked.is_empty() {
+        repos = repos.push(muted("No repo linked to this project yet."));
     }
+    for (index, path) in logic::suggested_repos(&project.name, &app.project_dirs, linked)
+        .into_iter()
+        .enumerate()
+    {
+        repos = repos.push(
+            row![
+                icon(Icon::Folder, 16.0, Tone::Muted),
+                text(path.display().to_string())
+                    .size(TS_14)
+                    .width(Length::Fill),
+                text_button(
+                    format!("repo-suggest-{index}"),
+                    "Link",
+                    Some(Message::LinkRepo(path.clone())),
+                    theme::button_secondary,
+                ),
+            ]
+            .spacing(SP_2)
+            .align_y(Alignment::Center),
+        );
+    }
+    let name = app.forms.project_name.trim();
+    let renamed = !name.is_empty() && name != project.name;
     let filled = !app.forms.repo.trim().is_empty();
     column![
+        heading(&project.name).width(Length::Fill),
         row![
-            heading(&state.name).width(Length::Fill),
-            icon_text_button(
-                "settings-copy-key",
-                Icon::Copy,
-                Tone::Text,
-                "Copy key",
-                Some(Message::CopyKey),
-                theme::button_secondary,
+            input(
+                "project-name-input",
+                "Project name",
+                &app.forms.project_name,
+                Message::ProjectNameInput,
+                Message::RenameProject
             ),
-            icon_text_button(
-                "leave-room",
-                Icon::Leave,
-                Tone::Danger,
-                "Leave",
-                Some(Message::LeaveRoom),
-                theme::button_danger,
+            text_button(
+                "rename-project",
+                "Rename",
+                renamed.then_some(Message::RenameProject),
+                theme::button_secondary
             ),
         ]
         .spacing(SP_2)
         .align_y(Alignment::Center),
         column![
-            text("Shared repos").size(TS_14).font(MEDIUM),
+            text("Linked repos").size(TS_14).font(MEDIUM),
             muted(
                 "omp sessions running in these folders on this machine are visible to the \
                  room: title, project, runtime and tokens. Nothing else leaves your machine."
             ),
             muted(
                 "The plug sets up omp in a repo: /schwitzer there plans, builds and proposes \
-                 this room's tasks, and agents there get this room's Schwitzer tools."
+                 this project's tasks, and agents there get the room's Schwitzer tools."
             ),
         ]
         .spacing(SP_1),
@@ -174,7 +300,7 @@ fn this_room(app: &App) -> Element<'_, Message> {
             ),
             text_button(
                 "repo-add",
-                "Add",
+                "Link",
                 filled.then_some(Message::AddRepo),
                 theme::button_secondary
             ),

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Member, MemberId, RoomId, RoomState, SessionInfo, Task};
+use crate::{Member, MemberId, Project, RoomId, RoomState, SessionInfo, Task};
 
 /// Opens the stream. The server knows the member's rooms.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,5 +31,10 @@ pub enum Event {
     },
     Left {
         room: RoomId,
+    },
+    /// A new or renamed project.
+    Project {
+        room: RoomId,
+        project: Project,
     },
 }

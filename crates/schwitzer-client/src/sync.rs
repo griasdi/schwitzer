@@ -249,6 +249,12 @@ impl Client {
                 }
                 room
             }
+            Event::Project { room, project } => {
+                if !self.update(room, |state| upsert_project(state, project)) {
+                    return;
+                }
+                room
+            }
         };
         let state = lock(&self.0.rooms)
             .get(&changed)
@@ -294,6 +300,14 @@ fn upsert_task(state: &mut RoomState, task: schwitzer_proto::Task) {
     match state.tasks.binary_search_by_key(&task.number, |t| t.number) {
         Ok(i) => state.tasks[i] = task,
         Err(i) => state.tasks.insert(i, task),
+    }
+}
+
+/// Keeps the projects ordered by id.
+fn upsert_project(state: &mut RoomState, project: schwitzer_proto::Project) {
+    match state.projects.binary_search_by_key(&project.id, |p| p.id) {
+        Ok(i) => state.projects[i] = project,
+        Err(i) => state.projects.insert(i, project),
     }
 }
 

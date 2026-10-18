@@ -28,13 +28,12 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
             rows = rows.push(session_row(app, owner.clone(), hue, session));
         }
     }
-    let shares = !app.room_repos().is_empty();
     let chevron = if app.sessions_open {
         Icon::ChevronDown
     } else {
         Icon::ChevronRight
     };
-    let mut line = row![
+    let line = row![
         icon(chevron, 14.0, Tone::Muted),
         text("Sessions").size(TS_12).font(SEMIBOLD),
         widgets::pill(count.to_string()),
@@ -42,17 +41,6 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
     ]
     .spacing(6)
     .align_y(Alignment::Center);
-    // The share button takes the press before the header does.
-    if !shares {
-        line = line.push(widgets::icon_text_button(
-            "share-sessions",
-            Icon::FolderPlus,
-            Tone::Ink,
-            "Share mine",
-            Some(Message::OpenSettings),
-            theme::button_ghost,
-        ));
-    }
     let header = container(id_button(
         "group-sessions",
         container(line)
@@ -68,16 +56,9 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
         return column![header].into();
     }
     let body: Element<'a, Message> = if count == 0 {
-        container(
-            muted(if shares {
-                "No agent is running in the shared repos right now."
-            } else {
-                "Nobody shares sessions yet. Add your repos for this room in Settings; omp sessions running in them show up here."
-            })
-            .width(Length::Fill),
-        )
-        .padding([SP_2, SP_3])
-        .into()
+        container(muted("No agent is running in the linked repos right now.").width(Length::Fill))
+            .padding([SP_2, SP_3])
+            .into()
     } else {
         container(
             scrollable(container(rows).padding(Padding {

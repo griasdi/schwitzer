@@ -1,9 +1,12 @@
 //! The element open in place in the task list: a task shown in full, or the draft of a new one.
 
-use iced::widget::{Space, column, container, markdown, row, text, text_editor, text_input};
+use iced::widget::{
+    Space, column, container, markdown, pick_list, row, text, text_editor, text_input,
+};
 use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task};
 
+use super::chrome::ProjectChoice;
 use super::icons::{Icon, Tone, icon};
 use super::list;
 use super::logic;
@@ -12,7 +15,7 @@ use super::widgets::{
     text_button,
 };
 use super::{App, Message};
-use crate::theme::{self, Lamp, MEDIUM, SP_1, SP_2, SP_3, TS_12, TS_14};
+use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 
 /// Task `task` open in place: the slab's two lines as a head that closes it again, then
 /// details, people, decisions, plan, priority and notes.
@@ -64,8 +67,11 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
         .push(plan(app, task, editable))
         .push(hrule())
         .push(priority(task))
-        .push(hrule())
-        .push(notes(app, state, task));
+        .push(hrule());
+    if state.projects.len() > 1 {
+        body = body.push(project(state, task)).push(hrule());
+    }
+    body = body.push(notes(app, state, task));
     container(column![head, hrule(), container(body).padding(SP_3)])
         .id("open-task")
         .width(Length::Fill)
@@ -393,6 +399,34 @@ fn priority(task: &Task) -> Element<'_, Message> {
         segment("prio-high", "High", Priority::High),
         segment("prio-normal", "Normal", Priority::Normal),
         segment("prio-low", "Low", Priority::Low),
+    ]
+    .spacing(SP_1)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// The project of the task; picking another moves the task there.
+fn project<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
+    let choices: Vec<ProjectChoice> = state.projects.iter().map(ProjectChoice::of).collect();
+    let selected = state
+        .projects
+        .iter()
+        .find(|p| p.id == task.project)
+        .map(ProjectChoice::of);
+    row![
+        heading("Project").width(Length::Fill),
+        container(
+            pick_list(choices, selected, |choice| match choice {
+                ProjectChoice::Project { id, .. } => Message::MoveTask(id),
+                ProjectChoice::New => Message::Noop,
+            })
+            .text_size(TS_14)
+            .font(SEMIBOLD)
+            .padding([SP_1, SP_2])
+            .style(theme::picker)
+            .menu_style(theme::picker_menu),
+        )
+        .id("task-project"),
     ]
     .spacing(SP_1)
     .align_y(Alignment::Center)

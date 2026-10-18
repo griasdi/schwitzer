@@ -6,9 +6,9 @@
 
 use rusqlite::Connection;
 use schwitzer_proto::{
-    ApiError, Event, MAX_RPC_BYTES, Member, MemberId, PROTOCOL_VERSION, RPC_TIMEOUT, Reply,
-    Request, Response, RoomId, RoomToken, SessionInfo, Stage, Task, caps, from_bytes, now_ms,
-    to_bytes,
+    ApiError, Event, MAX_RPC_BYTES, Member, MemberId, PROTOCOL_VERSION, Project, RPC_TIMEOUT,
+    Reply, Request, Response, RoomId, RoomToken, SessionInfo, Stage, Task, caps, from_bytes,
+    now_ms, to_bytes,
 };
 use tokio::time::timeout;
 use weida::{ErrorCode, IncomingRequest, Replier, TransferMeta};
@@ -115,24 +115,52 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
         }
         Request::JoinRoom { token } => join_room(state, caller, token).await,
         Request::LeaveRoom { room } => leave_room(state, caller, room).await,
-        Request::Propose { room, title, body } => {
+        Request::Propose {
+            room,
+            project,
+            title,
+            body,
+        } => {
             let title = text("title", &title, caps::TITLE, true)?;
             let body = text("body", &body, caps::BODY, false)?;
             task_reply(
                 mutate(state, caller, room, move |conn, now| {
-                    store::create_task(conn, &room, &caller, Stage::Proposed, &title, &body, now)
-                        .map(Some)
+                    store::create_task(
+                        conn,
+                        &room,
+                        &caller,
+                        project,
+                        Stage::Proposed,
+                        &title,
+                        &body,
+                        now,
+                    )
+                    .map(Some)
                 })
                 .await,
             )
         }
-        Request::AddIdea { room, title, body } => {
+        Request::AddIdea {
+            room,
+            project,
+            title,
+            body,
+        } => {
             let title = text("title", &title, caps::TITLE, true)?;
             let body = text("body", &body, caps::BODY, false)?;
             task_reply(
                 mutate(state, caller, room, move |conn, now| {
-                    store::create_task(conn, &room, &caller, Stage::Idea, &title, &body, now)
-                        .map(Some)
+                    store::create_task(
+                        conn,
+                        &room,
+                        &caller,
+                        project,
+                        Stage::Idea,
+                        &title,
+                        &body,
+                        now,
+                    )
+                    .map(Some)
                 })
                 .await,
             )
@@ -192,12 +220,13 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
         Request::Claim {
             room,
             work,
+            project,
             task,
             agent,
         } => {
             let agent = text("agent", &agent, caps::AGENT_LABEL, false)?;
             let claimed = mutate(state, caller, room, move |conn, now| {
-                store::claim(conn, &room, &caller, work, task, &agent, now)
+                store::claim(conn, &room, &caller, work, project, task, &agent, now)
             })
             .await?;
             Ok(Response::Claimed(claimed))
@@ -252,6 +281,34 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
         Request::PublishSessions { room, sessions } => {
             publish_sessions(state, caller, room, sessions).await
         }
+        Request::CreateProject { room, name } => {
+            let name = text("project name", &name, caps::PROJECT_NAME, true)?;
+            mutate_project(state, caller, room, move |conn, now| {
+                store::create_project(conn, &room, &name, now)
+            })
+            .await
+        }
+        Request::RenameProject {
+            room,
+            project,
+            name,
+        } => {
+            let name = text("project name", &name, caps::PROJECT_NAME, true)?;
+            mutate_project(state, caller, room, move |conn, _| {
+                store::rename_project(conn, &room, project, &name)
+            })
+            .await
+        }
+        Request::MoveTask {
+            room,
+            task,
+            project,
+        } => task_reply(
+            mutate(state, caller, room, move |conn, now| {
+                store::move_task(conn, &room, task, project, now).map(Some)
+            })
+            .await,
+        ),
     }
 }
 
@@ -294,6 +351,34 @@ where
             Ok(task)
         })
         .await
+}
+
+/// Runs a project mutation in one transaction as a member of `room`, then
+/// publishes the resulting project to the room's members.
+async fn mutate_project<F>(state: &State, caller: MemberId, room: RoomId, f: F) -> Reply
+where
+    F: FnOnce(&Connection, u64) -> R<Project> + Send + 'static,
+{
+    let st = state.clone();
+    let project = state
+        .store
+        .run(move |conn| {
+            let tx = conn.transaction()?;
+            store::require_member(&tx, &room, &caller)?;
+            let project = f(&tx, now_ms())?;
+            let members = store::room_member_ids(&tx, &room)?;
+            tx.commit()?;
+            st.hub.publish(
+                &members,
+                &Event::Project {
+                    room,
+                    project: project.clone(),
+                },
+            );
+            Ok(project)
+        })
+        .await?;
+    Ok(Response::Project(project))
 }
 
 /// Stores the caller's name and tells their rooms; `always` also when it did

@@ -60,9 +60,18 @@ pub struct Note {
     pub at_ms: u64,
 }
 
+/// A part of a room, for example one product or repository; every task belongs to one.
+/// Ids are per-room numbers starting at 1, like task numbers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Project {
+    pub id: u64,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub number: u64,
+    pub project: u64,
     pub title: String,
     pub body: String,
     pub plan: String,
@@ -99,6 +108,8 @@ pub struct SessionInfo {
 pub struct RoomState {
     pub id: RoomId,
     pub name: String,
+    /// Ordered by id.
+    pub projects: Vec<Project>,
     pub members: Vec<Member>,
     pub tasks: Vec<Task>,
     pub sessions: Vec<(MemberId, Vec<SessionInfo>)>,
