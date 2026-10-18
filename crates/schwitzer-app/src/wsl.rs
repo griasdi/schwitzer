@@ -90,14 +90,15 @@ pub fn to_windows(distro: &str, linux: &str) -> Option<String> {
     Some(format!("{UNC}{distro}{}", linux.replace('/', "\\")))
 }
 
-/// The data directory as the plugin in `repo` sees it: a Linux path when the repo lies in a
-/// WSL distro, else `data_dir` itself. A data directory the distro cannot name stays as is.
-pub fn data_dir_for(repo: &Path, data_dir: &Path) -> PathBuf {
+/// `path` as the plugin in `repo` sees it: a Linux path when the repo lies in a WSL distro
+/// (`C:\…` is `/mnt/c/…`, a path in the same distro its Linux path), else `path` itself. A
+/// path the distro cannot name stays as is.
+pub fn path_for(repo: &Path, path: &Path) -> PathBuf {
     let Some(distro) = distro_of(repo) else {
-        return data_dir.to_owned();
+        return path.to_owned();
     };
-    let Some(dir) = data_dir.to_str() else {
-        return data_dir.to_owned();
+    let Some(dir) = path.to_str() else {
+        return path.to_owned();
     };
     let bytes = dir.as_bytes();
     if bytes.len() >= 2
@@ -113,12 +114,12 @@ pub fn data_dir_for(repo: &Path, data_dir: &Path) -> PathBuf {
             PathBuf::from(format!("/mnt/{letter}/{rest}"))
         };
     }
-    if let Some((name, linux)) = to_linux(data_dir)
+    if let Some((name, linux)) = to_linux(path)
         && name.eq_ignore_ascii_case(distro)
     {
         return PathBuf::from(linux);
     }
-    data_dir.to_owned()
+    path.to_owned()
 }
 
 /// The distro names in the output of `wsl.exe --list --quiet`: UTF-16LE when it writes to a
@@ -242,24 +243,24 @@ mod tests {
     }
 
     #[test]
-    fn data_dir_as_seen_from_a_wsl_repo() {
+    fn paths_as_seen_from_a_wsl_repo() {
         let repo = Path::new(r"\\wsl.localhost\Ubuntu\home\felix\code\x");
         assert_eq!(
-            data_dir_for(
+            path_for(
                 repo,
                 Path::new(r"C:\Users\felix\AppData\Roaming\schwitzer\data")
             ),
             Path::new("/mnt/c/Users/felix/AppData/Roaming/schwitzer/data")
         );
-        assert_eq!(data_dir_for(repo, Path::new("C:")), Path::new("/mnt/c"));
+        assert_eq!(path_for(repo, Path::new("C:")), Path::new("/mnt/c"));
         assert_eq!(
-            data_dir_for(repo, Path::new(r"\\wsl$\ubuntu\tmp\sw")),
+            path_for(repo, Path::new(r"\\wsl$\ubuntu\tmp\sw")),
             Path::new("/tmp/sw")
         );
         let other = Path::new(r"\\wsl.localhost\Debian\tmp");
-        assert_eq!(data_dir_for(repo, other), other);
+        assert_eq!(path_for(repo, other), other);
         let data = Path::new(r"C:\Users\felix\data");
-        assert_eq!(data_dir_for(Path::new(r"C:\code\x"), data), data);
+        assert_eq!(path_for(Path::new(r"C:\code\x"), data), data);
     }
 
     #[test]

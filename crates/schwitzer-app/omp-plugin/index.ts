@@ -11,15 +11,20 @@
 // ideas to write up into a proposal. A bare /schwitzer offers a menu of the four.
 // It also gives the agent the app's tools as schwitzer_<name> (TOOLS); each call goes to the app's
 // MCP server, whose URL schwitzer.json names. The token is read from <data_dir>/mcp-token per call.
+// Before a prompt it tells the agent which other Schwitzer projects exist and that a change one of
+// them needs goes there as a proposal; before an edit, write or ast_edit touches a repo linked to
+// another project it asks the user (and blocks without a UI).
 // omp-plugin/README.md describes what the plugin does.
 
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 /** schwitzer.json, written by the app. */
 interface Config {
   data_dir: string;
   mcp_url: string;
   projects: { room: string; project: number }[];
+  /** Repos of the projects this repo is not linked to; missing in plugins written before. */
+  other_repos?: { room: string; project: number; path: string }[];
 }
 interface ToolResult {
   text: string;
@@ -51,6 +56,12 @@ interface JoinedProject {
   roomName: string;
   projectName: string;
 }
+/** A project of a joined room this repo is not linked to, with its local repos. For these `room`
+ *  is the room id prefix list_rooms shows, which every tool takes. */
+interface OtherProject extends JoinedProject {
+  repos: string[];
+}
+type OtherRepo = NonNullable<Config["other_repos"]>[number];
 interface Candidate extends JoinedProject {
   task: TaskRow;
 }
@@ -67,6 +78,7 @@ interface SessionEntry {
   mode?: string;
   customType?: string;
   data?: unknown;
+  content?: unknown;
 }
 interface Ctx {
   ui: {
@@ -77,11 +89,20 @@ interface Ctx {
   isIdle(): boolean;
   sessionManager: { getBranch(): SessionEntry[] };
   agent?: { kind: string };
+  hasUI: boolean;
+  cwd: string;
 }
 interface PlanReviewEvent {
   planContent?: string;
   planPath?: string;
   planFilePath?: string;
+}
+interface ToolCallEvent {
+  toolName: string;
+  input: Record<string, unknown>;
+}
+interface InjectedMessage {
+  message: { customType: string; content: string; display: boolean };
 }
 interface ZodType {
   optional(): ZodType;
@@ -109,6 +130,11 @@ interface Pi {
     command: { description: string; handler: (args: string, ctx: Ctx) => Promise<void> },
   ): void;
   on(event: "plan_review_requested", handler: (event: PlanReviewEvent, ctx: Ctx) => void): void;
+  on(event: "before_agent_start", handler: (event: unknown, ctx: Ctx) => Promise<InjectedMessage | undefined>): void;
+  on(
+    event: "tool_call",
+    handler: (event: ToolCallEvent, ctx: Ctx) => Promise<{ block: true; reason: string } | undefined>,
+  ): void;
   appendEntry(customType: string, data: unknown): void;
   sendMessage(
     message: { customType: string; content: string; display: boolean },
@@ -119,8 +145,14 @@ interface Pi {
 
 const CLAIM_ENTRY = "schwitzer-plan-claim";
 const TASK_MESSAGE = "schwitzer-task";
+const PROJECTS_MESSAGE = "schwitzer-projects";
+const ALLOW_ENTRY = "schwitzer-cross-allow";
+const EDIT_TOOLS: Record<string, true> = { edit: true, write: true, ast_edit: true };
 const PRIORITY_RANK: Record<string, number> = { high: 0, normal: 1, low: 2 };
 const TIMEOUT_MS = 35_000; // the app bounds a tool call at 30 s
+const HINT_TIMEOUT_MS = 3_000; // hooks must not stall a prompt or an edit
+/** The repo this plugin lives in: <repo>/.omp/plugins/node_modules/schwitzer. */
+const OWN_ROOT = resolve(import.meta.dir, "../../../..");
 const STAGE: Record<Work, string> = { plan: "accepted", build: "ready" };
 const SUBCOMMANDS = [
   { name: "plan", label: "plan · plan a task that waits for a plan" },
@@ -187,7 +219,7 @@ const TOOLS: ToolSpec[] = [
     name: "propose",
     label: "Schwitzer propose",
     description:
-      "Propose a task to a room, or write up one of its ideas into a proposal (pass `idea`). Room members accept or reject it; you cannot.",
+      "Propose a task to a room, or write up one of its ideas into a proposal (pass `idea`). Any project of a joined room takes proposals, also one the current repo does not belong to: a change another project needs, for example a dependency, is proposed to that project. Room members accept or reject it; you cannot.",
     approval: "write",
     parameters: (z) =>
       z.object({
@@ -292,7 +324,12 @@ export async function loadConfig(): Promise<Config> {
 
 /** One tool call on the app's MCP server: initialize, initialized, tools/call, then the
  *  session is closed. The token is read per call, so a rotated token needs no restart. */
-export async function callTool(config: Config, name: string, args: Record<string, unknown>): Promise<ToolResult> {
+export async function callTool(
+  config: Config,
+  name: string,
+  args: Record<string, unknown>,
+  timeoutMs = TIMEOUT_MS,
+): Promise<ToolResult> {
   let token: string;
   try {
     token = (await Bun.file(join(config.data_dir, "mcp-token")).text()).trim();
@@ -311,7 +348,7 @@ export async function callTool(config: Config, name: string, args: Record<string
         method: "POST",
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       throw new Error(`not reachable at ${config.mcp_url}; is the app running?`);
@@ -378,8 +415,8 @@ async function reply(res: Response, id: number): Promise<RpcMessage> {
 }
 
 /** A tool call whose failure is an error with the tool's text. */
-async function tool(config: Config, name: string, args: Record<string, unknown>): Promise<string> {
-  const result = await callTool(config, name, args);
+async function tool(config: Config, name: string, args: Record<string, unknown>, timeoutMs = TIMEOUT_MS): Promise<string> {
+  const result = await callTool(config, name, args, timeoutMs);
   if (result.isError) throw new Error(result.text);
   return result.text;
 }
@@ -391,9 +428,13 @@ function lastEntry(ctx: Ctx, match: (entry: SessionEntry) => boolean): SessionEn
   return undefined;
 }
 
-/** The configured projects of the rooms the app has joined, in config order. */
-async function joinedProjects(config: Config): Promise<JoinedProject[]> {
-  const rows = JSON.parse(await tool(config, "list_rooms", {})) as RoomRow[];
+/** The rooms the app has joined, as list_rooms shows them. */
+async function listRooms(config: Config, timeoutMs = TIMEOUT_MS): Promise<RoomRow[]> {
+  return JSON.parse(await tool(config, "list_rooms", {}, timeoutMs)) as RoomRow[];
+}
+
+/** The configured projects among the joined rooms `rows`, in config order. */
+function ownProjects(config: Config, rows: RoomRow[]): JoinedProject[] {
   const joined: JoinedProject[] = [];
   for (const entry of config.projects) {
     const row = rows.find((r) => entry.room.startsWith(r.room));
@@ -403,12 +444,151 @@ async function joinedProjects(config: Config): Promise<JoinedProject[]> {
   return joined;
 }
 
+/** The projects of the joined rooms `rows` that this repo is not linked to, in list order. */
+function otherProjects(config: Config, rows: RoomRow[]): OtherProject[] {
+  const others: OtherProject[] = [];
+  for (const row of rows) {
+    for (const p of row.projects) {
+      if (config.projects.some((e) => e.room.startsWith(row.room) && e.project === p.id)) continue;
+      others.push({
+        room: row.room,
+        roomName: row.name ?? row.room,
+        projectName: p.name,
+        repos: (config.other_repos ?? [])
+          .filter((o) => o.room.startsWith(row.room) && o.project === p.id)
+          .map((o) => o.path),
+      });
+    }
+  }
+  return others;
+}
+
+/** How a proposal to another project names where it comes from. */
+function fromLine(own: JoinedProject[]): string {
+  if (own.length === 1) return `\`Requested from project "${own[0].projectName}" in room "${own[0].roomName}"\``;
+  const list = own.map((p) => `"${p.projectName}" in room "${p.roomName}"`).join(", ");
+  return `\`Requested from project "<name>" in room "<room>"\`, naming the one of this repo's projects (${list}) the change is for`;
+}
+
+/** The hint that tells the agent about the other projects; empty when there is nothing to say. */
+function projectsHint(own: JoinedProject[], others: OtherProject[]): string {
+  if (own.length === 0 || others.length === 0) return "";
+  return [
+    "Schwitzer projects this repo is not part of:",
+    ...others.map(
+      (o) =>
+        `- "${o.projectName}" in room "${o.roomName}" (room id ${o.room})` +
+        (o.repos.length > 0 ? `, local repo ${o.repos.join(", ")}` : ""),
+    ),
+    `This repo belongs to the Schwitzer project(s): ${own.map((p) => `"${p.projectName}" in room "${p.roomName}"`).join(", ")}.`,
+    `When the work here needs a change in one of the projects above, for example in a dependency, do not change that project's code from this session. Draft a proposal for that project instead: a one-line title and a Markdown body that says what is needed and why, starting with ${fromLine(own)} and the number of the Schwitzer task you work on, if any. Ask me with the ask tool whether to send it, with title and body in the question, and only after I agree call \`schwitzer_propose\` with that project's room id and project name.`,
+    "If a dependency you want to change is not a Schwitzer project, ask me before changing its code.",
+  ].join("\n");
+}
+
+/** Whether the model still sees `text` as the newest projects hint: not cut off by a compaction. */
+function hintInContext(ctx: Ctx, text: string): boolean {
+  const branch = ctx.sessionManager.getBranch();
+  for (let i = branch.length - 1; i >= 0; i--) {
+    const entry = branch[i];
+    if (entry.type === "compaction" || entry.type === "reset_boundary") return false;
+    if (entry.type === "custom_message" && entry.customType === PROJECTS_MESSAGE) return entry.content === text;
+  }
+  return false;
+}
+
+/** The files an edit, write or ast_edit call names, resolved against `cwd`; URLs are skipped and
+ *  globs stay literal, which still lie under their repo's root. */
+function editTargets(input: Record<string, unknown>, cwd: string): string[] {
+  const raw: unknown[] = [input.path, ...(Array.isArray(input.paths) ? input.paths : [])];
+  return raw
+    .filter((p): p is string => typeof p === "string" && p !== "" && !/^[a-z][a-z0-9+.-]*:\/\//i.test(p))
+    .map((p) => resolve(cwd, p));
+}
+
+function within(file: string, root: string): boolean {
+  const norm = (p: string) => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p));
+  const f = norm(file);
+  const r = norm(root);
+  return f === r || f.startsWith(r.endsWith(sep) ? r : r + sep);
+}
+
+/** The other project's repo `file` lies in: the deepest root containing it wins, so a repo nested
+ *  in another belongs to itself; `undefined` when that is this repo or no repo holds it. */
+function owner(file: string, ownRoot: string, others: OtherRepo[]): OtherRepo | undefined {
+  let best: { length: number; other?: OtherRepo } | undefined;
+  if (within(file, ownRoot)) best = { length: resolve(ownRoot).length };
+  for (const other of others) {
+    const length = resolve(other.path).length;
+    if (within(file, other.path) && (best === undefined || length > best.length)) best = { length, other };
+  }
+  return best?.other;
+}
+
+/** Asks the user before an edit touches another project's repo; blocks without a UI. */
+async function crossProjectCheck(
+  pi: Pi,
+  event: ToolCallEvent,
+  ctx: Ctx,
+): Promise<{ block: true; reason: string } | undefined> {
+  if (!Object.hasOwn(EDIT_TOOLS, event.toolName)) return undefined;
+  let config: Config;
+  let hit: OtherRepo | undefined;
+  let target = "";
+  try {
+    config = await loadConfig();
+    const others = config.other_repos ?? [];
+    if (others.length === 0) return undefined;
+    for (const file of editTargets(event.input, ctx.cwd)) {
+      hit = owner(file, OWN_ROOT, others);
+      if (hit) {
+        target = file;
+        break;
+      }
+    }
+  } catch {
+    return undefined; // an unreadable schwitzer.json must never block edits
+  }
+  if (!hit) return undefined;
+  const found = hit;
+  const allowed = lastEntry(ctx, (e) => {
+    const data = e.data as { room?: string; project?: number } | undefined;
+    return e.type === "custom" && e.customType === ALLOW_ENTRY && data?.room === found.room && data.project === found.project;
+  });
+  if (allowed) return undefined;
+  let rows: RoomRow[];
+  try {
+    rows = await listRooms(config, HINT_TIMEOUT_MS);
+  } catch {
+    rows = [];
+  }
+  const row = rows.find((r) => found.room.startsWith(r.room));
+  const projectName = row?.projects.find((p) => p.id === found.project)?.name;
+  const name = projectName ?? `#${found.project}`;
+  const roomName = row?.name ?? found.room.slice(0, 8);
+  const roomId = row?.room ?? found.room.slice(0, 8);
+  const reason = `${target} belongs to the Schwitzer project "${name}" in room "${roomName}", not to this repo's project. Do not change it from this session: draft a proposal for "${name}" (what is needed and why), ask the user, and after they agree call schwitzer_propose with room "${roomId}" and project "${projectName ?? found.project}".`;
+  if (!ctx.hasUI) return { block: true, reason };
+  const options = ["Allow this edit", `Allow edits in "${name}" for this session`, `Block: propose it to "${name}" instead`];
+  const choice = await ctx.ui.select(
+    `The agent wants to edit ${target}, which belongs to the Schwitzer project "${name}" (room "${roomName}").`,
+    options,
+  );
+  const index = typeof choice === "number" ? choice : choice === undefined ? -1 : options.indexOf(choice);
+  if (index === 0) return undefined;
+  if (index === 1) {
+    pi.appendEntry(ALLOW_ENTRY, { room: found.room, project: found.project });
+    return undefined;
+  }
+  return { block: true, reason };
+}
+
 /** Unclaimed tasks of the configured projects in `stage` (accepted for plan, ready for build, idea
  *  to write up), high priority first, then by number. A configured project the app no longer has
  *  joined is skipped. */
 async function unclaimed(config: Config, stage: string): Promise<Candidate[]> {
   const found: Candidate[] = [];
-  for (const { room, roomName, projectName } of await joinedProjects(config)) {
+  for (const { room, roomName, projectName } of ownProjects(config, await listRooms(config))) {
     const tasks = JSON.parse(await tool(config, "list_tasks", { room, project: projectName, stage })) as TaskRow[];
     for (const task of tasks) if (task.claim === null) found.push({ room, roomName, projectName, task });
   }
@@ -497,16 +677,22 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work): Promise<
   );
 }
 
-/** The project to act on: the only one, or the one the user picks. */
-async function pickProject(ctx: Ctx, projects: JoinedProject[], title: string): Promise<JoinedProject | undefined> {
-  if (projects.length === 1) return projects[0];
-  const labels = projects.map((p) => `${p.projectName} · ${p.roomName}`);
+/** The project to act on: the only one, or the one the user picks; `others` are offered after
+ *  this repo's own projects. */
+async function pickProject(
+  ctx: Ctx,
+  projects: JoinedProject[],
+  title: string,
+  others: JoinedProject[],
+): Promise<JoinedProject | undefined> {
+  if (projects.length === 1 && others.length === 0) return projects[0];
+  const all = [...projects, ...others];
+  const labels = [
+    ...projects.map((p) => `${p.projectName} · ${p.roomName}`),
+    ...others.map((p) => `${p.projectName} · ${p.roomName} · other project`),
+  ];
   const choice = await ctx.ui.select(title, labels);
-  return typeof choice === "number"
-    ? projects[choice]
-    : choice === undefined
-      ? undefined
-      : projects[labels.indexOf(choice)];
+  return typeof choice === "number" ? all[choice] : choice === undefined ? undefined : all[labels.indexOf(choice)];
 }
 
 /** Notes `text` as an idea in a project, without an agent turn. */
@@ -516,12 +702,12 @@ async function addIdea(ctx: Ctx, config: Config, text: string): Promise<void> {
     ctx.ui.notify("Type the idea after /schwitzer idea and press Enter.", "info");
     return;
   }
-  const projects = await joinedProjects(config);
+  const projects = ownProjects(config, await listRooms(config));
   if (projects.length === 0) {
     ctx.ui.notify("The Schwitzer app has not joined a room with a project this repo is linked to.", "info");
     return;
   }
-  const target = await pickProject(ctx, projects, "Note the idea in which Schwitzer project?");
+  const target = await pickProject(ctx, projects, "Note the idea in which Schwitzer project?", []);
   if (!target) return;
   let title = text;
   let body = "";
@@ -558,14 +744,16 @@ async function proposeTask(pi: Pi, ctx: Ctx, config: Config, text: string): Prom
       }
     }
   }
-  const projects = await joinedProjects(config);
-  if (projects.length === 0) {
+  const rows = await listRooms(config);
+  const own = ownProjects(config, rows);
+  const others = otherProjects(config, rows);
+  if (own.length === 0) {
     ctx.ui.notify("The Schwitzer app has not joined a room with a project this repo is linked to.", "info");
     return;
   }
-  const target = await pickProject(ctx, projects, "Propose to which Schwitzer project?");
+  const target = await pickProject(ctx, own, "Propose to which Schwitzer project?", others);
   if (!target) return;
-  pi.sendUserMessage(proposePrompt(target, text));
+  pi.sendUserMessage(proposePrompt(target, text, (others as JoinedProject[]).includes(target) ? own : undefined));
 }
 
 /** How a proposal is drafted and agreed on, shared by a new proposal and a written-up idea. */
@@ -575,12 +763,17 @@ const DRAFT_STEPS = [
   "Then ask me with the ask tool whether to send the proposal, change it or drop it. Put the title and the body into the question itself, so I see what I agree to.",
 ];
 
-function proposePrompt(target: JoinedProject, idea: string): string {
+/** The prompt for a new proposal; `from` holds this repo's projects when `target` is another one. */
+function proposePrompt(target: JoinedProject, idea: string, from?: JoinedProject[]): string {
   return [
     `Draft a task proposal for the project "${target.projectName}" of the Schwitzer room "${target.roomName}".`,
+    from
+      ? `This repo is not part of "${target.projectName}": the proposal asks that project for a change this repo's project needs.`
+      : "",
     idea ? `The idea: ${idea}` : "",
     idea ? "" : "Base it on our conversation so far; if it holds no idea for a task, ask me what to propose.",
     ...DRAFT_STEPS,
+    from ? `Start the body with ${fromLine(from)} and say why that project needs the change.` : "",
     `Only after I agree, call the tool \`schwitzer_propose\` with room "${target.room}", project "${target.projectName}", the title and the body.`,
   ]
     .filter(Boolean)
@@ -680,4 +873,21 @@ export default function schwitzer(pi: Pi): void {
     // Detached: the handler must not wait on the network; submitPlan catches everything.
     if (claim) void submitPlan(event, claim, ctx);
   });
+  // Tells the main agent which other projects exist, once per context: again after a compaction
+  // or when the list changes.
+  pi.on("before_agent_start", async (_event, ctx) => {
+    if (ctx.agent && ctx.agent.kind !== "main") return undefined;
+    try {
+      const config = await loadConfig();
+      if (config.projects.length === 0) return undefined;
+      const rows = await listRooms(config, HINT_TIMEOUT_MS);
+      const text = projectsHint(ownProjects(config, rows), otherProjects(config, rows));
+      if (text === "" || hintInContext(ctx, text)) return undefined;
+      return { message: { customType: PROJECTS_MESSAGE, content: text, display: false } };
+    } catch {
+      return undefined; // app down or slow: no hint, never a failed prompt
+    }
+  });
+  // A throwing handler would block the tool; crossProjectCheck catches what it must.
+  pi.on("tool_call", async (event, ctx) => crossProjectCheck(pi, event, ctx));
 }

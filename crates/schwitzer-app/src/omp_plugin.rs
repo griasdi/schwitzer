@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use crate::settings;
+use crate::{settings, wsl};
 
 /// The package name, and its key in the lock file.
 const NAME: &str = "schwitzer";
@@ -39,6 +39,9 @@ pub struct PluginConfig {
     pub mcp_url: String,
     /// The projects the repo is linked to.
     pub projects: Vec<PluginProject>,
+    /// The repos of the projects this repo is not linked to; the plugin asks before the agent
+    /// edits a file in one of them.
+    pub other_repos: Vec<OtherRepo>,
 }
 
 /// One project a repo is linked to.
@@ -47,6 +50,16 @@ pub struct PluginProject {
     /// The room id in hex.
     pub room: String,
     pub project: u64,
+}
+
+/// A repo linked to a project the plugin's repo is not linked to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OtherRepo {
+    /// The room id in hex.
+    pub room: String,
+    pub project: u64,
+    /// The repo's path as the plugin sees it ([`wsl::path_for`]).
+    pub path: PathBuf,
 }
 
 fn plugin_dir(repo: &Path) -> PathBuf {
@@ -73,6 +86,48 @@ pub fn projects_of(repos: &BTreeMap<String, Vec<PathBuf>>, repo: &Path) -> Vec<P
             project,
         })
         .collect()
+}
+
+/// The repos of the projects `repo` is not linked to, in map order, as the plugin in `repo`
+/// sees them ([`wsl::path_for`]). Malformed keys are skipped, and so are a repo of one of
+/// `repo`'s own projects (also `repo` itself) and a repo in another WSL distro than `repo`,
+/// which the plugin cannot reach.
+pub fn other_repos(repos: &BTreeMap<String, Vec<PathBuf>>, repo: &Path) -> Vec<OtherRepo> {
+    let own = projects_of(repos, repo);
+    let is_own = |room: &str, project| own.iter().any(|p| p.room == room && p.project == project);
+    let own_paths: Vec<&PathBuf> = repos
+        .iter()
+        .filter(|(key, _)| {
+            settings::parse_repo_key(key).is_some_and(|(room, project)| is_own(room, project))
+        })
+        .flat_map(|(_, paths)| paths)
+        .collect();
+    let repo_distro = wsl::distro_of(repo);
+    let mut others = Vec::new();
+    for (key, paths) in repos {
+        let Some((room, project)) = settings::parse_repo_key(key) else {
+            continue;
+        };
+        if is_own(room, project) {
+            continue;
+        }
+        for path in paths {
+            if own_paths.contains(&path) {
+                continue;
+            }
+            if let (Some(theirs), Some(ours)) = (wsl::distro_of(path), repo_distro)
+                && !theirs.eq_ignore_ascii_case(ours)
+            {
+                continue;
+            }
+            others.push(OtherRepo {
+                room: room.to_owned(),
+                project,
+                path: wsl::path_for(repo, path),
+            });
+        }
+    }
+    others
 }
 
 /// Whether the app's plugin is in `repo`.
@@ -280,6 +335,7 @@ mod tests {
                 room: "ab".repeat(32),
                 project: 1,
             }],
+            other_repos: vec![],
         }
     }
 
@@ -446,6 +502,72 @@ mod tests {
             [linked(&a, 1), linked(&c, 3)]
         );
         assert!(projects_of(&repos, Path::new("/code/other")).is_empty());
+    }
+
+    #[test]
+    fn other_repos_skip_own_projects() {
+        let (a, c) = ("aa".repeat(32), "cc".repeat(32));
+        let repos = BTreeMap::from([
+            (format!("{a}/1"), vec![PathBuf::from("/code/app")]),
+            (format!("{a}/2"), vec![PathBuf::from("/code/lib")]),
+            (
+                format!("{c}/3"),
+                vec![PathBuf::from("/code/shared"), PathBuf::from("/code/app")],
+            ),
+            (
+                format!("{c}/4"),
+                vec![PathBuf::from("/code/shared"), PathBuf::from("/code/tool")],
+            ),
+            ("malformed".to_owned(), vec![PathBuf::from("/code/x")]),
+        ]);
+        let other = |room: &str, project, path: &str| OtherRepo {
+            room: room.to_owned(),
+            project,
+            path: PathBuf::from(path),
+        };
+        assert_eq!(
+            other_repos(&repos, Path::new("/code/app")),
+            [other(&a, 2, "/code/lib"), other(&c, 4, "/code/tool")]
+        );
+        assert_eq!(
+            other_repos(&repos, Path::new("/code/none")),
+            [
+                other(&a, 1, "/code/app"),
+                other(&a, 2, "/code/lib"),
+                other(&c, 3, "/code/shared"),
+                other(&c, 3, "/code/app"),
+                other(&c, 4, "/code/shared"),
+                other(&c, 4, "/code/tool"),
+            ]
+        );
+    }
+
+    #[test]
+    fn other_repos_as_seen_from_a_wsl_repo() {
+        let a = "aa".repeat(32);
+        let repos = BTreeMap::from([
+            (
+                format!("{a}/1"),
+                vec![PathBuf::from(r"\\wsl.localhost\Ubuntu\code\app")],
+            ),
+            (
+                format!("{a}/2"),
+                vec![
+                    PathBuf::from(r"\\wsl.localhost\Ubuntu\code\lib"),
+                    PathBuf::from(r"\\wsl.localhost\Debian\code\x"),
+                    PathBuf::from(r"C:\code\win"),
+                ],
+            ),
+        ]);
+        let paths: Vec<PathBuf> =
+            other_repos(&repos, Path::new(r"\\wsl.localhost\Ubuntu\code\app"))
+                .into_iter()
+                .map(|other| other.path)
+                .collect();
+        assert_eq!(
+            paths,
+            [Path::new("/code/lib"), Path::new("/mnt/c/code/win")]
+        );
     }
 
     #[test]

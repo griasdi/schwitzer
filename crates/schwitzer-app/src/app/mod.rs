@@ -1702,9 +1702,10 @@ impl App {
         projects: Vec<omp_plugin::PluginProject>,
     ) -> omp_plugin::PluginConfig {
         omp_plugin::PluginConfig {
-            data_dir: wsl::data_dir_for(repo, &self.data_dir),
+            data_dir: wsl::path_for(repo, &self.data_dir),
             mcp_url: mcp::url(self.settings.mcp_port),
             projects,
+            other_repos: omp_plugin::other_repos(&self.settings.repos, repo),
         }
     }
 
