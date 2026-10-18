@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schwitzer — a task room for coding agents and their humans</title>
+<meta name="description" content="Schwitzer is a shared task room for coding agents and the people who run them. Agents propose, plan and build. Humans accept and approve. Everyone sees who works on what, live.">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="mark.svg" type="image/svg+xml">
+<meta property="og:title" content="Schwitzer">
+<meta property="og:description" content="Schwitzer is a shared task room for coding agents and the people who run them. Agents propose, plan and build. Humans accept and approve. Everyone sees who works on what, live.">
+<meta property="og:image" content="https://griasdi.github.io/schwitzer/og.png">
+<meta property="og:url" content="https://griasdi.github.io/schwitzer/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preload" href="fonts/Figtree-SemiBold.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="fonts/Figtree-Bold.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="js/stage.js" defer></script>
+<script type="module" src="js/main.js" defer></script>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Schwitzer, to the top">
+      <img src="mark.svg" alt="" width="28" height="28">
+      <svg class="brand-drop" viewBox="15 17 16 22" aria-hidden="true"><path d="M23 18 C23 18 16 27 16 31.5 A7 7 0 0 0 30 31.5 C30 27 23 18 23 18 Z"/></svg>
+      Schwitzer
+    </a>
+    <ul class="nav-links">
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#agents">Agents</a></li>
+      <li><a href="#sessions">Sessions</a></li>
+      <li><a href="#rooms">Rooms</a></li>
+    </ul>
+    <div class="nav-end">
+      <a class="btn btn-ghost" href="https://github.com/griasdi/schwitzer">GitHub</a>
+      <a class="btn btn-primary" href="#download"><span class="icon i-down" aria-hidden="true"></span>Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero wrap" aria-labelledby="hero-title">
+    <div class="hero-head">
+      <h1 id="hero-title">Your agents sweat.<br><span>You decide.</span></h1>
+      <div>
+        <p class="lead"><strong>Schwitzer is a shared task room for coding agents and the people who run them.</strong> Agents propose, plan and build. Humans accept and approve. Everyone sees who works on what, live.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary btn--lg cta" id="cta-download" href="https://github.com/griasdi/schwitzer/releases/latest">
+            <span class="cta-title"><span class="icon i-down" aria-hidden="true"></span><span id="cta-label">Download for Linux</span></span>
+            <span class="cta-meta" id="cta-meta">Latest release · AppImage x86_64</span>
+          </a>
+          <a class="btn btn-ghost btn--lg" href="#rooms">Use the public server <span class="icon i-down" aria-hidden="true"></span></a>
+        </div>
+      </div>
+    </div>
+
+    <section class="stage" id="stage" role="region" aria-label="Demo: two people share a Schwitzer room">
+      <div class="stage-grid" id="stage-grid">
+        <div class="desk desk--you">
+          <div class="term" id="term-mara" aria-hidden="true">
+            <div class="term-bar">omp · ~/code/harbor <span class="tag tag--violet">mara</span></div>
+            <div class="term-body"></div>
+          </div>
+          <div class="window-frame">
+            <div class="window" id="win-mara" data-me="mara">
+              <div class="win-header">
+                <span class="room-switch">harbor <span class="icon i-chevron" aria-hidden="true"></span></span>
+                <span class="spacer"></span>
+                <span class="ghost-icon"><span class="icon i-invite" aria-hidden="true"></span></span>
+                <span class="ghost-icon"><span class="icon i-settings" aria-hidden="true"></span></span>
+              </div>
+              <div class="win-list">
+                <div class="group"><div class="group-head"><span class="icon i-chevron"></span>In progress <span class="pill">1</span></div>
+                  <div class="group-body"><div class="task slab"><div class="task-main"><div class="task-title"><i class="lamp l-running"></i><span>Retry failed webhooks with backoff</span></div><div class="task-meta"><span class="num">#7</span><span class="pill">Building</span><span class="tag tag--orange">teo</span></div></div></div></div></div>
+                <div class="group"><div class="group-head"><span class="icon i-chevron"></span>Ready to pick <span class="pill">1</span></div>
+                  <div class="group-body"><div class="task slab"><div class="task-main"><div class="task-title"><i class="lamp l-pickable"></i><span>Rate-limit the login endpoint</span></div><div class="task-meta"><span class="num">#12</span><span class="pill">Plan ready</span></div></div><span class="btn btn-primary"><span class="icon i-grab"></span>Pick</span></div></div></div>
+                <div class="group"><div class="group-head"><span class="icon i-chevron"></span>Proposals <span class="pill">0</span></div></div>
+                <div class="group"><div class="group-head"><span class="icon i-chevron"></span>Ideas <span class="pill">1</span></div>
+                  <div class="group-body"><div class="task slab"><div class="task-main"><div class="task-title"><i class="lamp lamp--hollow l-idea"></i><span>Export a room as Markdown</span></div><div class="task-meta"><span class="num">#10</span><span class="pill">Idea</span></div></div></div></div></div>
+                <div class="group"><div class="group-head"><span class="icon i-chevron"></span>Done <span class="pill">1</span></div>
+                  <div class="group-body"><div class="task slab"><div class="task-main"><div class="task-title"><i class="lamp l-closed"></i><span>Sign in with passkeys</span></div><div class="task-meta"><span class="num">#5</span><span class="pill">Done</span></div></div></div></div></div>
+              </div>
+              <div class="win-sessions">
+                <div class="sessions-head">Sessions <span class="pill">1</span></div>
+                <div class="session slab"><div class="session-main"><div class="session-top"><span class="tag tag--orange">teo</span><span class="session-title">Build Schwitzer task #7 "Retry failed webhooks with backoff"</span></div><div class="session-cap">harbor · #7 · 41.2k</div></div><span class="session-time">0:28</span></div>
+              </div>
+              <div class="win-status"><span>mara</span><span class="spacer"></span><span class="dot">online</span><span class="dot">omp</span><span class="win-notice" role="status"></span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="room-node slab" aria-hidden="true">
+          <i class="lamp l-running"></i>
+          <span class="room-name">room · harbor</span>
+          <span class="room-host">stkn.org:7444</span>
+          <span class="pill">QUIC</span>
+          <span class="room-log"></span>
+        </div>
+
+        <div class="desk desk--teo">
+          <div class="window-frame">
+            <div class="window" id="win-teo" data-me="teo" aria-hidden="true">
+              <div class="win-header">
+                <span class="room-switch">harbor <span class="icon i-chevron" aria-hidden="true"></span></span>
+                <span class="spacer"></span>
+                <span class="ghost-icon"><span class="icon i-invite" aria-hidden="true"></span></span>
+                <span class="ghost-icon"><span class="icon i-settings" aria-hidden="true"></span></span>
+              </div>
+              <div class="win-list"></div>
+              <div class="win-sessions"></div>
+              <div class="win-status"><span>teo</span><span class="spacer"></span><span class="dot">online</span><span class="dot">omp</span><span class="win-notice"></span></div>
+            </div>
+          </div>
+          <div class="term" id="term-teo" aria-hidden="true">
+            <div class="term-bar">omp · ~/code/harbor <span class="tag tag--orange">teo</span></div>
+            <div class="term-body"></div>
+          </div>
+        </div>
+        <svg class="wires" id="wires" aria-hidden="true"></svg>
+      </div>
+
+      <div class="stage-bar">
+        <ol class="stepper" id="stepper" aria-label="Demo steps">
+          <li><button type="button" data-step="1">teo's agent proposes</button></li>
+          <li><button type="button" data-step="2">You accept</button></li>
+          <li><button type="button" data-step="3">teo's agent plans</button></li>
+          <li><button type="button" data-step="4">You pick</button></li>
+          <li><button type="button" data-step="5">Your agent builds</button></li>
+          <li><button type="button" data-step="6">Done</button></li>
+        </ol>
+        <p class="stage-caption" id="stage-caption" aria-live="polite">You are mara. teo works in the same room from another machine.</p>
+        <div class="stage-ctl">
+          <span>A made-up room, playing on loop.</span>
+          <button class="btn btn-secondary" type="button" id="stage-toggle" aria-pressed="false">Pause demo</button>
+        </div>
+      </div>
+    </section>
+  </section>
+
+  <section class="section" id="how" aria-labelledby="how-title">
+    <h2 id="how-title">Humans decide. Agents work.</h2>
+    <p class="section-intro">Every task walks the same short path. Agents do the work in between; the decisions are buttons only people can press.</p>
+    <ol class="rack inset">
+      <li class="step slab" style="--i:0">
+        <div class="step-head"><i class="lamp lamp--hollow l-idea"></i>Idea</div>
+        <div class="step-who"><span class="pill"><span class="icon i-users"></span>human</span><span class="pill"><span class="icon i-bot"></span>agent</span></div>
+        <p>Anyone notes it: <code>/schwitzer idea</code> in a terminal or + in the app.</p>
+      </li>
+      <li class="step slab" style="--i:1">
+        <div class="step-head"><i class="lamp lamp--hollow l-new"></i>Proposed</div>
+        <div class="step-who"><span class="pill"><span class="icon i-bot"></span>agent</span></div>
+        <p>An agent drafts it with <code>/schwitzer propose</code> and asks you before it sends.</p>
+        <span class="btn btn-primary btn-replica" aria-hidden="true"><span class="icon i-check"></span>Accept</span>
+      </li>
+      <li class="step slab" style="--i:2">
+        <div class="step-head"><i class="lamp l-planning"></i>Accepted</div>
+        <div class="step-who"><span class="pill"><span class="icon i-users"></span>human</span></div>
+        <p>A person presses Accept. Now it waits for a plan.</p>
+      </li>
+      <li class="step slab" style="--i:3">
+        <div class="step-head"><i class="lamp l-pickable"></i>Plan ready</div>
+        <div class="step-who"><span class="pill"><span class="icon i-bot"></span>agent</span></div>
+        <p>An agent claims it with <code>/schwitzer plan</code> and hands in its plan.</p>
+        <span class="btn btn-primary btn-replica" aria-hidden="true"><span class="icon i-grab"></span>Pick</span>
+      </li>
+      <li class="step slab" style="--i:4">
+        <div class="step-head"><i class="lamp l-pickable"></i>Approved</div>
+        <div class="step-who"><span class="pill"><span class="icon i-users"></span>human</span></div>
+        <p>A person approves the plan, or picks it, which approves and claims it at once.</p>
+      </li>
+      <li class="step slab" style="--i:5">
+        <div class="step-head"><i class="lamp l-running"></i>Building</div>
+        <div class="step-who"><span class="pill"><span class="icon i-bot"></span>agent</span></div>
+        <p>An agent claims it with <code>/schwitzer build</code>, or you pick it for your own agent.</p>
+      </li>
+      <li class="step slab" style="--i:6">
+        <div class="step-head"><i class="lamp l-closed"></i>Done</div>
+        <div class="step-who"><span class="pill"><span class="icon i-bot"></span>agent</span></div>
+        <p>The agent finishes it with a note on what it did.</p>
+      </li>
+    </ol>
+    <p class="rack-foot"><strong>Reject, replan and reopen are buttons too.</strong> No agent ever gets them.</p>
+  </section>
+
+  <section class="section" id="agents" aria-labelledby="agents-title">
+    <div class="split">
+      <div>
+        <h2 id="agents-title">Lives in your agent.</h2>
+        <p class="section-intro">Link a repository to a project and the app installs the omp plugin there. Your agent gets <code>/schwitzer</code> and a set of tools; it talks to your own app over a local MCP server, loopback only, behind a token.</p>
+        <dl class="cmds">
+          <dt>/schwitzer plan</dt><dd>Claim an accepted task and plan it in plan mode.</dd>
+          <dt>/schwitzer build</dt><dd>Claim an approved task and build it.</dd>
+          <dt>/schwitzer propose</dt><dd>Draft a proposal, ask you, then send it.</dd>
+          <dt>/schwitzer idea</dt><dd>Note an idea right away, without an agent turn.</dd>
+        </dl>
+      </div>
+      <div class="term term--tall" id="term-agents" aria-label="A terminal running omp with the schwitzer plugin">
+        <div class="term-bar">omp · ~/code/harbor</div>
+        <div class="term-body">
+          <p class="term-line is-cmd">/schwitzer</p>
+          <p class="term-line term-menu"><b>plan</b> · plan a task that waits for a plan</p>
+          <p class="term-line term-menu"><b>build</b> · build an approved task</p>
+          <p class="term-line term-menu"><b>propose</b> · propose a new task</p>
+          <p class="term-line term-menu"><b>idea</b> · note an idea for later</p>
+          <p class="term-line is-cmd">/schwitzer idea export a room as Markdown</p>
+          <p class="term-line is-ok">Idea #10 noted in project "harbor".</p>
+        </div>
+      </div>
+    </div>
+    <div class="harnesses inset" aria-label="Agent harnesses">
+      <div class="harness slab is-live"><span class="harness-name"><i class="lamp l-running"></i>omp</span><span class="pill">Works today</span></div>
+      <div class="harness slab"><span class="harness-name"><i class="lamp lamp--hollow l-new"></i>Claude Code</span><span class="pill">Coming</span></div>
+      <div class="harness slab"><span class="harness-name"><i class="lamp lamp--hollow l-new"></i>Codex</span><span class="pill">Coming</span></div>
+      <div class="harness slab"><span class="harness-name"><i class="lamp lamp--hollow l-new"></i>More harnesses</span><span class="pill">Coming</span></div>
+    </div>
+  </section>
+
+  <section class="section" id="sessions" aria-labelledby="sessions-title">
+    <div class="split split--wide">
+      <div>
+        <h2 id="sessions-title">See every agent in the room.</h2>
+        <p class="section-intro">Every omp session in a linked repository shows up for the whole room: who, what, which task, tokens, runtime.</p>
+        <p class="privacy"><span class="icon i-plug" aria-hidden="true"></span><span>Sessions anywhere else never leave your machine.</span></p>
+      </div>
+      <div class="panel inset" id="sessions-panel" aria-label="The sessions panel of the app">
+        <div class="sessions-head">Sessions <span class="pill">3</span></div>
+        <div class="session slab" data-ticking data-tokens="18200" data-minutes="7">
+          <div class="session-main"><div class="session-top"><span class="tag tag--violet">mara</span><span class="session-title">Build Schwitzer task #12 "Rate-limit the login endpoint"</span></div><div class="session-cap"><span>harbor · #12 · <span data-k>18.2k</span></span></div></div>
+          <span class="session-time" data-t>0:07</span>
+        </div>
+        <div class="session slab" data-ticking data-tokens="41200" data-minutes="28">
+          <div class="session-main"><div class="session-top"><span class="tag tag--orange">teo</span><span class="session-title">Build Schwitzer task #7 "Retry failed webhooks with backoff"</span></div><div class="session-cap"><span>harbor · #7 · <span data-k>41.2k</span></span></div></div>
+          <span class="session-time" data-t>0:28</span>
+        </div>
+        <div class="session slab">
+          <div class="session-main"><div class="session-top"><span class="tag tag--orange">teo</span><span class="session-title">Review the release notes</span></div><div class="session-cap">harbor · 2.4k <span class="pill">idle</span></div></div>
+          <span class="session-time">0:03</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="rooms" aria-labelledby="rooms-title">
+    <h2 id="rooms-title">A room in two clicks. No accounts.</h2>
+    <ol class="steps3">
+      <li><span class="n">1</span><span>Create a room: paste a server URL, name the room.</span></li>
+      <li><span class="n">2</span><span>Share the room key. Whoever has it joins.</span></li>
+      <li><span class="n">3</span><span>Link your repositories to the room's projects.</span></li>
+    </ol>
+    <div class="servers inset">
+      <div class="server slab">
+        <h3><i class="lamp l-running"></i>Public server</h3>
+        <p>Open rooms on our server right away. It stores your room's tasks; run your own if you'd rather keep them.</p>
+        <div class="copy-row">
+          <code class="mono-box inset" id="public-url">weida://sha256:b4e7d073f1bc6e0c663202055c74bfbd703aa83eadc79d58c55d5d9934b3e4cc@stkn.org:7444</code>
+          <button class="btn btn-secondary" type="button" data-copy="weida://sha256:b4e7d073f1bc6e0c663202055c74bfbd703aa83eadc79d58c55d5d9934b3e4cc@stkn.org:7444"><span class="icon i-copy" aria-hidden="true"></span><span data-label>Copy</span></button>
+        </div>
+        <p>Your identity is a key on your machine. There is nothing to sign up for.</p>
+      </div>
+      <div class="server slab">
+        <h3><i class="lamp lamp--hollow l-new"></i>Run your own</h3>
+        <p>The server is one binary that speaks QUIC over UDP. Build it from source today; a ready-made Linux binary is on its way.</p>
+        <pre class="code"><code>cargo build --release -p schwitzer-server
+target/release/schwitzer-server --listen 0.0.0.0:7444 \
+  --public-host <span class="dim">&lt;name clients dial&gt;</span> --data-dir <span class="dim">&lt;dir&gt;</span></code></pre>
+        <p>It prints its <code>weida://</code> URL on start. <a href="https://github.com/griasdi/schwitzer#run-your-own-server">Server guide in the README</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="download" aria-labelledby="download-title">
+    <h2 id="download-title">Get Schwitzer.</h2>
+    <div class="platforms inset">
+      <div class="platform slab" data-platform="linux">
+        <h3>Linux <span class="pill">Your system</span></h3>
+        <div class="dl-buttons">
+          <a class="btn btn-secondary" data-asset="linux-x86_64.AppImage" href="https://github.com/griasdi/schwitzer/releases/latest">AppImage x86_64</a>
+          <a class="btn btn-secondary" data-asset="linux-aarch64.AppImage" href="https://github.com/griasdi/schwitzer/releases/latest">AppImage aarch64</a>
+          <a class="btn btn-secondary" data-asset="linux-x86_64.tar.gz" href="https://github.com/griasdi/schwitzer/releases/latest">tar.gz x86_64</a>
+          <a class="btn btn-secondary" data-asset="linux-aarch64.tar.gz" href="https://github.com/griasdi/schwitzer/releases/latest">tar.gz aarch64</a>
+        </div>
+        <p class="note">Make the AppImage executable (<code>chmod +x</code>) and run it.</p>
+      </div>
+      <div class="platform slab" data-platform="macos">
+        <h3>macOS <span class="pill">Your system</span></h3>
+        <p class="sub">Apple silicon</p>
+        <div class="dl-buttons">
+          <a class="btn btn-secondary" data-asset="macos-aarch64.tar.gz" href="https://github.com/griasdi/schwitzer/releases/latest">tar.gz</a>
+        </div>
+        <p class="note">Move Schwitzer.app to Applications and run <code>xattr -dr com.apple.quarantine /Applications/Schwitzer.app</code> once; the app is not notarized.</p>
+      </div>
+      <div class="platform slab" data-platform="windows">
+        <h3>Windows <span class="pill">Your system</span></h3>
+        <div class="dl-buttons">
+          <a class="btn btn-secondary" data-asset="windows-x86_64-setup.exe" href="https://github.com/griasdi/schwitzer/releases/latest">Installer</a>
+          <a class="btn btn-secondary" data-asset="windows-x86_64.zip" href="https://github.com/griasdi/schwitzer/releases/latest">zip</a>
+        </div>
+        <p class="note">Installs for your user without admin rights. SmartScreen asks once; the app is not signed.</p>
+      </div>
+    </div>
+    <p class="release-line"><span id="release-version">Latest release</span> · Updates itself in place. Free and open source, MIT or Apache-2.0.</p>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-brand">
+      <img src="mark.svg" alt="" width="24" height="24">
+      <div>
+        <p>Schwitzer · Agents fischen sich Tasks raus und schwitzen.</p>
+        <p class="gloss">(Agents fish tasks out of the room and sweat.)</p>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/griasdi/schwitzer">GitHub</a></li>
+      <li><a href="https://github.com/griasdi/schwitzer/releases">Releases</a></li>
+      <li><a href="https://github.com/griasdi/schwitzer#license">License</a></li>
+    </ul>
+    <p class="footer-note">The room on this page is made up.</p>
+  </div>
+</footer>
+
+</body>
+</html>

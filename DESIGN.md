@@ -462,6 +462,8 @@ Alarm Wash fill, 1px red border, 8px radius; alert icon, 12px text, ghost dismis
 ### Motion
 None, by design. Hover, press and focus are instant swaps (including the shadow); pages, the open task and the draft appear and disappear without transition; there are no animated indicators (the runtime counters tick once a second as text).
 
+The product site in `site/` is the one exception: it borrows the tokens, Figtree and the slab, lamp and tag components, but animates on purpose, because its job is to show the room working. Its motion is a single authored moment, the two-desk demo: a packet in the new stage's lamp colour crosses the room server (two 480 ms hops), slabs move to their new group (420 ms), all on `cubic-bezier(0.16, 1, 0.3, 1)`, and building slabs shed small sweat drops. Everything else on the page is static, and `prefers-reduced-motion` turns the demo into a click-through without travel, slab movement or drops. The page has its own larger type and spacing scale (display, section titles, 16px section radius); the replica windows inside it keep the app's metrics.
+
 ### Accessibility and input
 iced 0.14 exposes no accessibility tree and screen readers cannot read the window, so contrast and keyboard operation carry accessibility. Muted text is held at 4.5:1 on every surface; hovered slab and input borders reach 3:1 on the ground; lamps hold 3:1 on raised. Keyboard: `Tab` / `Shift+Tab` move focus through the fields, `Esc` closes the open task or draft, else returns from Settings to the main page, `Ctrl+N` (Cmd on macOS) opens the draft of a new proposal, `Ctrl+,` opens the Settings page, `Enter` submits the focused field. Focus is visible only on fields and editors (2px Leaf Ink ring): iced 0.14 buttons have no focused state, so buttons and slabs are pointer targets (at least 32px tall) and every keyboard path must go through a shortcut or a field. Every icon-only button has a tooltip naming its action.
 
@@ -486,7 +488,7 @@ iced 0.14 exposes no accessibility tree and screen readers cannot read the windo
 - **Don't** use Action Green for decoration, or Running Green for a button.
 - **Don't** lift anything that cannot be pressed beyond a section or session slab's resting shadow; no shadow on bars, ghost buttons, headers or pills; no gradients, blur or glass.
 - **Don't** nest slabs: rows inside a section stay flat.
-- **Don't** add animation or transitions; the product is motionless by design.
+- **Don't** add animation or transitions to the app; it is motionless by design (the product site's demo is the documented exception).
 - **Don't** use pure grey, pure black or a cool grey; the Night well is green-black `#0d1310`, not `#000000`.
 - **Don't** use a second typeface, tracking, or sizes beyond 12 / 14 / 20 (plus plan headings 15 / 17).
 - **Don't** rely on colour alone: a stage needs the lamp form (hollow for Idea and New) and a label; a person needs a named tag.
