@@ -3,8 +3,8 @@
 //! The app writes the plugin (`omp-plugin/index.ts`, a `package.json` and `schwitzer.json`)
 //! into `<repo>/.omp/plugins/node_modules/schwitzer/` and enters it in
 //! `<repo>/.omp/plugins/omp-plugins.lock.json`, so omp started in the repo loads it as a
-//! project-scope plugin. It gives omp `/schwitzer`, which plans a task of the rooms the repo
-//! is shared with through the app's MCP server.
+//! project-scope plugin. It gives omp `/schwitzer plan`, `build` and `propose`, which plan,
+//! build and propose tasks of the rooms the repo is shared with through the app's MCP server.
 //!
 //! Install also registers the app's MCP server as `schwitzer` in `<repo>/.omp/mcp.json`, with
 //! the access token in its `Authorization` header. That file is then readable by the user only

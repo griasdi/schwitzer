@@ -158,9 +158,9 @@ fn this_room(app: &App) -> Element<'_, Message> {
                  room: title, project, runtime and tokens. Nothing else leaves your machine."
             ),
             muted(
-                "The plug sets up omp in a repo: /schwitzer there plans tasks waiting for a \
-                 plan, and agents there reach this app's MCP server. Its access token goes \
-                 into the repo's .omp/mcp.json: keep that file out of git."
+                "The plug sets up omp in a repo: /schwitzer there plans, builds and proposes \
+                 this room's tasks, and agents there reach this app's MCP server. Its access \
+                 token goes into the repo's .omp/mcp.json: keep that file out of git."
             ),
         ]
         .spacing(SP_1),
