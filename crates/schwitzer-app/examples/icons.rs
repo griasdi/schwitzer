@@ -1,4 +1,4 @@
-//! Renders assets/logo/mark.svg into the Windows (.ico) and macOS (.icns) icon files beside it: cargo run -p schwitzer-app --example icons.
+//! Renders assets/logo/mark.svg into the Windows (.ico), macOS (.icns) and Linux (256 px .png) icon files beside it: cargo run -p schwitzer-app --example icons.
 
 use std::fs;
 use std::path::Path;
@@ -41,6 +41,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let rgba = render_rgba(&tree, size)?;
         let image = ico::IconImage::from_rgba_data(size, size, rgba.clone());
         image.write_png(fs::File::create(previews.join(format!("{size}.png")))?)?;
+        if size == 256 {
+            image.write_png(fs::File::create(logo.join("schwitzer.png"))?)?;
+        }
         if ICO_SIZES.contains(&size) {
             ico.add_entry(ico::IconDirEntry::encode(&image)?);
         }

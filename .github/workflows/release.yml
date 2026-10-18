@@ -2,6 +2,8 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Builds every package without publishing, to check them before a tag.
+  workflow_dispatch:
 permissions:
   contents: read
 env:
@@ -28,11 +30,14 @@ jobs:
         with:
           key: ${{ matrix.platform }}
       - name: Tag matches the workspace version
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: test "v$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)" = "$GITHUB_REF_NAME"
       - run: cargo build --release --locked -p schwitzer-app --features self-update
+      - if: runner.os == 'Windows'
+        run: choco install innosetup -y --no-progress
       - shell: bash
-        run: deploy/package.sh ${{ matrix.platform }} "${GITHUB_REF_NAME#v}"
+        run: deploy/package.sh ${{ matrix.platform }} "$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
       - uses: actions/upload-artifact@v4
         with:
           name: schwitzer-${{ matrix.platform }}
@@ -40,6 +45,7 @@ jobs:
           if-no-files-found: error
   publish:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -62,10 +68,10 @@ jobs:
 
           ### Install
 
-          - Linux: unpack the `linux-x86_64` or `linux-aarch64` archive and run `schwitzer`.
+          - Linux: download the `.AppImage` for x86_64 or aarch64, make it executable (`chmod +x`) and run it. Or unpack the `.tar.gz` and run `schwitzer`.
           - macOS (Apple silicon): unpack, move `Schwitzer.app` to Applications and run `xattr -dr com.apple.quarantine /Applications/Schwitzer.app` once; the app is not notarized.
-          - Windows: unpack the zip and run `schwitzer.exe`; SmartScreen asks once because the app is not signed.
+          - Windows: run `…-windows-x86_64-setup.exe`; it installs for your user, without admin rights. Or unpack the zip and run `schwitzer.exe`. SmartScreen asks once because the app is not signed.
 
-          Keep the app in a folder you can write to: it installs new releases in place and restarts.
+          Keep the app (the AppImage too) in a folder you can write to: it installs new releases in place and restarts.
           EOF
           gh release create "$GITHUB_REF_NAME" dist/* --title "Schwitzer ${GITHUB_REF_NAME#v}" --notes-file notes.md

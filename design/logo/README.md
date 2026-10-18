@@ -56,7 +56,8 @@ product and name. At 16 px the drop disappears and a-rack remains.
 
 d-rack-tropfen on the dark plate. The shipping copy is
 `crates/schwitzer-app/assets/logo/mark.svg`; `src/brand.rs` renders it as the
-window icon. `schwitzer.ico` (embedded in `schwitzer.exe` by `build.rs`) and
-`schwitzer.icns` (in `Schwitzer.app`, `deploy/package.sh`) beside it are
-generated with `cargo run -p schwitzer-app --example icons`; rerun it after
-changing the mark.
+window icon. `schwitzer.ico` (embedded in `schwitzer.exe` by `build.rs` and the
+Windows installer's icon), `schwitzer.icns` (in `Schwitzer.app`,
+`deploy/package.sh`) and `schwitzer.png` (256 px, the AppImage icon,
+`deploy/package.sh`) beside it are generated with
+`cargo run -p schwitzer-app --example icons`; rerun it after changing the mark.

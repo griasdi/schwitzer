@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Schwitzer
+Comment=Task room for coding agents and their humans
+Exec=schwitzer
+Icon=schwitzer
+# The window's app id (main.rs, application_id): desktops find this entry and its icon by it.
+StartupWMClass=schwitzer
+Categories=Development;ProjectManagement;
+Terminal=false

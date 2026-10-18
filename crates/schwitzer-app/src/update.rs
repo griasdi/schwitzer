@@ -1,11 +1,11 @@
-//! Self-update from the GitHub releases: check for a newer release, download its archive for
-//! this platform, verify it against the digest GitHub publishes, swap the program file in place
-//! and start the new program.
+//! Self-update from the GitHub releases: check for a newer release, download its archive (or
+//! AppImage) for this platform, verify it against the digest GitHub publishes, swap the program
+//! file in place and start the new program.
 //!
 //! Only builds with the `self-update` feature use it ([`ENABLED`]); the module is compiled and
 //! tested in every build.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -45,6 +45,57 @@ const BINARY: &str = if cfg!(windows) {
 } else {
     "schwitzer"
 };
+
+/// How this copy of the program came, which decides the release asset it updates from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Package {
+    /// The `.tar.gz` or `.zip` archive (the Windows installer installs the same `schwitzer.exe`).
+    Archive,
+    /// The Linux AppImage: the whole `.AppImage` file is the program file.
+    AppImage,
+}
+
+/// The file an update replaces and the restart runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Program {
+    pub path: PathBuf,
+    pub package: Package,
+}
+
+impl Program {
+    /// This program's file. Inside an AppImage the program runs from a read-only mount
+    /// (`APPDIR`); the AppImage runtime names the file it runs from in `APPIMAGE`.
+    pub fn current() -> Option<Program> {
+        Self::locate(
+            std::env::current_exe().ok(),
+            std::env::var_os("APPIMAGE"),
+            std::env::var_os("APPDIR"),
+        )
+    }
+
+    fn locate(
+        exe: Option<PathBuf>,
+        appimage: Option<OsString>,
+        appdir: Option<OsString>,
+    ) -> Option<Program> {
+        if cfg!(target_os = "linux")
+            && let (Some(appimage), Some(appdir), Some(exe)) = (&appimage, &appdir, &exe)
+            && !appimage.is_empty()
+            && !appdir.is_empty()
+            // A process started from an AppImage inherits APPIMAGE but does not run under its APPDIR.
+            && exe.starts_with(appdir)
+        {
+            return Some(Program {
+                path: appimage.into(),
+                package: Package::AppImage,
+            });
+        }
+        exe.map(|path| Program {
+            path,
+            package: Package::Archive,
+        })
+    }
+}
 
 /// A release newer than this build, with the archive for this platform.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,17 +141,22 @@ struct Asset {
     digest: Option<String>,
 }
 
-/// The name of the release archive of `version` for `platform`.
-pub fn asset_name(version: &semver::Version, platform: &str) -> String {
-    format!("schwitzer-{version}-{platform}.{ARCHIVE_EXT}")
+/// The name of the release asset of `version` for `platform` and `package`.
+pub fn asset_name(version: &semver::Version, platform: &str, package: Package) -> String {
+    let ext = match package {
+        Package::AppImage => "AppImage",
+        Package::Archive => ARCHIVE_EXT,
+    };
+    format!("schwitzer-{version}-{platform}.{ext}")
 }
 
 /// The release in GitHub's "latest release" answer `json` when it is newer than `current` and
-/// a stable version; its archive for `platform` must be there with a sha256 digest.
+/// a stable version; its asset for `platform` and `package` must be there with a sha256 digest.
 pub fn parse_latest(
     json: &[u8],
     current: &semver::Version,
     platform: &str,
+    package: Package,
 ) -> Result<Option<Release>, String> {
     let latest: Latest =
         serde_json::from_slice(json).map_err(|e| format!("unreadable release list: {e}"))?;
@@ -116,7 +172,7 @@ pub fn parse_latest(
     if !version.pre.is_empty() || version <= *current {
         return Ok(None);
     }
-    let name = asset_name(&version, platform);
+    let name = asset_name(&version, platform, package);
     let asset = latest
         .assets
         .into_iter()
@@ -138,20 +194,24 @@ pub fn parse_latest(
 }
 
 /// Asks GitHub for the latest release; `None` when there is nothing newer for this platform.
-pub async fn check() -> Result<Option<Release>, String> {
+pub async fn check(package: Package) -> Result<Option<Release>, String> {
     let Some(platform) = PLATFORM else {
         return Err("No release is built for this platform".into());
     };
-    blocking(move || fetch_latest(platform)).await
+    blocking(move || fetch_latest(platform, package)).await
 }
 
-/// Downloads `release`, verifies it and puts its program in place of `exe`.
-pub async fn install(release: Release, exe: PathBuf) -> Result<semver::Version, String> {
+/// Downloads `release`, verifies it and puts it in place of `program`.
+pub async fn install(release: Release, program: Program) -> Result<semver::Version, String> {
     blocking(move || {
         let bytes = download(&release)?;
         verify(&bytes, &release)?;
-        let binary = extract(&bytes)?;
-        replace(&exe, &binary).map_err(|e| format!("cannot replace {}: {e}", exe.display()))?;
+        let binary = match program.package {
+            Package::AppImage => bytes,
+            Package::Archive => extract(&bytes)?,
+        };
+        replace(&program.path, &binary)
+            .map_err(|e| format!("cannot replace {}: {e}", program.path.display()))?;
         Ok(release.version)
     })
     .await
@@ -165,6 +225,11 @@ pub fn clean_leftovers(exe: &Path) {
 
 /// Starts `exe` with this process's arguments and environment; the caller then exits.
 pub fn restart(exe: &Path) -> io::Result<()> {
+    // The new program gets no file descriptor this process inherited (Rust opens its own ones
+    // close-on-exec): inside an AppImage the runtime's keepalive pipe and mount directory would
+    // keep the old mount and its FUSE process alive until the new program exits.
+    #[cfg(unix)]
+    close_fds::set_fds_cloexec_threadsafe(3, &[]);
     Command::new(exe)
         .args(std::env::args_os().skip(1))
         .spawn()
@@ -196,7 +261,7 @@ fn agent(timeout: Duration) -> ureq::Agent {
         .into()
 }
 
-fn fetch_latest(platform: &str) -> Result<Option<Release>, String> {
+fn fetch_latest(platform: &str, package: Package) -> Result<Option<Release>, String> {
     let url = std::env::var(URL_ENV).unwrap_or_else(|_| LATEST_URL.to_owned());
     let response = agent(Duration::from_secs(30))
         .get(&url)
@@ -216,7 +281,7 @@ fn fetch_latest(platform: &str) -> Result<Option<Release>, String> {
         .read_to_vec()
         .map_err(|e| format!("GitHub: {e}"))?;
     let current = CURRENT.parse().expect("CARGO_PKG_VERSION is semver");
-    parse_latest(&json, &current, platform)
+    parse_latest(&json, &current, platform, package)
 }
 
 fn download(release: &Release) -> Result<Vec<u8>, String> {
@@ -360,8 +425,14 @@ mod tests {
 
     #[test]
     fn newer_release_is_found_with_its_archive() {
-        let json = latest("v1.2.0", &asset_name(&v("1.2.0"), PLATFORM), Some(DIGEST));
-        let release = parse_latest(&json, &v("1.1.9"), PLATFORM).unwrap().unwrap();
+        let json = latest(
+            "v1.2.0",
+            &asset_name(&v("1.2.0"), PLATFORM, Package::Archive),
+            Some(DIGEST),
+        );
+        let release = parse_latest(&json, &v("1.1.9"), PLATFORM, Package::Archive)
+            .unwrap()
+            .unwrap();
         assert_eq!(release.version, v("1.2.0"));
         assert_eq!(release.url, "https://x/a");
         assert_eq!(release.size, 42);
@@ -370,56 +441,122 @@ mod tests {
 
     #[test]
     fn same_or_older_release_is_no_update() {
-        let json = latest("v1.2.0", &asset_name(&v("1.2.0"), PLATFORM), Some(DIGEST));
-        assert_eq!(parse_latest(&json, &v("1.2.0"), PLATFORM), Ok(None));
-        assert_eq!(parse_latest(&json, &v("2.0.0"), PLATFORM), Ok(None));
+        let json = latest(
+            "v1.2.0",
+            &asset_name(&v("1.2.0"), PLATFORM, Package::Archive),
+            Some(DIGEST),
+        );
+        assert_eq!(
+            parse_latest(&json, &v("1.2.0"), PLATFORM, Package::Archive),
+            Ok(None)
+        );
+        assert_eq!(
+            parse_latest(&json, &v("2.0.0"), PLATFORM, Package::Archive),
+            Ok(None)
+        );
     }
 
     #[test]
     fn drafts_and_prereleases_are_no_update() {
-        let name = asset_name(&v("1.0.0"), PLATFORM);
+        let name = asset_name(&v("1.0.0"), PLATFORM, Package::Archive);
         for flag in ["draft", "prerelease"] {
             let mut json: serde_json::Value =
                 serde_json::from_slice(&latest("v1.0.0", &name, Some(DIGEST))).unwrap();
             json[flag] = true.into();
             let json = json.to_string();
             assert_eq!(
-                parse_latest(json.as_bytes(), &v("0.1.0"), PLATFORM),
+                parse_latest(json.as_bytes(), &v("0.1.0"), PLATFORM, Package::Archive),
                 Ok(None)
             );
         }
         let rc = latest(
             "v1.0.0-rc.1",
-            &asset_name(&v("1.0.0-rc.1"), PLATFORM),
+            &asset_name(&v("1.0.0-rc.1"), PLATFORM, Package::Archive),
             Some(DIGEST),
         );
-        assert_eq!(parse_latest(&rc, &v("0.1.0"), PLATFORM), Ok(None));
+        assert_eq!(
+            parse_latest(&rc, &v("0.1.0"), PLATFORM, Package::Archive),
+            Ok(None)
+        );
     }
 
     #[test]
     fn missing_archive_is_an_error_naming_it() {
         let json = latest("v1.0.0", "schwitzer-1.0.0-other.tar.gz", Some(DIGEST));
-        let error = parse_latest(&json, &v("0.1.0"), PLATFORM).unwrap_err();
+        let error = parse_latest(&json, &v("0.1.0"), PLATFORM, Package::Archive).unwrap_err();
         assert!(
-            error.contains(&asset_name(&v("1.0.0"), PLATFORM)),
+            error.contains(&asset_name(&v("1.0.0"), PLATFORM, Package::Archive)),
             "{error}"
         );
     }
 
     #[test]
     fn missing_or_malformed_digest_is_an_error() {
-        let name = asset_name(&v("1.0.0"), PLATFORM);
+        let name = asset_name(&v("1.0.0"), PLATFORM, Package::Archive);
         let md5 = DIGEST.replace("sha256", "md5");
         for digest in [None, Some("sha256:abc"), Some(md5.as_str())] {
             let json = latest("v1.0.0", &name, digest);
-            assert!(parse_latest(&json, &v("0.1.0"), PLATFORM).is_err());
+            assert!(parse_latest(&json, &v("0.1.0"), PLATFORM, Package::Archive).is_err());
         }
     }
 
     #[test]
     fn tag_that_is_no_version_is_an_error() {
         let json = latest("nightly", "x", Some(DIGEST));
-        assert!(parse_latest(&json, &v("0.1.0"), PLATFORM).is_err());
+        assert!(parse_latest(&json, &v("0.1.0"), PLATFORM, Package::Archive).is_err());
+    }
+
+    #[test]
+    fn appimage_updates_from_the_appimage_asset() {
+        let archive = asset_name(&v("1.2.0"), PLATFORM, Package::Archive);
+        let json = serde_json::json!({
+            "tag_name": "v1.2.0",
+            "draft": false,
+            "prerelease": false,
+            "assets": [
+                {"name": archive, "browser_download_url": "https://x/a", "size": 42, "digest": DIGEST},
+                {"name": "schwitzer-1.2.0-linux-x86_64.AppImage", "browser_download_url": "https://x/img", "size": 43, "digest": DIGEST},
+            ],
+        })
+        .to_string();
+        let found = |package| {
+            parse_latest(json.as_bytes(), &v("1.1.0"), PLATFORM, package)
+                .unwrap()
+                .unwrap()
+                .url
+        };
+        assert_eq!(found(Package::AppImage), "https://x/img");
+        assert_eq!(found(Package::Archive), "https://x/a");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn appimage_is_found_only_under_its_mount() {
+        let appimage = Some(OsString::from("/home/u/S.AppImage"));
+        let appdir = Some(OsString::from("/tmp/.mount_x"));
+        assert_eq!(
+            Program::locate(
+                Some("/tmp/.mount_x/usr/bin/schwitzer".into()),
+                appimage.clone(),
+                appdir.clone()
+            ),
+            Some(Program {
+                path: "/home/u/S.AppImage".into(),
+                package: Package::AppImage,
+            })
+        );
+        let outside = Some(Program {
+            path: "/usr/bin/schwitzer".into(),
+            package: Package::Archive,
+        });
+        assert_eq!(
+            Program::locate(Some("/usr/bin/schwitzer".into()), appimage, appdir.clone()),
+            outside
+        );
+        assert_eq!(
+            Program::locate(Some("/usr/bin/schwitzer".into()), None, appdir),
+            outside
+        );
     }
 
     #[test]

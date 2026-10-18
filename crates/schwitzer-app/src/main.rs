@@ -42,6 +42,12 @@ fn main() -> iced::Result {
             size: iced::Size::new(400.0, 780.0),
             min_size: Some(iced::Size::new(340.0, 520.0)),
             icon: brand::window_icon(),
+            // Matches `StartupWMClass` in deploy/schwitzer.desktop: desktops find the icon by it.
+            #[cfg(target_os = "linux")]
+            platform_specific: iced::window::settings::PlatformSpecific {
+                application_id: "schwitzer".into(),
+                ..Default::default()
+            },
             ..iced::window::Settings::default()
         });
     for font in theme::FONTS {

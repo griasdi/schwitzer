@@ -276,9 +276,10 @@ pub struct App {
     auto_failed: BTreeSet<PathBuf>,
     /// When the plugins were last checked.
     plugins_checked_ms: u64,
-    /// This program's file as it was at start; the restart after an update runs it. (On Linux,
-    /// `current_exe` reads `… (deleted)` once the file is replaced.)
-    exe: Option<PathBuf>,
+    /// This program's file as it was at start (the AppImage when it runs from one); the restart
+    /// after an update runs it. (On Linux, `current_exe` reads `… (deleted)` once the file is
+    /// replaced.)
+    program: Option<update::Program>,
     updater: UpdateState,
     /// The version whose install failed and why, so the periodic check does not download it
     /// again by itself.
@@ -375,7 +376,7 @@ impl App {
             plugins: BTreeMap::new(),
             auto_failed: BTreeSet::new(),
             plugins_checked_ms: 0,
-            exe: std::env::current_exe().ok(),
+            program: update::Program::current(),
             updater: UpdateState::Idle,
             update_failed: None,
             resume_focus: None,
@@ -383,9 +384,9 @@ impl App {
         };
         app.read_project_dirs();
         if update::ENABLED
-            && let Some(exe) = &app.exe
+            && let Some(program) = &app.program
         {
-            update::clean_leftovers(exe);
+            update::clean_leftovers(&program.path);
         }
         if let Some(resume) = resume::take(&app.data_dir, now_ms()) {
             app.apply_resume(resume);
@@ -1872,12 +1873,13 @@ impl App {
         {
             return Task::none();
         }
-        if self.exe.is_none() {
+        let Some(program) = &self.program else {
             self.updater = UpdateState::Failed("Cannot find this program's file".into());
             return Task::none();
-        }
+        };
+        let package = program.package;
         self.updater = UpdateState::Checking;
-        Task::perform(update::check(), Message::UpdateChecked)
+        Task::perform(update::check(package), Message::UpdateChecked)
     }
 
     fn update_checked(&mut self, result: Result<Option<update::Release>, String>) -> Task<Message> {
@@ -1908,11 +1910,11 @@ impl App {
     }
 
     fn install_update(&mut self, release: update::Release) -> Task<Message> {
-        let Some(exe) = self.exe.clone() else {
+        let Some(program) = self.program.clone() else {
             return Task::none();
         };
         self.updater = UpdateState::Installing(release.clone());
-        Task::perform(update::install(release, exe), Message::UpdateInstalled)
+        Task::perform(update::install(release, program), Message::UpdateInstalled)
     }
 
     fn update_installed(&mut self, result: Result<semver::Version, String>) -> Task<Message> {
@@ -1944,7 +1946,7 @@ impl App {
     /// every destructor, so nothing of the old process removes what the new one already set up
     /// (the remote control socket).
     fn restart_for_update(&mut self, focus: Option<&iced::advanced::widget::Id>) {
-        let (UpdateState::Installed(_), Some(exe)) = (&self.updater, &self.exe) else {
+        let (UpdateState::Installed(_), Some(program)) = (&self.updater, &self.program) else {
             return;
         };
         let snapshot = self.snapshot(focus);
@@ -1952,7 +1954,7 @@ impl App {
             self.banner = Some(format!("Cannot restart: {e}"));
             return;
         }
-        if let Err(e) = update::restart(exe) {
+        if let Err(e) = update::restart(&program.path) {
             resume::remove(&self.data_dir);
             self.banner = Some(format!("Cannot restart: {e}"));
             return;

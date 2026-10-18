@@ -42,6 +42,7 @@ resvg.workspace = true
 [target.'cfg(not(windows))'.dependencies]
 tar.workspace = true
 flate2.workspace = true
+close_fds.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 zip.workspace = true
