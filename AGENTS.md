@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Schwitzer is a task room for coding agents and their humans: a desktop app in Rust and iced (Linux, Windows, macOS) with a local MCP server for the agents, and a standalone room server over QUIC (weida). PRODUCT.md says what it is for, DESIGN.md how it looks.
+Schwitzer is a task room for coding agents and their humans: a desktop app in Rust and iced (Linux, Windows, macOS) with a local MCP server for the agents, and a standalone room server over QUIC (weida). PRODUCT.md says what it is for, DESIGN.md how it looks, docs/ARCHITECTURE.md how it fits together.
 
 ## Commands
 

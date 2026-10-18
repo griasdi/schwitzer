@@ -43,7 +43,7 @@ The server listens on UDP (QUIC) and prints `server url: weida://sha256:…@host
 
 ## Build from source
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, building, checks, commit rules and releases. [PRODUCT.md](PRODUCT.md) says what Schwitzer is for, [DESIGN.md](DESIGN.md) how it looks, and [AGENTS.md](AGENTS.md) is for coding agents working on this repo.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, building, checks, commit rules and releases. [PRODUCT.md](PRODUCT.md) says what Schwitzer is for, [DESIGN.md](DESIGN.md) how it looks, and [AGENTS.md](AGENTS.md) is for coding agents working on this repo. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) shows how the pieces fit together and how agents work through the omp plugin.
 
 ## License
 

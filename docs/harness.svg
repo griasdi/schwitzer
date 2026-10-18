@@ -1,0 +1,267 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">Schwitzer agent harness flow</title>
+  <desc id="desc">Top: the stages of one task from Idea to Done, with the human decisions (buttons in the app) above and the agent actions (/schwitzer commands and schwitzer_* tools) below. Bottom left: one tool call from omp through the plugin and the app's MCP server to the room server and every member. Bottom right: one live session, from the claim marker through the omp session log and the app's scanner to every member's sessions panel.</desc>
+  <defs>
+    <style>
+      text { font-family: Figtree, Inter, 'Segoe UI', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif; }
+      .title { font-size: 30px; font-weight: 700; fill: #e4eee6; }
+      .sub { font-size: 15px; fill: #93a597; }
+      .region { font-size: 13px; font-weight: 600; letter-spacing: 1.6px; fill: #627568; }
+      .crate { font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'DejaVu Sans Mono', monospace; font-size: 14px; font-weight: 700; }
+      .mono { font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'DejaVu Sans Mono', monospace; }
+      .desc { font-size: 12px; fill: #93a597; }
+      .chip { font-size: 11.5px; fill: #e4eee6; }
+      .legend { font-size: 11px; fill: #e4eee6; }
+      .small { font-size: 11px; fill: #627568; }
+      .bold { font-weight: 700; }
+      .head { font-size: 14px; font-weight: 700; fill: #e4eee6; }
+      .mid { text-anchor: middle; }
+      .end { text-anchor: end; }
+      .app { fill: #3dcb5c; }
+      .client { fill: #5aa6f5; }
+      .proto { fill: #e6dcff; }
+      .server { fill: #cdf5f2; }
+      .agent { fill: #f0a630; }
+      .danger { fill: #f06a62; }
+    </style>
+    <marker id="m-room" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#e4eee6"/>
+    </marker>
+    <marker id="m-agent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#f0a630"/>
+    </marker>
+    <marker id="m-file" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#93a597"/>
+    </marker>
+    <marker id="m-https" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#627568"/>
+    </marker>
+    <marker id="m-human" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#3dcb5c"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="1000" rx="24" fill="#0d1310"/>
+
+  <!-- Header: the app mark (crates/schwitzer-app/assets/logo/mark.svg) -->
+  <g transform="translate(40 24) scale(0.56)">
+    <rect x="8" y="8" width="112" height="112" rx="26" fill="#142019"/>
+    <rect x="22" y="84" width="76" height="24" rx="6" fill="#0a0f0c"/>
+    <rect x="22" y="80" width="76" height="24" rx="6" fill="#2a3a30"/>
+    <rect x="31" y="87" width="10" height="10" rx="3" fill="#f0a630"/>
+    <rect x="22" y="54" width="76" height="24" rx="6" fill="#0a0f0c"/>
+    <rect x="22" y="50" width="76" height="24" rx="6" fill="#2a3a30"/>
+    <rect x="31" y="57" width="10" height="10" rx="3" fill="#5aa6f5"/>
+    <rect x="34" y="28" width="76" height="24" rx="6" fill="#1a7f35"/>
+    <rect x="34" y="24" width="76" height="24" rx="6" fill="#3dcb5c"/>
+    <rect x="43" y="31" width="10" height="10" rx="3" fill="#03200b"/>
+    <path d="M23 18 C23 18 16 27 16 31.5 A7 7 0 0 0 30 31.5 C30 27 23 18 23 18 Z" fill="#e4eee6"/>
+  </g>
+  <text x="128" y="60" class="title">Schwitzer — agent harness flow</text>
+  <text x="128" y="86" class="sub">Humans decide in the app · agents work through the omp plugin and the app's MCP server · every step is a room event</text>
+  <rect x="1100" y="28" width="40" height="16" rx="5" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.16"/>
+  <text x="1152" y="40" class="legend">Human decision — a button in the app</text>
+  <rect x="1100" y="50" width="40" height="16" rx="8" fill="#f0a630" stroke="#f0a630" stroke-width="1.5" fill-opacity="0.10" stroke-dasharray="5 3"/>
+  <text x="1152" y="62" class="legend">Agent action — /schwitzer command or schwitzer_* tool</text>
+  <rect x="1102" y="75" width="10" height="10" rx="3" fill="#5aa6f5"/>
+  <rect x="1116" y="75" width="10" height="10" rx="3" fill="#3dcb5c"/>
+  <rect x="1131" y="76" width="8" height="8" rx="2.5" fill="none" stroke="#7d9182" stroke-width="2"/>
+  <text x="1152" y="84" class="legend">Stage lamp, as in the app's task list</text>
+  <path d="M1100 102 L1140 102" fill="none" stroke="#93a597" stroke-width="2" stroke-dasharray="2 5" stroke-linecap="round" marker-end="url(#m-file)"/>
+  <text x="1152" y="106" class="legend">Files on disk — omp session logs</text>
+
+  <!-- Part 1: one task through the room -->
+  <rect x="40" y="125" width="1520" height="460" rx="16" fill="#1a231e" stroke="#2a3a30"/>
+  <text x="60" y="151" class="region">ONE TASK THROUGH THE ROOM</text>
+  <text x="60" y="172" class="small">HUMAN · IN THE APP</text>
+  <line x1="56" y1="265" x2="1544" y2="265" stroke="#2a3a30" stroke-dasharray="2 4"/>
+  <text x="60" y="287" class="small">ROOM · TASK STAGE</text>
+  <line x1="56" y1="450" x2="1544" y2="450" stroke="#2a3a30" stroke-dasharray="2 4"/>
+  <text x="60" y="474" class="small">AGENT · OMP + PLUGIN</text>
+  <rect x="60" y="300" width="160" height="64" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <rect x="75" y="314" width="8" height="8" rx="2.5" fill="none" stroke="#6f8374" stroke-width="2"/>
+  <text x="92" y="323" class="head">Idea</text>
+  <text x="74" y="348" class="small">a rough sketch</text>
+  <rect x="246" y="300" width="160" height="64" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <rect x="261" y="314" width="8" height="8" rx="2.5" fill="none" stroke="#7d9182" stroke-width="2"/>
+  <text x="278" y="323" class="head">Proposed</text>
+  <text x="260" y="348" class="small">waits for a human</text>
+  <rect x="432" y="300" width="160" height="64" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <rect x="446" y="313" width="10" height="10" rx="3" fill="#f0a630"/>
+  <text x="464" y="323" class="head">Accepted</text>
+  <text x="446" y="348" class="small">waits for a plan</text>
+  <rect x="618" y="300" width="160" height="64" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <rect x="632" y="313" width="10" height="10" rx="3" fill="#3dcb5c"/>
+  <text x="650" y="323" class="head">Being planned</text>
+  <text x="632" y="348" class="small">Accepted + plan claim</text>
+  <rect x="804" y="300" width="160" height="64" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <rect x="818" y="313" width="10" height="10" rx="3" fill="#5aa6f5"/>
+  <text x="836" y="323" class="head">Plan ready</text>
+  <text x="818" y="348" class="small">Planned, plan not empty</text>
+  <rect x="990" y="300" width="160" height="64" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <rect x="1004" y="313" width="10" height="10" rx="3" fill="#5aa6f5"/>
+  <text x="1022" y="323" class="head">Approved</text>
+  <text x="1004" y="348" class="small">Ready, unclaimed</text>
+  <rect x="1176" y="300" width="160" height="64" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <rect x="1190" y="313" width="10" height="10" rx="3" fill="#3dcb5c"/>
+  <text x="1208" y="323" class="head">Building</text>
+  <text x="1190" y="348" class="small">Ready + build claim</text>
+  <rect x="1362" y="300" width="160" height="64" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <rect x="1376" y="313" width="10" height="10" rx="3" fill="#738678"/>
+  <text x="1394" y="323" class="head">Done</text>
+  <text x="1376" y="348" class="small">finished with a note</text>
+  <path d="M220 332 L246 332" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+  <path d="M406 332 L432 332" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+  <path d="M592 332 L618 332" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+  <path d="M778 332 L804 332" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+  <path d="M964 332 L990 332" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+  <path d="M1150 332 L1176 332" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+  <path d="M1336 332 L1362 332" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+
+  <!-- Rejected -->
+  <rect x="1362" y="380" width="160" height="56" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <rect x="1376" y="391" width="10" height="10" rx="3" fill="#f06a62"/>
+  <text x="1394" y="401" class="head">Rejected</text>
+  <text x="1376" y="418" class="small">Reject: Idea, Proposed,</text>
+  <text x="1376" y="431" class="small">Accepted or Planned</text>
+
+  <!-- Human decisions -->
+  <rect x="72" y="185" width="137" height="24" rx="6" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.16"/>
+  <text x="140" y="201" class="chip mid">+ Idea → Add idea</text>
+  <path d="M140 209 L140 300" fill="none" stroke="#3dcb5c" stroke-width="1.5" marker-end="url(#m-human)"/>
+  <rect x="250" y="185" width="99" height="24" rx="6" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.16"/>
+  <text x="300" y="201" class="chip mid">+ → Propose</text>
+  <path d="M300 209 L300 300" fill="none" stroke="#3dcb5c" stroke-width="1.5" marker-end="url(#m-human)"/>
+  <rect x="193" y="222" width="80" height="24" rx="6" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.16"/>
+  <text x="233" y="238" class="chip mid">Write up</text>
+  <path d="M233 246 L233 326" fill="none" stroke="#3dcb5c" stroke-width="1.5" marker-end="url(#m-human)"/>
+  <rect x="386" y="222" width="67" height="24" rx="6" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.16"/>
+  <text x="419" y="238" class="chip mid">Accept</text>
+  <path d="M419 246 L419 326" fill="none" stroke="#3dcb5c" stroke-width="1.5" marker-end="url(#m-human)"/>
+  <rect x="924" y="222" width="105" height="24" rx="6" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.16"/>
+  <text x="977" y="238" class="chip mid">Approve plan</text>
+  <path d="M977 246 L977 326" fill="none" stroke="#3dcb5c" stroke-width="1.5" marker-end="url(#m-human)"/>
+  <path d="M860 300 C860 130, 1250 130, 1250 300" fill="none" stroke="#3dcb5c" stroke-width="1.5" marker-end="url(#m-human)"/>
+  <rect x="958" y="150" width="195" height="24" rx="6" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.16"/>
+  <text x="1055" y="166" class="chip mid">Pick → claim + copy prompt</text>
+  <text x="1268" y="196" class="small">from Plan ready or Approved:</text>
+  <text x="1268" y="210" class="small">approves first if needed</text>
+
+  <!-- Replan, release, reopen -->
+  <path d="M830 300 C830 256, 520 256, 520 300" fill="none" stroke="#93a597" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m-file)"/>
+  <text x="675" y="258" class="small mid">Replan (also from Approved)</text>
+  <path d="M650 364 C650 394, 570 394, 570 364" fill="none" stroke="#93a597" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m-file)"/>
+  <text x="610" y="402" class="small mid">release</text>
+  <path d="M1230 364 C1230 394, 1110 394, 1110 364" fill="none" stroke="#93a597" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m-file)"/>
+  <text x="1170" y="402" class="small mid">release</text>
+  <path d="M1522 408 L1536 408 L1536 137 L370 137 L370 300" fill="none" stroke="#93a597" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m-file)"/>
+  <text x="1530" y="152" class="small end">Reopen (from Done or Rejected) → Proposed</text>
+
+  <!-- Agent actions -->
+  <rect x="56" y="490" width="189" height="24" rx="12" fill="#f0a630" stroke="#f0a630" stroke-width="1.5" fill-opacity="0.10" stroke-dasharray="5 3"/>
+  <text x="150" y="506" class="chip mid">/schwitzer idea → add_idea</text>
+  <path d="M100 490 L100 364" fill="none" stroke="#f0a630" stroke-width="1.5" marker-end="url(#m-agent)"/>
+  <rect x="196" y="530" width="267" height="24" rx="12" fill="#f0a630" stroke="#f0a630" stroke-width="1.5" fill-opacity="0.10" stroke-dasharray="5 3"/>
+  <text x="330" y="546" class="chip mid">/schwitzer propose → propose (idea: N)</text>
+  <path d="M290 530 L290 364" fill="none" stroke="#f0a630" stroke-width="1.5" marker-end="url(#m-agent)"/>
+  <rect x="536" y="530" width="209" height="24" rx="12" fill="#f0a630" stroke="#f0a630" stroke-width="1.5" fill-opacity="0.10" stroke-dasharray="5 3"/>
+  <text x="640" y="546" class="chip mid">/schwitzer plan → claim(plan)</text>
+  <path d="M680 530 L680 364" fill="none" stroke="#f0a630" stroke-width="1.5" marker-end="url(#m-agent)"/>
+  <rect x="708" y="490" width="183" height="24" rx="12" fill="#f0a630" stroke="#f0a630" stroke-width="1.5" fill-opacity="0.10" stroke-dasharray="5 3"/>
+  <text x="800" y="506" class="chip mid">plan review → submit_plan</text>
+  <path d="M791 490 L791 332" fill="none" stroke="#f0a630" stroke-width="1.5" marker-end="url(#m-agent)"/>
+  <rect x="1089" y="530" width="222" height="24" rx="12" fill="#f0a630" stroke="#f0a630" stroke-width="1.5" fill-opacity="0.10" stroke-dasharray="5 3"/>
+  <text x="1200" y="546" class="chip mid">/schwitzer build → claim(build)</text>
+  <path d="M1260 530 L1260 364" fill="none" stroke="#f0a630" stroke-width="1.5" marker-end="url(#m-agent)"/>
+  <rect x="1286" y="490" width="125" height="24" rx="12" fill="#f0a630" stroke="#f0a630" stroke-width="1.5" fill-opacity="0.10" stroke-dasharray="5 3"/>
+  <text x="1349" y="506" class="chip mid">schwitzer_finish</text>
+  <path d="M1349 490 L1349 332" fill="none" stroke="#f0a630" stroke-width="1.5" marker-end="url(#m-agent)"/>
+  <text x="60" y="574" class="small">The server has no roles; the app keeps decisions human: Decide exists only as buttons, never as an MCP tool.</text>
+
+  <!-- Part 2 left: one tool call -->
+  <rect x="40" y="605" width="750" height="355" rx="16" fill="#1a231e" stroke="#2a3a30"/>
+  <text x="60" y="631" class="region">ONE TOOL CALL</text>
+  <rect x="60" y="645" width="530" height="46" rx="10" fill="#222d26" stroke="#f0a630" stroke-width="1.5"/>
+  <text x="74" y="664" class="head">omp agent</text>
+  <text x="576" y="664" class="small end">or the plugin itself, for /schwitzer</text>
+  <text x="74" y="681" class="desc">calls schwitzer_claim(work, task, agent)</text>
+  <path d="M140 691 L140 709" fill="none" stroke="#f0a630" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#m-agent)"/>
+  <text x="152" y="704" class="small">tool call</text>
+  <rect x="60" y="709" width="530" height="46" rx="10" fill="#222d26" stroke="#f0a630" stroke-width="1.5"/>
+  <text x="74" y="728" class="head">omp plugin · index.ts</text>
+  <text x="576" y="728" class="small end">35 s per call</text>
+  <text x="74" y="745" class="desc">reads schwitzer.json and &lt;data_dir&gt;/mcp-token · initialize → tools/call → DELETE</text>
+  <path d="M140 755 L140 773" fill="none" stroke="#f0a630" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#m-agent)"/>
+  <text x="152" y="768" class="small">HTTP POST + Bearer</text>
+  <rect x="60" y="773" width="530" height="46" rx="10" fill="#222d26" stroke="#3dcb5c" stroke-width="1.5"/>
+  <text x="74" y="792" class="head">app MCP server</text>
+  <text x="576" y="792" class="small end mono">127.0.0.1:13339/mcp</text>
+  <text x="74" y="809" class="desc">Origin → 403 · wrong token → 401 · 30 s per tool · no decide tools</text>
+  <path d="M140 819 L140 837" fill="none" stroke="#627568" stroke-width="1.5" marker-end="url(#m-https)"/>
+  <text x="152" y="832" class="small">Client::request</text>
+  <rect x="60" y="837" width="530" height="46" rx="10" fill="#222d26" stroke="#5aa6f5" stroke-width="1.5"/>
+  <text x="74" y="856" class="head">schwitzer-client</text>
+  <text x="576" y="856" class="small end">inside the app</text>
+  <text x="74" y="873" class="desc">Client::request(room, Request::Claim) → /rpc over weida</text>
+  <path d="M140 883 L140 901" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+  <text x="152" y="896" class="small">/rpc</text>
+  <rect x="60" y="901" width="530" height="46" rx="10" fill="#222d26" stroke="#cdf5f2" stroke-width="1.5"/>
+  <text x="74" y="920" class="head">schwitzer-server</text>
+  <text x="576" y="920" class="small end">one SQLite transaction</text>
+  <text x="74" y="937" class="desc">validate → change → commit → Event to every member over /events</text>
+  <rect x="620" y="790" width="150" height="54" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="634" y="811" class="head">your app</text>
+  <text x="634" y="830" class="desc">answer + event</text>
+  <rect x="620" y="862" width="150" height="76" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="634" y="883" class="head">every member</text>
+  <text x="634" y="902" class="desc">ClientEvent::Room</text>
+  <text x="634" y="920" class="desc">→ list redraws</text>
+  <path d="M590 924 L605 924 L605 817 L620 817" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+  <path d="M590 924 L620 924" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+  <text x="620" y="660" class="small">the answer goes back</text>
+  <text x="620" y="674" class="small">the same way: the agent</text>
+  <text x="620" y="688" class="small">sees the task JSON or</text>
+  <text x="620" y="702" class="small">the server's error text</text>
+
+  <!-- Part 2 right: one live session -->
+  <rect x="810" y="605" width="750" height="355" rx="16" fill="#1a231e" stroke="#2a3a30"/>
+  <text x="830" y="631" class="region">ONE LIVE SESSION</text>
+  <rect x="830" y="645" width="340" height="60" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="844" y="665" class="head">claim answer</text>
+  <text x="844" y="683" class="desc mono">schwitzer-claim: &lt;32 hex&gt;</text>
+  <text x="844" y="697" class="small">from schwitzer_claim or the Pick prompt</text>
+  <rect x="830" y="723" width="340" height="60" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="844" y="743" class="head">plugin puts it into the prompt</text>
+  <text x="844" y="761" class="desc">a user message, so it lands in</text>
+  <text x="844" y="775" class="desc">the session log</text>
+  <rect x="830" y="801" width="340" height="60" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="844" y="821" class="head">omp session log</text>
+  <text x="844" y="839" class="desc mono">~/.omp/agent/sessions/*/*.jsonl</text>
+  <text x="844" y="853" class="small">written by omp, read only by the app</text>
+  <rect x="830" y="879" width="340" height="60" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="844" y="899" class="head">app scanner · every 5 s</text>
+  <text x="844" y="917" class="desc">active ≤ 10 min, read incrementally</text>
+  <text x="844" y="931" class="desc">title · model · tokens · markers</text>
+  <path d="M890 705 L890 723" fill="none" stroke="#f0a630" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#m-agent)"/>
+  <path d="M890 783 L890 801" fill="none" stroke="#93a597" stroke-width="2" stroke-dasharray="2 5" stroke-linecap="round" marker-end="url(#m-file)"/>
+  <path d="M890 861 L890 879" fill="none" stroke="#93a597" stroke-width="2" stroke-dasharray="2 5" stroke-linecap="round" marker-end="url(#m-file)"/>
+  <rect x="1200" y="866" width="340" height="76" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="1214" y="887" class="head">filter</text>
+  <text x="1214" y="907" class="desc">newest marker = my claim → task #N</text>
+  <text x="1214" y="922" class="small danger">cwd outside a linked repo: never leaves</text>
+  <text x="1214" y="937" class="small danger">the machine</text>
+  <rect x="1200" y="757" width="340" height="76" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="1214" y="778" class="head">PublishSessions</text>
+  <text x="1214" y="798" class="desc">≤ 50 per room · only when changed</text>
+  <text x="1214" y="813" class="desc">server memory only → Event::Sessions</text>
+  <rect x="1200" y="648" width="340" height="76" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="1214" y="669" class="head">Sessions panel of every member</text>
+  <text x="1214" y="689" class="desc">owner · title · #N · tokens · runtime</text>
+  <text x="1214" y="704" class="desc">idle after 2 min</text>
+  <path d="M1170 909 L1200 909" fill="none" stroke="#627568" stroke-width="1.5" marker-end="url(#m-https)"/>
+  <path d="M1260 866 L1260 833" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+  <text x="1272" y="853" class="small">only sessions in linked repos</text>
+  <path d="M1260 757 L1260 724" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)"/>
+  <text x="1272" y="744" class="small">/rpc, then /events to every member</text>
+  <text x="40" y="985" class="small">docs/harness.svg · see docs/ARCHITECTURE.md, section 9</text>
+</svg>

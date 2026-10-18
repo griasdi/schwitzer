@@ -1,0 +1,297 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" role="img" aria-labelledby="title desc">
+  <title id="title">Schwitzer system architecture</title>
+  <desc id="desc">On your machine, omp agent sessions with the Schwitzer plugin call the desktop app's local MCP server; the app (UI, MCP server, session scanner, plugin keeper) reaches its rooms through schwitzer-client and schwitzer-proto and keeps its data in SCHWITZER_HOME. weida/QUIC carries /rpc and /events to the room server (rpc, events, hub, in-memory sessions, SQLite store, release check), which sends every change to the other members' apps; GitHub releases, the releases API, stkn.org, CI and the site make up the project infrastructure.</desc>
+  <defs>
+    <style>
+      text { font-family: Figtree, Inter, 'Segoe UI', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif; }
+      .title { font-size: 30px; font-weight: 700; fill: #e4eee6; }
+      .sub { font-size: 15px; fill: #93a597; }
+      .region { font-size: 13px; font-weight: 600; letter-spacing: 1.6px; fill: #627568; }
+      .crate { font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'DejaVu Sans Mono', monospace; font-size: 14px; font-weight: 700; }
+      .mono { font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'DejaVu Sans Mono', monospace; }
+      .desc { font-size: 12px; fill: #93a597; }
+      .chip { font-size: 11.5px; fill: #e4eee6; }
+      .legend { font-size: 11px; fill: #e4eee6; }
+      .small { font-size: 11px; fill: #627568; }
+      .bold { font-weight: 700; }
+      .head { font-size: 14px; font-weight: 700; fill: #e4eee6; }
+      .mid { text-anchor: middle; }
+      .end { text-anchor: end; }
+      .app { fill: #3dcb5c; }
+      .client { fill: #5aa6f5; }
+      .proto { fill: #e6dcff; }
+      .server { fill: #cdf5f2; }
+      .agent { fill: #f0a630; }
+      .danger { fill: #f06a62; }
+    </style>
+    <marker id="m-room" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#e4eee6"/>
+    </marker>
+    <marker id="m-agent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#f0a630"/>
+    </marker>
+    <marker id="m-file" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#93a597"/>
+    </marker>
+    <marker id="m-https" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#627568"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="1100" rx="24" fill="#0d1310"/>
+
+  <!-- Header: the app mark (crates/schwitzer-app/assets/logo/mark.svg) -->
+  <g transform="translate(40 24) scale(0.56)">
+    <rect x="8" y="8" width="112" height="112" rx="26" fill="#142019"/>
+    <rect x="22" y="84" width="76" height="24" rx="6" fill="#0a0f0c"/>
+    <rect x="22" y="80" width="76" height="24" rx="6" fill="#2a3a30"/>
+    <rect x="31" y="87" width="10" height="10" rx="3" fill="#f0a630"/>
+    <rect x="22" y="54" width="76" height="24" rx="6" fill="#0a0f0c"/>
+    <rect x="22" y="50" width="76" height="24" rx="6" fill="#2a3a30"/>
+    <rect x="31" y="57" width="10" height="10" rx="3" fill="#5aa6f5"/>
+    <rect x="34" y="28" width="76" height="24" rx="6" fill="#1a7f35"/>
+    <rect x="34" y="24" width="76" height="24" rx="6" fill="#3dcb5c"/>
+    <rect x="43" y="31" width="10" height="10" rx="3" fill="#03200b"/>
+    <path d="M23 18 C23 18 16 27 16 31.5 A7 7 0 0 0 30 31.5 C30 27 23 18 23 18 Z" fill="#e4eee6"/>
+  </g>
+  <text x="128" y="60" class="title">Schwitzer — system architecture</text>
+  <text x="128" y="86" class="sub">Task room for coding agents and their humans · iced desktop app with a local MCP server · weida QUIC room server</text>
+  <path d="M1090 36 L1130 36" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)" marker-start="url(#m-room)"/>
+  <text x="1142" y="40" class="legend">Room traffic — postcard over weida/QUIC (/rpc, /events)</text>
+  <path d="M1090 58 L1130 58" fill="none" stroke="#f0a630" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#m-agent)"/>
+  <text x="1142" y="62" class="legend">Agent calls — MCP over loopback HTTP, bearer token</text>
+  <path d="M1090 80 L1130 80" fill="none" stroke="#93a597" stroke-width="2" stroke-dasharray="2 5" stroke-linecap="round" marker-end="url(#m-file)"/>
+  <text x="1142" y="84" class="legend">Files on disk — plugin files, omp session logs</text>
+  <path d="M1090 102 L1130 102" fill="none" stroke="#627568" stroke-width="1.5" marker-end="url(#m-https)"/>
+  <text x="1142" y="106" class="legend">HTTPS — GitHub releases</text>
+
+  <!-- Region A: your machine -->
+  <rect x="40" y="125" width="820" height="660" rx="16" fill="#1a231e" stroke="#2a3a30"/>
+  <text x="60" y="151" class="region">YOUR MACHINE</text>
+  <text x="60" y="169" class="small">one member: the app, its agents and their files</text>
+
+  <!-- A1 omp -->
+  <rect x="60" y="180" width="780" height="130" rx="10" fill="#f0a630" stroke="#f0a630" stroke-width="1.5" fill-opacity="0.10"/>
+  <text x="76" y="200" class="crate agent">omp · coding agent sessions</text>
+  <text x="76" y="217" class="desc">the harness, started in a repo that is linked to a room's project</text>
+  <rect x="76" y="228" width="280" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="216.0" y="244.0" class="chip mid">/schwitzer plan · build · propose · idea</text>
+  <rect x="364" y="228" width="164" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="446.0" y="244.0" class="chip mid">schwitzer_* tools (10)</text>
+  <rect x="536" y="228" width="183" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="627.5" y="244.0" class="chip mid">plan review → submit_plan</text>
+  <rect x="76" y="258" width="106" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="129.0" y="274.0" class="chip mid">projects hint</text>
+  <rect x="190" y="258" width="177" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="278.5" y="274.0" class="chip mid">cross-project edit guard</text>
+  <text x="76" y="294" class="small mono">.omp/plugins/node_modules/schwitzer/ · index.ts · package.json · schwitzer.json (no token)</text>
+
+  <!-- A2 app -->
+  <rect x="60" y="350" width="780" height="220" rx="10" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.10"/>
+  <text x="76" y="370" class="crate app">schwitzer · desktop app</text>
+  <text x="76" y="387" class="desc">iced 0.14 · App / Message / update / view · 400×780 beside the editor</text>
+  <rect x="76" y="400" width="179" height="122" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="90" y="420" class="head">UI</text>
+  <text x="90" y="440" class="desc">list · task view · settings</text>
+  <text x="90" y="457" class="small">decisions are buttons:</text>
+  <text x="90" y="474" class="desc">accept · reject · approve</text>
+  <text x="90" y="491" class="desc">replan · reopen · pick</text>
+  <rect x="266" y="400" width="179" height="122" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="280" y="420" class="head">MCP server</text>
+  <text x="280" y="440" class="desc mono">127.0.0.1:13339/mcp</text>
+  <text x="280" y="457" class="desc">rmcp streamable HTTP</text>
+  <text x="280" y="474" class="desc">Bearer mcp-token</text>
+  <text x="280" y="491" class="desc">Origin → 403 · 30 s/tool</text>
+  <rect x="456" y="400" width="179" height="122" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="470" y="420" class="head">Session scanner</text>
+  <text x="470" y="440" class="desc">scan every 5 s</text>
+  <text x="470" y="457" class="desc">active ≤ 10 min</text>
+  <text x="470" y="474" class="desc mono">~/.omp/agent/sessions</text>
+  <text x="470" y="491" class="desc">claim marker → task</text>
+  <text x="470" y="508" class="small danger">only linked repos leave</text>
+  <rect x="646" y="400" width="179" height="122" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="660" y="420" class="head">Plugin keeper</text>
+  <text x="660" y="440" class="desc">every 5 s: compare</text>
+  <text x="660" y="457" class="desc">install · update · remove</text>
+  <text x="660" y="474" class="desc mono">auto_update_plugins</text>
+  <rect x="76" y="532" width="209" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="180.5" y="548.0" class="chip mid">bridge: ClientEvent → Message</text>
+  <rect x="292" y="532" width="183" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="383.5" y="548.0" class="chip mid">self-update + resume.json</text>
+  <rect x="482" y="532" width="177" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="570.5" y="548.0" class="chip mid">headless remote (remote)</text>
+  <rect x="666" y="532" width="157" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="744.5" y="548.0" class="chip mid">WSL distros (Windows)</text>
+
+  <!-- A1 ↔ A2 -->
+  <path d="M355.5 310 L355.5 350" fill="none" stroke="#f0a630" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#m-agent)"/>
+  <text x="363.5" y="334" class="small">MCP · HTTP + Bearer</text>
+  <path d="M545.5 310 L545.5 350" fill="none" stroke="#93a597" stroke-width="2" stroke-dasharray="2 5" stroke-linecap="round" marker-end="url(#m-file)"/>
+  <text x="553.5" y="334" class="small">session .jsonl, read only</text>
+  <path d="M735.5 350 L735.5 310" fill="none" stroke="#93a597" stroke-width="2" stroke-dasharray="2 5" stroke-linecap="round" marker-end="url(#m-file)"/>
+  <text x="743.5" y="334" class="small">writes plugin files</text>
+
+  <!-- A3 proto and client -->
+  <rect x="60" y="600" width="265" height="104" rx="10" fill="#3b2a6b" stroke="#e6dcff" stroke-width="1.5" fill-opacity="0.55"/>
+  <text x="76" y="622" class="crate proto">schwitzer-proto</text>
+  <text x="76" y="643" class="desc">Request · Event · Task · Stage</text>
+  <text x="76" y="661" class="desc">postcard · u32 LE frames · caps</text>
+  <text x="76" y="679" class="desc mono">PROTOCOL_VERSION 5</text>
+  <rect x="340" y="600" width="500" height="104" rx="10" fill="#5aa6f5" stroke="#5aa6f5" stroke-width="1.5" fill-opacity="0.10"/>
+  <text x="356" y="622" class="crate client">schwitzer-client</text>
+  <text x="356" y="639" class="desc">own tokio runtime schwitzer-net (2 workers) + weida runtime</text>
+  <rect x="356" y="648" width="151" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="431.5" y="664.0" class="chip mid">sync loop per server</text>
+  <rect x="515" y="648" width="177" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="603.5" y="664.0" class="chip mid">Hello · rejoin · /events</text>
+  <rect x="356" y="675" width="138" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="425.0" y="691.0" class="chip mid">backoff 1 s → 30 s</text>
+  <rect x="502" y="675" width="164" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="584.0" y="691.0" class="chip mid">broadcast&lt;ClientEvent&gt;</text>
+  <path d="M590 570 L590 600" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)" marker-start="url(#m-room)"/>
+  <text x="604" y="590" class="small">Client::request · events</text>
+
+  <!-- A4 local data -->
+  <rect x="60" y="716" width="780" height="56" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="74" y="738" class="head">Local data · SCHWITZER_HOME</text>
+  <text x="76" y="760" class="small mono">identity/ (key = member id) · mcp-token (0600) · settings.toml (rooms, repos, mcp_port) · resume.json</text>
+
+  <!-- Region B: weida -->
+  <rect x="880" y="125" width="160" height="660" rx="16" fill="#1a231e" stroke="#2a3a30"/>
+  <text x="900" y="151" class="region">WEIDA · QUIC</text>
+  <text x="894" y="172" class="small">UDP · mutual TLS</text>
+  <text x="894" y="188" class="small">the client pins the</text>
+  <text x="894" y="204" class="small">server key by the</text>
+  <text x="894" y="220" class="small">fingerprint in</text>
+  <text x="894" y="236" class="small mono">weida://sha256:…</text>
+  <text x="894" y="252" class="small">member id =</text>
+  <text x="894" y="268" class="small">the client's key</text>
+
+  <!-- Region C: room server -->
+  <rect x="1060" y="125" width="330" height="660" rx="16" fill="#1a231e" stroke="#2a3a30"/>
+  <text x="1080" y="151" class="region">ROOM SERVER</text>
+  <text x="1080" y="169" class="small">e.g. stkn.org, the shared server</text>
+  <rect x="1074" y="180" width="302" height="132" rx="10" fill="#222d26" stroke="#f0a630" stroke-width="1.5"/>
+  <text x="1088" y="200" class="head">What the server holds</text>
+  <text x="1088" y="220" class="desc">stores: rooms, projects, tasks, plans,</text>
+  <text x="1088" y="236" class="desc">notes, names — plain text,</text>
+  <text x="1088" y="252" class="small">TLS protects only the wire</text>
+  <text x="1088" y="268" class="desc">in memory: shared sessions</text>
+  <text x="1088" y="284" class="small">title · model · tokens · task</text>
+  <text x="1088" y="300" class="desc">never: code, MCP token, other sessions</text>
+  <rect x="1074" y="325" width="302" height="410" rx="10" fill="#16494a" stroke="#cdf5f2" stroke-width="1.5" fill-opacity="0.45"/>
+  <text x="1088" y="345" class="crate server">schwitzer-server</text>
+  <text x="1088" y="362" class="desc">one binary · rooms without accounts</text>
+  <text x="1088" y="378" class="desc">UDP 7444 on stkn.org</text>
+  <rect x="1088" y="392" width="131" height="92" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="1102" y="411" class="head">store</text>
+  <text x="1102" y="430" class="desc mono">schwitzer.db</text>
+  <text x="1102" y="446" class="desc">SQLite · WAL</text>
+  <text x="1102" y="462" class="desc">schema version 2</text>
+  <rect x="1088" y="494" width="131" height="96" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="1102" y="513" class="head">sessions</text>
+  <text x="1102" y="532" class="desc">memory only</text>
+  <text x="1102" y="548" class="desc">per room and</text>
+  <text x="1102" y="564" class="desc">member</text>
+  <rect x="1088" y="600" width="131" height="56" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="1102" y="619" class="head">rpc</text>
+  <text x="1102" y="639" class="small">one tx per change</text>
+  <rect x="1088" y="666" width="131" height="56" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="1102" y="685" class="head">events</text>
+  <text x="1102" y="705" class="small">snapshot, then live</text>
+  <rect x="1231" y="392" width="131" height="198" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="1245" y="411" class="head">hub</text>
+  <text x="1245" y="430" class="desc">shared frames</text>
+  <text x="1245" y="446" class="desc">queue 1024 / stream</text>
+  <text x="1245" y="462" class="desc">full → drop → resync</text>
+  <text x="1245" y="478" class="desc">≤ 8 streams each</text>
+  <text x="1245" y="494" class="desc">online = ≥ 1 stream</text>
+  <rect x="1231" y="600" width="131" height="122" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="1245" y="619" class="head">release check</text>
+  <text x="1245" y="638" class="desc">GitHub every 5 min</text>
+  <text x="1245" y="654" class="desc">newest stable</text>
+  <text x="1245" y="670" class="desc">→ Event::Release</text>
+
+  <!-- client ↔ server over weida -->
+  <path d="M840 628 L1088 628" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)" marker-start="url(#m-room)"/>
+  <path d="M840 694 L1088 694" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)" marker-start="url(#m-room)"/>
+  <rect x="936" y="616" width="50" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="961.0" y="632.0" class="chip mono mid">/rpc</text>
+  <text x="894" y="657" class="small">Req/Rep · 15 s · ≤ 1 MiB</text>
+  <rect x="925" y="682" width="71" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="960.5" y="698.0" class="chip mono mid">/events</text>
+  <text x="894" y="723" class="small">one long reply</text>
+  <text x="894" y="737" class="small">frames ≤ 4 MiB</text>
+
+  <!-- Region D: other members -->
+  <rect x="1410" y="125" width="150" height="660" rx="16" fill="#1a231e" stroke="#2a3a30"/>
+  <text x="1430" y="151" class="region">MEMBERS</text>
+  <text x="1430" y="169" class="small">others in the room</text>
+  <rect x="1424" y="345" width="122" height="110" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <circle cx="1446" cy="369" r="11" fill="#1e3a6b" stroke="#d3e4ff" stroke-width="1.5"/>
+  <text x="1464" y="374" class="head">Member</text>
+  <text x="1438" y="405" class="desc">schwitzer app</text>
+  <text x="1438" y="423" class="desc">+ their omp</text>
+  <text x="1438" y="439" class="desc">agents</text>
+  <path d="M1376 400 L1424 400" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)" marker-start="url(#m-room)"/>
+  <rect x="1424" y="475" width="122" height="110" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <circle cx="1446" cy="499" r="11" fill="#3b2a6b" stroke="#e6dcff" stroke-width="1.5"/>
+  <text x="1464" y="504" class="head">Member</text>
+  <text x="1438" y="535" class="desc">schwitzer app</text>
+  <text x="1438" y="553" class="desc">+ their omp</text>
+  <text x="1438" y="569" class="desc">agents</text>
+  <path d="M1376 530 L1424 530" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)" marker-start="url(#m-room)"/>
+  <rect x="1424" y="605" width="122" height="110" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <circle cx="1446" cy="629" r="11" fill="#5a3416" stroke="#ffe2c4" stroke-width="1.5"/>
+  <text x="1464" y="634" class="head">Member</text>
+  <text x="1438" y="665" class="desc">schwitzer app</text>
+  <text x="1438" y="683" class="desc">+ their omp</text>
+  <text x="1438" y="699" class="desc">agents</text>
+  <path d="M1376 660 L1424 660" fill="none" stroke="#e4eee6" stroke-width="2" marker-end="url(#m-room)" marker-start="url(#m-room)"/>
+  <text x="1424" y="750" class="small">same app · events</text>
+  <text x="1424" y="764" class="small">in commit order</text>
+
+  <!-- Region E: project infrastructure -->
+  <rect x="40" y="805" width="1520" height="250" rx="16" fill="#1a231e" stroke="#2a3a30"/>
+  <text x="60" y="831" class="region">PROJECT INFRASTRUCTURE</text>
+  <rect x="56" y="845" width="286" height="190" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="70" y="865" class="head">GitHub Releases</text>
+  <text x="70" y="885" class="small mono">deploy/release.sh → tag v*</text>
+  <text x="70" y="902" class="desc">release.yml builds 4 platforms</text>
+  <text x="70" y="919" class="desc">AppImage · tar.gz · zip · setup.exe</text>
+  <text x="70" y="936" class="desc">sha256 digest per asset</text>
+  <text x="70" y="953" class="desc">notes from Changelog: trailers</text>
+  <rect x="356" y="845" width="286" height="190" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="370" y="865" class="head">GitHub Actions</text>
+  <text x="370" y="885" class="small mono">.github/workflows/ci.yml</text>
+  <text x="370" y="902" class="desc">gate on every push and PR:</text>
+  <text x="370" y="919" class="desc">fmt · clippy · test · deny</text>
+  <text x="370" y="936" class="desc">app clippy and update:: tests</text>
+  <text x="370" y="953" class="desc">on macOS and Windows</text>
+  <text x="370" y="1023" class="small">the local gate still runs before a push</text>
+  <rect x="656" y="845" width="286" height="190" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="670" y="865" class="head">Site</text>
+  <text x="670" y="885" class="small mono">site/ → GitHub Pages</text>
+  <text x="670" y="902" class="desc">the product page</text>
+  <text x="670" y="919" class="desc">site.yml publishes it</text>
+  <rect x="956" y="845" width="286" height="190" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="970" y="865" class="head">stkn.org</text>
+  <text x="970" y="885" class="small mono">deploy/deploy.sh stkn</text>
+  <text x="970" y="902" class="desc">the shared room server</text>
+  <text x="970" y="919" class="desc">systemd user unit schwitzer-server</text>
+  <text x="970" y="936" class="desc">UDP 7444 · runs the latest main</text>
+  <text x="970" y="1023" class="small">a protocol break cuts off older apps</text>
+  <rect x="1256" y="845" width="286" height="190" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
+  <text x="1270" y="865" class="head">Releases API</text>
+  <text x="1270" y="885" class="small mono">api.github.com/repos/</text>
+  <text x="1270" y="902" class="small mono">griasdi/schwitzer/releases</text>
+  <text x="1270" y="919" class="desc">server polls it every 5 min</text>
+  <text x="1270" y="936" class="desc">app fetches releases/tags/v&lt;version&gt;</text>
+
+  <!-- arrows into E -->
+  <path d="M60 460 L48 460 L48 880 L56 880" fill="none" stroke="#627568" stroke-width="1.5" marker-end="url(#m-https)"/>
+  <text x="60" y="799" class="small">self-update: download · sha256 · swap · restart</text>
+  <path d="M1296 722 L1296 845" fill="none" stroke="#627568" stroke-width="1.5" marker-end="url(#m-https)"/>
+  <text x="1304" y="799" class="small">newest stable</text>
+  <text x="40" y="1085" class="small">docs/architecture.svg · see docs/ARCHITECTURE.md for the detail views</text>
+</svg>
