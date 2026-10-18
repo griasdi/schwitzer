@@ -116,7 +116,7 @@ pub fn stage_label(task: &Task) -> &'static str {
         (Stage::Accepted, _) => "Accepted",
         (Stage::Planned, _) if task.plan.trim().is_empty() => "Planned",
         (Stage::Planned, _) => "Plan ready",
-        (Stage::Ready, Some(_)) => "In progress",
+        (Stage::Ready, Some(_)) => "Building",
         (Stage::Ready, None) => "Approved",
         (Stage::Done, _) => "Done",
         (Stage::Rejected, _) => "Rejected",

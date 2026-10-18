@@ -1,5 +1,5 @@
-//! Vendored Lucide icons (ISC, see `assets/icons/LICENSE`) and the app's status flower, drawn
-//! with iced's `svg` widget and tinted from the theme.
+//! Vendored Lucide icons (ISC, see `assets/icons/LICENSE`), drawn with iced's `svg` widget and
+//! tinted from the theme.
 
 use iced::widget::svg;
 use iced::{Length, Theme};
@@ -47,20 +47,7 @@ icons! {
     Bot => "bot",
     Alert => "circle-alert",
     Plan => "file-text",
-    Flower => "flower",
-    FlowerOutline => "flower-outline",
-}
-
-/// The colour of a status flower: what state a task is in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Bloom {
-    New,
-    Idea,
-    Planning,
-    Pickable,
-    Running,
-    Closed,
-    Rejected,
+    Back => "arrow-left",
 }
 
 /// How an icon is coloured; resolved against the theme when drawn.
@@ -71,7 +58,6 @@ pub enum Tone {
     Ink,
     OnPrimary,
     Danger,
-    Bloom(Bloom),
 }
 
 /// An icon of `size` logical pixels in `tone`.
@@ -88,13 +74,6 @@ pub fn icon<'a>(icon: Icon, size: f32, tone: Tone) -> svg::Svg<'a, Theme> {
                     Tone::Ink => t.ink,
                     Tone::OnPrimary => t.on_primary,
                     Tone::Danger => t.danger,
-                    Tone::Bloom(Bloom::New) => t.stage_new,
-                    Tone::Bloom(Bloom::Idea) => t.stage_idea,
-                    Tone::Bloom(Bloom::Planning) => t.stage_planning,
-                    Tone::Bloom(Bloom::Pickable) => t.stage_pickable,
-                    Tone::Bloom(Bloom::Running) => t.stage_running,
-                    Tone::Bloom(Bloom::Closed) => t.stage_closed,
-                    Tone::Bloom(Bloom::Rejected) => t.stage_rejected,
                 }),
             }
         })

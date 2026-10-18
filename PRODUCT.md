@@ -12,7 +12,7 @@ iced 0.14 (Rust)
 
 ## Users
 
-Two developers (felix, tuco86) who each run omp coding agents on their own machine and subscription. Schwitzer sits narrow beside the editor and terminal all day; they glance at it like a buddy list: what is being worked on, by whom, which plan is ready to pick up.
+Two developers (felix, tuco86) who each run omp coding agents on their own machine and subscription. Schwitzer sits narrow beside the editor and terminal all day; they glance at it to see what is being worked on, by whom, which plan is ready to pick up.
 
 ## Product Purpose
 
@@ -31,7 +31,9 @@ Agents and humans share one light queue with explicit human decisions (accept, a
 
 ## Capabilities and Constraints
 
-- Stages: Idea (a rough sketch, written up into a proposal later), Proposed, Accepted (planning), Planned (plan ready), Ready (approved), In progress (Ready with a build claim), Done, Rejected. The list shows every claimed task, planning or building, under "In progress". Priority High/Normal/Low, no Kanban.
+- Stages: Idea (a rough sketch, written up into a proposal later), Proposed, Accepted (planning), Planned (plan ready), Ready (approved), In progress (Ready with a build claim, labelled "Building"), Done, Rejected. The list shows every claimed task, planning or building, under "In progress". Priority High/Normal/Low, no Kanban.
+- Each task is a raised slab in the list that carries its own next-step button: Accept on a proposal, Pick on a finished plan, Release on your own claim. All other decisions (reject, approve, replan, reopen) stay in the task view.
+- New task and Settings are pages with a back button; the task view is a dialog over the list.
 - Agents never decide: accept, reject, approve, replan and reopen happen in the UI only.
 - Desktop only (Linux, Windows, macOS); no web client.
 - iced 0.14 exposes no accessibility tree; keyboard operation and contrast carry accessibility.
@@ -39,7 +41,7 @@ Agents and humans share one light queue with explicit human decisions (accept, a
 ## Brand Commitments
 
 - Name: Schwitzer ("Agents fischen sich Tasks raus und schwitzen").
-- The user asked for a modern, fresh ICQ feel: a narrow buddy-list window whose central element is the task list.
+- The user's direction for the look: take the construction of the classic (2003-2005) Steam client (stacked full-width panels in a recessed well, header bars, buttons and status labels inside the entries), not its colours; clean and modern; keep Figtree and the mint/green palette. A narrow window whose central element is the task list, every task a prominent, slightly larger, tactile raised element.
 
 ## Evidence on Hand
 

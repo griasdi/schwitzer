@@ -1,67 +1,65 @@
-//! The buddy list of tasks: foldable groups, one row per task with its status flower, the
-//! name tag of whoever works on it, and a Pick button on finished plans.
+//! The task list: foldable groups of raised slabs, each with its stage lamp, labels, the
+//! worker's name tag and its next-step button.
 
-use iced::widget::{column, container, row, scrollable, text};
+use iced::widget::{Space, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{Priority, RoomState, Task};
+use schwitzer_proto::{Decision, RoomState, Stage, Task};
 
 use super::icons::{Icon, Tone, icon};
 use super::logic::{self, Group};
-use super::widgets::{self, flower, id_button, member_tag, muted, with_tip};
+use super::widgets::{
+    self, icon_button, icon_text_button, id_button, lamp, member_tag, muted, priority_pill,
+    with_tip,
+};
 use super::{App, Message};
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
 
+/// Width of the stage lamp; the second line of a slab starts under the title.
+const LAMP: f32 = 10.0;
+
 pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
-    if state.tasks.is_empty() {
-        return empty(
-            "No tasks yet",
-            "Propose the first one; agents pick it up once it has a plan.",
-            widgets::icon_text_button(
-                "empty-new-task",
-                Icon::Plus,
-                Tone::OnPrimary,
-                "New task",
-                Some(Message::OpenNewTask),
-                theme::button_primary,
-            ),
-        );
-    }
-    let mut list = column![].spacing(2).width(Length::Fill);
+    let mut list = column![].spacing(SP_3).width(Length::Fill);
     for group in Group::ALL {
         let tasks = logic::tasks_in(state, group);
-        if tasks.is_empty() {
+        // Proposals and ideas stay visible, so their `+` is always reachable.
+        if tasks.is_empty() && !matches!(group, Group::Proposals | Group::Ideas) {
             continue;
         }
         let open = !app.collapsed.contains(&group);
-        list = list.push(group_header(group, tasks.len(), open));
+        let mut slabs = column![group_header(group, tasks.len(), open)].spacing(SP_1);
         if open {
             for task in tasks {
-                list = list.push(task_row(app, state, task));
+                slabs = slabs.push(task_row(app, state, task));
             }
         }
+        list = list.push(slabs);
     }
-    // The right inset keeps the Pick buttons clear of the scrollbar.
-    scrollable(container(list).padding(Padding {
-        top: SP_2,
-        right: SP_3,
-        bottom: SP_2,
-        left: SP_2,
-    }))
-    .id("tasks")
-    .height(Length::Fill)
-    .style(theme::scroll)
-    .into()
+    if state.tasks.is_empty() {
+        list = list.push(
+            container(muted(
+                "No tasks yet. Add a proposal with +; agents pick it up once it has a plan.",
+            ))
+            .padding([SP_1, SP_2]),
+        );
+    }
+    scrollable(container(list).padding(SP_2))
+        .spacing(SP_1)
+        .id("tasks")
+        .height(Length::Fill)
+        .style(theme::scroll)
+        .into()
 }
 
 /// A centred empty state with one action.
 pub fn empty<'a>(
+    glyph: Icon,
     title: &'a str,
     hint: &'a str,
     action: Element<'a, Message>,
 ) -> Element<'a, Message> {
     container(
         column![
-            icon(Icon::FlowerOutline, 40.0, Tone::Muted),
+            icon(glyph, 40.0, Tone::Muted),
             text(title).size(TS_14).font(SEMIBOLD),
             muted(hint).align_x(Alignment::Center),
             action,
@@ -81,89 +79,144 @@ fn group_header<'a>(group: Group, count: usize, open: bool) -> Element<'a, Messa
     } else {
         Icon::ChevronRight
     };
+    let mut line = row![
+        icon(chevron, 14.0, Tone::Muted),
+        text(group.title()).size(TS_12).font(SEMIBOLD),
+        widgets::pill(count.to_string()),
+        Space::new().width(Length::Fill),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center);
+    // The `+` takes the press before the header does.
+    match group {
+        Group::Proposals => {
+            line = line.push(icon_button(
+                "add-proposal",
+                Icon::Plus,
+                Tone::Text,
+                "New proposal  (Ctrl+N)",
+                Some(Message::OpenNewTask { idea: false }),
+                theme::button_ghost,
+            ))
+        }
+        Group::Ideas => {
+            line = line.push(icon_button(
+                "add-idea",
+                Icon::Plus,
+                Tone::Text,
+                "New idea",
+                Some(Message::OpenNewTask { idea: true }),
+                theme::button_ghost,
+            ))
+        }
+        _ => {}
+    }
     id_button(
         format!("group-{}", group.slug()),
-        container(
-            row![
-                icon(chevron, 14.0, Tone::Muted),
-                text(group.title()).size(TS_12).font(SEMIBOLD),
-                muted(count.to_string()),
-            ]
-            .spacing(6)
+        container(line)
+            .padding([0.0, SP_1])
+            .height(32)
             .align_y(Alignment::Center),
-        )
-        .padding([SP_1, SP_1]),
         Some(Message::ToggleGroup(group)),
-        theme::button_row,
+        theme::button_header,
         Length::Fill,
     )
 }
 
 fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
-    let mut line = row![
-        flower(task, 16.0),
-        text(format!("#{}", task.number))
+    let n = task.number;
+    let mut meta = row![
+        text(format!("#{n}"))
             .size(TS_12)
             .font(MEDIUM)
             .style(theme::text_muted),
-        text(&task.title).size(TS_14).width(Length::Fill),
+        widgets::pill(logic::stage_label(task)),
     ]
     .spacing(SP_2)
     .align_y(Alignment::Center);
-    match task.priority {
-        Priority::High => {
-            line = line.push(with_tip(
-                icon(Icon::ArrowUp, 14.0, Tone::Danger),
-                "High priority",
-            ))
-        }
-        Priority::Low => {
-            line = line.push(with_tip(
-                icon(Icon::ArrowDown, 14.0, Tone::Muted),
-                "Low priority",
-            ))
-        }
-        Priority::Normal => {}
+    if let Some(priority) = priority_pill(task.priority) {
+        meta = meta.push(priority);
     }
+    meta = meta.push(Space::new().width(Length::Fill));
     if let Some(claim) = &task.claim {
-        line = line.push(muted(logic::work_label(claim.work)));
-        line = line.push(member_tag(
+        meta = meta.push(member_tag(
             logic::member_name(&state.members, &claim.member),
             logic::member_hue(&claim.member),
         ));
     }
+    let mut line = row![
+        column![
+            row![
+                lamp(task),
+                text(&task.title)
+                    .size(TS_14)
+                    .font(MEDIUM)
+                    .width(Length::Fill),
+            ]
+            .spacing(SP_2)
+            .align_y(Alignment::Center),
+            container(meta).padding(Padding {
+                left: LAMP + SP_2,
+                ..Padding::ZERO
+            }),
+        ]
+        .spacing(SP_1)
+        .width(Length::Fill),
+    ]
+    .spacing(SP_3)
+    .align_y(Alignment::Center);
+    if let Some(action) = next_step(app, task) {
+        line = line.push(action);
+    }
+    id_button(
+        format!("task-{n}"),
+        container(line).padding([SP_2, SP_3]),
+        Some(Message::OpenTask(n)),
+        theme::slab,
+        Length::Fill,
+    )
+}
+
+/// The one button a slab carries: Pick a finished plan, Accept a proposal, or Release your own
+/// claim. The button takes the press before the slab does.
+fn next_step<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
+    let n = task.number;
     if logic::pickable(task) {
-        let busy = app.picking == Some(task.number);
-        // Inside the row, so its right edge lines up with the tags of the other rows; the
-        // button takes the press before the row does.
-        line = line.push(with_tip(
-            id_button(
-                format!("pick-{}", task.number),
-                container(
-                    row![
-                        icon(
-                            Icon::Pick,
-                            14.0,
-                            if busy { Tone::Muted } else { Tone::OnPrimary }
-                        ),
-                        text("Pick").size(TS_12).font(SEMIBOLD),
-                    ]
-                    .spacing(SP_1)
-                    .align_y(Alignment::Center),
-                )
-                .padding([SP_1, 10.0]),
-                (!busy && app.picking.is_none()).then_some(Message::Pick(task.number)),
+        let busy = app.picking == Some(n);
+        return Some(with_tip(
+            icon_text_button(
+                format!("pick-{n}"),
+                Icon::Pick,
+                if busy { Tone::Muted } else { Tone::OnPrimary },
+                "Pick",
+                (!busy && app.picking.is_none()).then_some(Message::Pick(n)),
                 theme::button_primary,
-                Length::Shrink,
             ),
             "Claim it and copy a prompt for your agent",
         ));
     }
-    id_button(
-        format!("task-{}", task.number),
-        container(line).padding([6.0, SP_2]),
-        Some(Message::OpenTask(task.number)),
-        theme::button_row,
-        Length::Fill,
-    )
+    if task.stage == Stage::Proposed {
+        return Some(icon_text_button(
+            format!("accept-{n}"),
+            Icon::Check,
+            Tone::OnPrimary,
+            "Accept",
+            Some(Message::Decide(n, Decision::Accept)),
+            theme::button_primary,
+        ));
+    }
+    match &task.claim {
+        Some(claim) if claim.member == app.client.member() => Some(with_tip(
+            icon_text_button(
+                format!("release-{n}"),
+                Icon::Leave,
+                Tone::Text,
+                "Release",
+                Some(Message::Release(n)),
+                theme::button_secondary,
+            ),
+            "Give the claim back; someone else can take it",
+        )),
+        _ => None,
+    }
 }

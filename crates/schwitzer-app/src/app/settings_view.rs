@@ -1,37 +1,25 @@
-//! The settings dialog: your name, the selected room and its shared repos, all rooms (switch,
-//! create, join) and the omp connection.
+//! The settings page: your name, the selected room and its shared repos, all rooms (switch,
+//! create, join) and the omp connection, each on its own slab.
 
 use iced::widget::{Space, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::RoomId;
 
-use super::dialogs::{self, frame};
 use super::icons::{Icon, Tone, icon};
-use super::widgets::{
-    dot, heading, hrule, icon_button, icon_text_button, id_button, muted, text_button,
-};
+use super::pages::{frame, section};
+use super::widgets::{dot, heading, icon_button, icon_text_button, id_button, muted, text_button};
 use super::{App, Message};
 use crate::mcp::McpStatus;
 use crate::omp_plugin::PluginState;
 use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let mut body = column![you(app)].spacing(SP_4);
+    let mut body = column![section(you(app))].spacing(SP_4);
     if app.selected_state().is_some() {
-        body = body.push(hrule()).push(this_room(app));
+        body = body.push(section(this_room(app)));
     }
-    body = body
-        .push(hrule())
-        .push(rooms(app))
-        .push(hrule())
-        .push(agents(app));
-    frame(
-        "settings-dialog",
-        dialogs::title("Settings"),
-        body.into(),
-        None,
-        true,
-    )
+    body = body.push(section(rooms(app))).push(section(agents(app)));
+    frame("settings-page", "Settings", body.into(), None)
 }
 
 fn input<'a>(

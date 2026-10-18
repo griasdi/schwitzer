@@ -1,4 +1,4 @@
-//! Schwitzer's look: a fresh ICQ buddy list. Two themes (Daylight and Night) follow the system
+//! Schwitzer's look: raised slabs in a recessed well. Two themes (Daylight and Night) follow the system
 //! appearance; every colour of the app comes from the [`Tokens`] of the active theme, and the
 //! style functions below are the only place that reads them for widgets.
 
@@ -27,6 +27,8 @@ pub const TS_20: f32 = 20.0;
 
 /// Corner radius of rows, inputs and buttons.
 pub const RADIUS: f32 = 8.0;
+/// Corner radius of the square stage lamps.
+pub const RADIUS_LAMP: f32 = 3.0;
 /// Corner radius of dialogs.
 pub const RADIUS_DIALOG: f32 = 14.0;
 
@@ -66,15 +68,13 @@ pub struct Tag {
 /// The colours of one theme.
 #[derive(Debug, Clone, Copy)]
 pub struct Tokens {
-    /// The list's ground.
+    /// The recessed well behind slabs: list, sessions, page bodies, inputs, pills.
     pub ground: Color,
-    /// Toolbar and status bar.
-    pub chrome: Color,
-    /// Dialog surface.
+    /// Slabs, bars, dialogs, menus, tooltips.
     pub raised: Color,
-    /// Row under the pointer.
+    /// A slab or button under the pointer.
     pub hover: Color,
-    /// Row pressed or selected.
+    /// A pressed slab or button; selection; active segment.
     pub selected: Color,
     /// Separators and input borders at rest.
     pub line: Color,
@@ -83,7 +83,7 @@ pub struct Tokens {
     pub text: Color,
     /// Secondary text, 4.5:1 on every surface.
     pub muted: Color,
-    /// ICQ green: the action fill.
+    /// Green: the action fill.
     pub primary: Color,
     pub primary_hover: Color,
     pub on_primary: Color,
@@ -95,7 +95,9 @@ pub struct Tokens {
     /// Behind dialogs.
     pub scrim: Color,
     pub shadow: Color,
-    /// Status flower colours.
+    /// The soft under-edge shadow of raised slabs and buttons.
+    pub edge: Color,
+    /// Stage lamp colours.
     pub stage_new: Color,
     pub stage_idea: Color,
     pub stage_planning: Color,
@@ -108,8 +110,7 @@ pub struct Tokens {
 }
 
 const DAYLIGHT: Tokens = Tokens {
-    ground: color!(0xffffff),
-    chrome: color!(0xedf5ee),
+    ground: color!(0xe9f0ea),
     raised: color!(0xffffff),
     hover: color!(0xf2f8f3),
     selected: color!(0xe2f1e5),
@@ -126,12 +127,13 @@ const DAYLIGHT: Tokens = Tokens {
     on_danger: color!(0xffffff),
     scrim: Color::from_rgba8(12, 28, 17, 0.36),
     shadow: Color::from_rgba8(12, 28, 17, 0.18),
+    edge: Color::from_rgba8(12, 28, 17, 0.14),
     stage_new: color!(0x7d8c80),
-    stage_idea: color!(0xa7b5aa),
+    stage_idea: color!(0x869589),
     stage_planning: color!(0xc98410),
     stage_pickable: color!(0x2f7fd6),
     stage_running: color!(0x22a340),
-    stage_closed: color!(0x9aa89d),
+    stage_closed: color!(0x869589),
     stage_rejected: color!(0xd9473f),
     tags: [
         Tag {
@@ -162,10 +164,9 @@ const DAYLIGHT: Tokens = Tokens {
 };
 
 const NIGHT: Tokens = Tokens {
-    ground: color!(0x121915),
-    chrome: color!(0x0c110e),
+    ground: color!(0x0d1310),
     raised: color!(0x1a231e),
-    hover: color!(0x1b2620),
+    hover: color!(0x222d26),
     selected: color!(0x213629),
     line: color!(0x2a3a30),
     line_strong: color!(0x627568),
@@ -180,12 +181,13 @@ const NIGHT: Tokens = Tokens {
     on_danger: color!(0x2a0605),
     scrim: Color::from_rgba8(0, 0, 0, 0.55),
     shadow: Color::from_rgba8(0, 0, 0, 0.45),
+    edge: Color::from_rgba8(0, 0, 0, 0.55),
     stage_new: color!(0x7d9182),
-    stage_idea: color!(0x5b6e61),
+    stage_idea: color!(0x6f8374),
     stage_planning: color!(0xf0a630),
     stage_pickable: color!(0x5aa6f5),
     stage_running: color!(0x3dcb5c),
-    stage_closed: color!(0x5f7064),
+    stage_closed: color!(0x738678),
     stage_rejected: color!(0xf06a62),
     tags: [
         Tag {
@@ -214,6 +216,18 @@ const NIGHT: Tokens = Tokens {
         },
     ],
 };
+
+/// The stage lamp of a task: which state it is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lamp {
+    Idea,
+    New,
+    Planning,
+    Pickable,
+    Running,
+    Closed,
+    Rejected,
+}
 
 /// The tokens of `theme`.
 pub fn tokens(theme: &Theme) -> &'static Tokens {
@@ -268,16 +282,66 @@ fn surface(background: Color, text: Color) -> container::Style {
     }
 }
 
-/// The list and sessions ground.
+/// The recessed well behind the slabs.
 pub fn ground(theme: &Theme) -> container::Style {
     let t = tokens(theme);
     surface(t.ground, t.text)
 }
 
-/// Toolbar and status bar.
-pub fn chrome(theme: &Theme) -> container::Style {
+/// The header bar, page bars and the status bar: raised panels.
+pub fn bar(theme: &Theme) -> container::Style {
     let t = tokens(theme);
-    surface(t.chrome, t.text)
+    surface(t.raised, t.text)
+}
+
+/// A slab that is not a button: session rows, settings sections.
+pub fn slab_static(theme: &Theme) -> container::Style {
+    let t = tokens(theme);
+    container::Style {
+        text_color: Some(t.text),
+        background: Some(t.raised.into()),
+        border: Border {
+            color: t.line,
+            width: 1.0,
+            radius: RADIUS.into(),
+        },
+        shadow: lift(t, button::Status::Active),
+        snap: true,
+    }
+}
+
+/// A stage lamp: a small square, hollow while an idea or only proposed.
+pub fn lamp(kind: Lamp) -> impl Fn(&Theme) -> container::Style {
+    move |theme| {
+        let t = tokens(theme);
+        let color = match kind {
+            Lamp::Idea => t.stage_idea,
+            Lamp::New => t.stage_new,
+            Lamp::Planning => t.stage_planning,
+            Lamp::Pickable => t.stage_pickable,
+            Lamp::Running => t.stage_running,
+            Lamp::Closed => t.stage_closed,
+            Lamp::Rejected => t.stage_rejected,
+        };
+        match kind {
+            Lamp::Idea | Lamp::New => container::Style {
+                border: Border {
+                    color,
+                    width: 2.0,
+                    radius: RADIUS_LAMP.into(),
+                },
+                ..container::Style::default()
+            },
+            _ => container::Style {
+                background: Some(color.into()),
+                border: Border {
+                    radius: RADIUS_LAMP.into(),
+                    ..Border::default()
+                },
+                ..container::Style::default()
+            },
+        }
+    }
 }
 
 /// The dimmed layer behind a dialog.
@@ -337,7 +401,7 @@ pub fn pill(theme: &Theme) -> container::Style {
     let t = tokens(theme);
     container::Style {
         text_color: Some(t.muted),
-        background: Some(t.chrome.into()),
+        background: Some(t.ground.into()),
         border: Border {
             color: t.line,
             width: 1.0,
@@ -416,15 +480,38 @@ pub fn text_ink(theme: &Theme) -> iced::widget::text::Style {
     }
 }
 
+pub fn text_danger(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(tokens(theme).danger),
+    }
+}
+
 // ---- buttons -------------------------------------------------------------------------------
 
-fn face(background: Option<Color>, text: Color, border: Border) -> button::Style {
+fn face(background: Option<Color>, text: Color, border: Border, shadow: Shadow) -> button::Style {
     button::Style {
         background: background.map(Background::from),
         text_color: text,
         border,
-        shadow: Shadow::default(),
+        shadow,
         snap: true,
+    }
+}
+
+/// The under-edge shadow of a raised slab or button: deeper on hover, gone when pressed.
+fn lift(t: &Tokens, status: button::Status) -> Shadow {
+    match status {
+        button::Status::Active => Shadow {
+            color: t.edge,
+            offset: Vector::new(0.0, 1.0),
+            blur_radius: 2.0,
+        },
+        button::Status::Hovered => Shadow {
+            color: t.edge,
+            offset: Vector::new(0.0, 2.0),
+            blur_radius: 4.0,
+        },
+        button::Status::Pressed | button::Status::Disabled => Shadow::default(),
     }
 }
 
@@ -435,84 +522,125 @@ fn rounded() -> Border {
     }
 }
 
-/// The one call to action of a view: ICQ green.
+/// The one call to action of a view: green.
 pub fn button_primary(theme: &Theme, status: button::Status) -> button::Style {
     let t = tokens(theme);
+    let shadow = lift(t, status);
     match status {
-        button::Status::Active => face(Some(t.primary), t.on_primary, rounded()),
-        button::Status::Hovered => face(Some(t.primary_hover), t.on_primary, rounded()),
-        button::Status::Pressed => face(Some(t.ink), t.on_primary, rounded()),
-        button::Status::Disabled => face(Some(t.line), t.muted, rounded()),
+        button::Status::Active => face(Some(t.primary), t.on_primary, rounded(), shadow),
+        button::Status::Hovered => face(Some(t.primary_hover), t.on_primary, rounded(), shadow),
+        button::Status::Pressed => face(Some(t.ink), t.on_primary, rounded(), shadow),
+        button::Status::Disabled => face(Some(t.line), t.muted, rounded(), shadow),
     }
 }
 
 /// A bordered secondary button.
 pub fn button_secondary(theme: &Theme, status: button::Status) -> button::Style {
     let t = tokens(theme);
+    let shadow = lift(t, status);
     let border = |color| Border {
         color,
         width: 1.0,
         radius: RADIUS.into(),
     };
     match status {
-        button::Status::Active => face(Some(t.raised), t.text, border(t.line)),
-        button::Status::Hovered => face(Some(t.hover), t.text, border(t.line_strong)),
-        button::Status::Pressed => face(Some(t.selected), t.text, border(t.line_strong)),
-        button::Status::Disabled => face(None, t.muted, border(t.line)),
+        button::Status::Active => face(Some(t.raised), t.text, border(t.line), shadow),
+        button::Status::Hovered => face(Some(t.hover), t.text, border(t.line_strong), shadow),
+        button::Status::Pressed => face(Some(t.selected), t.text, border(t.line_strong), shadow),
+        button::Status::Disabled => face(None, t.muted, border(t.line), shadow),
     }
 }
 
 /// A destructive button: red text, red fill on hover.
 pub fn button_danger(theme: &Theme, status: button::Status) -> button::Style {
     let t = tokens(theme);
+    let shadow = lift(t, status);
     let border = Border {
         color: t.danger,
         width: 1.0,
         radius: RADIUS.into(),
     };
     match status {
-        button::Status::Active => face(None, t.danger, border),
-        button::Status::Hovered => face(Some(t.danger_soft), t.danger, border),
-        button::Status::Pressed => face(Some(t.danger), t.on_danger, border),
-        button::Status::Disabled => face(None, t.muted, rounded()),
+        button::Status::Active => face(None, t.danger, border, shadow),
+        button::Status::Hovered => face(Some(t.danger_soft), t.danger, border, shadow),
+        button::Status::Pressed => face(Some(t.danger), t.on_danger, border, shadow),
+        button::Status::Disabled => face(None, t.muted, rounded(), shadow),
     }
 }
 
-/// Borderless: icon buttons in the chrome, text links.
+/// Borderless: icon buttons in the bars, text links.
 pub fn button_ghost(theme: &Theme, status: button::Status) -> button::Style {
     let t = tokens(theme);
+    let none = Shadow::default();
     match status {
-        button::Status::Active => face(None, t.text, rounded()),
-        button::Status::Hovered => face(Some(t.hover), t.text, rounded()),
-        button::Status::Pressed => face(Some(t.selected), t.text, rounded()),
-        button::Status::Disabled => face(None, t.muted, rounded()),
+        button::Status::Active => face(None, t.text, rounded(), none),
+        button::Status::Hovered => face(Some(t.hover), t.text, rounded(), none),
+        button::Status::Pressed => face(Some(t.selected), t.text, rounded(), none),
+        button::Status::Disabled => face(None, t.muted, rounded(), none),
     }
 }
 
-/// A row of the list.
+/// A flat row inside a slab, such as a room in the settings.
 pub fn button_row(theme: &Theme, status: button::Status) -> button::Style {
     let t = tokens(theme);
+    let none = Shadow::default();
     match status {
-        button::Status::Active | button::Status::Disabled => face(None, t.text, rounded()),
-        button::Status::Hovered => face(Some(t.hover), t.text, rounded()),
-        button::Status::Pressed => face(Some(t.selected), t.text, rounded()),
+        button::Status::Active | button::Status::Disabled => face(None, t.text, rounded(), none),
+        button::Status::Hovered => face(Some(t.hover), t.text, rounded(), none),
+        button::Status::Pressed => face(Some(t.selected), t.text, rounded(), none),
     }
 }
 
-/// A segment of a segmented control.
+/// A group header in the list: flat in the well until hovered.
+pub fn button_header(theme: &Theme, status: button::Status) -> button::Style {
+    let t = tokens(theme);
+    let none = Shadow::default();
+    match status {
+        button::Status::Active | button::Status::Disabled => face(None, t.text, rounded(), none),
+        button::Status::Hovered => face(Some(t.hover), t.text, rounded(), none),
+        button::Status::Pressed => face(Some(t.selected), t.text, rounded(), none),
+    }
+}
+
+/// A task slab: a raised full-width plate that sinks in when pressed.
+pub fn slab(theme: &Theme, status: button::Status) -> button::Style {
+    let t = tokens(theme);
+    let (background, border) = match status {
+        button::Status::Active | button::Status::Disabled => (t.raised, t.line),
+        button::Status::Hovered => (t.hover, t.line_strong),
+        button::Status::Pressed => (t.selected, t.line_strong),
+    };
+    face(
+        Some(background),
+        t.text,
+        Border {
+            color: border,
+            width: 1.0,
+            radius: RADIUS.into(),
+        },
+        lift(t, status),
+    )
+}
+
+/// A segment of a segmented control; the active one sits pressed in.
 pub fn button_segment(on: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let t = tokens(theme);
+        let shadow = if on {
+            Shadow::default()
+        } else {
+            lift(t, status)
+        };
         let border = Border {
             color: if on { t.ink } else { t.line },
             width: 1.0,
             radius: RADIUS.into(),
         };
         match (on, status) {
-            (true, _) => face(Some(t.selected), t.ink, border),
-            (false, button::Status::Hovered) => face(Some(t.hover), t.text, border),
-            (false, button::Status::Pressed) => face(Some(t.selected), t.text, border),
-            (false, _) => face(None, t.text, border),
+            (true, _) => face(Some(t.selected), t.ink, border, shadow),
+            (false, button::Status::Hovered) => face(Some(t.hover), t.text, border, shadow),
+            (false, button::Status::Pressed) => face(Some(t.selected), t.text, border, shadow),
+            (false, _) => face(None, t.text, border, shadow),
         }
     }
 }
@@ -529,7 +657,7 @@ pub fn input(theme: &Theme, status: text_input::Status) -> text_input::Style {
     };
     text_input::Style {
         background: if matches!(status, text_input::Status::Disabled) {
-            t.chrome.into()
+            t.ground.into()
         } else {
             t.raised.into()
         },
@@ -566,11 +694,11 @@ pub fn editor(theme: &Theme, status: text_editor::Status) -> text_editor::Style 
     }
 }
 
-/// The room switcher in the status bar: flat until hovered.
+/// The room switcher in the header bar: flat until hovered.
 pub fn picker(theme: &Theme, status: pick_list::Status) -> pick_list::Style {
     let t = tokens(theme);
     let (background, border) = match status {
-        pick_list::Status::Active => (t.chrome, t.chrome),
+        pick_list::Status::Active => (t.raised, t.raised),
         pick_list::Status::Hovered => (t.hover, t.line_strong),
         pick_list::Status::Opened { .. } => (t.selected, t.ink),
     };
@@ -653,7 +781,7 @@ pub fn plan_markdown(theme: &Theme) -> markdown::Settings {
     style.link_color = t.ink;
     style.inline_code_color = t.text;
     style.inline_code_highlight = iced::advanced::text::Highlight {
-        background: t.chrome.into(),
+        background: t.ground.into(),
         border: Border {
             color: t.line,
             width: 1.0,

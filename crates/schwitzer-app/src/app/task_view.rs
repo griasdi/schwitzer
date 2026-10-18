@@ -10,7 +10,7 @@ use super::dialogs;
 use super::icons::{Icon, Tone, icon};
 use super::logic;
 use super::widgets::{
-    self, flower, heading, hrule, icon_text_button, id_button, member_tag, muted, pill, text_button,
+    self, heading, hrule, icon_text_button, id_button, lamp, member_tag, muted, pill, text_button,
 };
 use super::{App, Message};
 use crate::theme::{self, BOLD, MEDIUM, SP_1, SP_2, SP_3, TS_12, TS_14, TS_20};
@@ -18,7 +18,7 @@ use crate::theme::{self, BOLD, MEDIUM, SP_1, SP_2, SP_3, TS_12, TS_14, TS_20};
 pub fn view<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     let editable = logic::editable(task);
     let header = row![
-        flower(task, 18.0),
+        lamp(task),
         text(format!("#{}", task.number))
             .size(TS_14)
             .font(MEDIUM)
@@ -43,7 +43,7 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
         .push(priority(task))
         .push(hrule())
         .push(notes(app, state, task));
-    dialogs::frame("task-dialog", header.into(), body.into(), None, false)
+    dialogs::frame("task-dialog", header.into(), body.into(), None)
 }
 
 fn title_and_body<'a>(app: &'a App, task: &'a Task, editable: bool) -> Element<'a, Message> {
@@ -207,7 +207,7 @@ fn actions<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
             Decision::Replan => ("replan", "Replan"),
             Decision::Reopen => ("reopen", "Reopen"),
         };
-        let message = Some(Message::Decide(decision));
+        let message = Some(Message::Decide(task.number, decision));
         row = row.push(match decision {
             Decision::Reject => text_button(id, label, message, theme::button_danger),
             Decision::Accept | Decision::Approve => {
@@ -223,7 +223,7 @@ fn actions<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
         row = row.push(text_button(
             "release",
             "Release claim",
-            Some(Message::Release),
+            Some(Message::Release(task.number)),
             theme::button_secondary,
         ));
     }

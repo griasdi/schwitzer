@@ -6,6 +6,7 @@ mod icons;
 mod list;
 mod live;
 pub mod logic;
+mod pages;
 mod settings_view;
 mod task_view;
 mod widgets;
@@ -60,10 +61,15 @@ pub enum Message {
     FocusNext,
     FocusPrevious,
 
-    OpenNewTask,
+    /// Opens the New task page, for an idea or a proposal.
+    OpenNewTask {
+        idea: bool,
+    },
     OpenSettings,
     OpenTask(u64),
-    CloseDialog,
+    /// Esc, the back button, the dialog's close button and the scrim: closes the task dialog
+    /// if open, else returns to the main page.
+    Back,
     ToggleGroup(Group),
 
     SelectRoom(RoomId),
@@ -112,8 +118,8 @@ pub enum Message {
     SavePlan,
     PlanSaved(Result<Response, String>),
     SetPriority(Priority),
-    Decide(Decision),
-    Release,
+    Decide(u64, Decision),
+    Release(u64),
     NoteInput(String),
     AddNote,
     NoteAdded(Result<Response, String>),
@@ -127,11 +133,11 @@ struct ServerStatus {
     error: Option<String>,
 }
 
-/// The dialog over the list.
+/// Which page fills the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Dialog {
+enum Page {
+    Main,
     NewTask,
-    Task(u64),
     Settings,
 }
 
@@ -141,7 +147,7 @@ struct Notice {
     until_ms: u64,
 }
 
-/// The inputs of the dialogs.
+/// The inputs of the pages and the task dialog.
 struct Forms {
     server_url: String,
     room_name: String,
@@ -150,7 +156,7 @@ struct Forms {
     repo: String,
     proposal_title: String,
     proposal_body: text_editor::Content,
-    /// Whether the New task dialog adds an idea instead of a proposal.
+    /// Whether the New task page adds an idea instead of a proposal.
     idea: bool,
     note: String,
 }
@@ -172,7 +178,9 @@ pub struct App {
     rooms: Vec<(RoomKey, Option<RoomState>)>,
     servers: HashMap<ServerAddr, ServerStatus>,
     selected: Option<RoomId>,
-    dialog: Option<Dialog>,
+    page: Page,
+    /// The task dialog over the main page.
+    open_task: Option<u64>,
     /// Folded groups of the list.
     collapsed: HashSet<Group>,
     /// The task whose pick is under way.
@@ -250,7 +258,8 @@ impl App {
             rooms,
             servers: HashMap::new(),
             selected,
-            dialog: None,
+            page: Page::Main,
+            open_task: None,
             collapsed: HashSet::from([Group::Closed]),
             picking: None,
             task_draft: None,
@@ -304,7 +313,33 @@ impl App {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let main: Element<'_, Message> = match (self.selected_state(), self.selected) {
+        let mut page = column![];
+        if let Some(banner) = &self.banner {
+            page = page.push(container(widgets::banner(banner)).padding(SP_2));
+        }
+        let body: Element<'_, Message> = match self.page {
+            Page::Main => column![chrome::header(self), widgets::hrule(), self.main()].into(),
+            Page::NewTask => pages::new_task(self),
+            Page::Settings => settings_view::view(self),
+        };
+        let page = container(
+            page.push(container(body).height(Length::Fill))
+                .push(widgets::hrule())
+                .push(chrome::status_bar(self)),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::ground);
+
+        match self.open().filter(|_| self.page == Page::Main) {
+            Some((state, task)) => dialogs::modal(page, task_view::view(self, state, task)),
+            None => page.into(),
+        }
+    }
+
+    /// The main page below the header bar: list and sessions, or an empty state.
+    fn main(&self) -> Element<'_, Message> {
+        match (self.selected_state(), self.selected) {
             (Some(state), _) => column![
                 container(list::view(self, state)).height(Length::FillPortion(60)),
                 widgets::hrule(),
@@ -312,6 +347,7 @@ impl App {
             ]
             .into(),
             (None, Some(_)) => list::empty(
+                Icon::Plug,
                 "Connecting…",
                 "The room shows up as soon as its server answers.",
                 widgets::icon_text_button(
@@ -324,6 +360,7 @@ impl App {
                 ),
             ),
             (None, None) => list::empty(
+                Icon::Users,
                 "Welcome to Schwitzer",
                 "Create a room on a server, or join one with the key someone shared.",
                 widgets::icon_text_button(
@@ -335,32 +372,6 @@ impl App {
                     theme::button_primary,
                 ),
             ),
-        };
-        let mut page = column![];
-        if let Some(banner) = &self.banner {
-            page = page.push(container(widgets::banner(banner)).padding(SP_2));
-        }
-        let page = container(
-            page.push(container(main).height(Length::Fill))
-                .push(widgets::hrule())
-                .push(chrome::toolbar(self))
-                .push(chrome::status_bar(self)),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(theme::ground);
-
-        let dialog = match self.dialog {
-            Some(Dialog::NewTask) => Some(dialogs::new_task(self)),
-            Some(Dialog::Settings) => Some(settings_view::view(self)),
-            Some(Dialog::Task(_)) => self
-                .open()
-                .map(|(state, task)| task_view::view(self, state, task)),
-            None => None,
-        };
-        match dialog {
-            Some(dialog) => dialogs::modal(page, dialog),
-            None => page.into(),
         }
     }
 
@@ -422,24 +433,33 @@ impl App {
                 Task::none()
             }
 
-            Message::OpenNewTask => {
+            Message::OpenNewTask { idea } => {
                 if self.selected_state().is_none() {
                     return Task::none();
                 }
-                self.open_dialog(Dialog::NewTask);
+                self.forms.idea = idea;
+                self.open_page(Page::NewTask);
                 operation::focus("proposal-title")
             }
             Message::OpenSettings => {
-                self.open_dialog(Dialog::Settings);
+                self.open_page(Page::Settings);
                 Task::none()
             }
             Message::OpenTask(number) => {
-                self.open_dialog(Dialog::Task(number));
+                if self.open_task != Some(number) {
+                    self.reset_drafts();
+                }
+                self.page = Page::Main;
+                self.open_task = Some(number);
                 Task::none()
             }
-            Message::CloseDialog => {
-                self.dialog = None;
-                self.reset_drafts();
+            Message::Back => {
+                if self.open_task.take().is_some() {
+                    self.reset_drafts();
+                } else if self.page != Page::Main {
+                    self.page = Page::Main;
+                    self.reset_drafts();
+                }
                 Task::none()
             }
             Message::ToggleGroup(group) => {
@@ -560,8 +580,8 @@ impl App {
                     Ok(response) => {
                         self.forms.proposal_title.clear();
                         self.forms.proposal_body = text_editor::Content::new();
-                        if self.dialog == Some(Dialog::NewTask) {
-                            self.dialog = None;
+                        if self.page == Page::NewTask {
+                            self.page = Page::Main;
                         }
                         let idea = matches!(&response, Response::Task(t) if t.stage == Stage::Idea);
                         self.notify(if idea { "Idea added" } else { "Task proposed" });
@@ -656,7 +676,7 @@ impl App {
                 )),
                 None => Task::none(),
             },
-            Message::Decide(decision) => match self.open_ids() {
+            Message::Decide(number, decision) => match self.task_ids(number) {
                 Some((room, task)) => fire(self.request(
                     room,
                     Request::Decide {
@@ -667,7 +687,7 @@ impl App {
                 )),
                 None => Task::none(),
             },
-            Message::Release => match self.open_ids() {
+            Message::Release(number) => match self.task_ids(number) {
                 Some((room, task)) => fire(self.request(
                     room,
                     Request::Release {
@@ -756,9 +776,7 @@ impl App {
 
     /// The selected room and the task of the open task dialog.
     fn open(&self) -> Option<(&RoomState, &RoomTask)> {
-        let Some(Dialog::Task(number)) = self.dialog else {
-            return None;
-        };
+        let number = self.open_task?;
         let state = self.selected_state()?;
         let task = state.tasks.iter().find(|t| t.number == number)?;
         Some((state, task))
@@ -766,6 +784,11 @@ impl App {
 
     fn open_ids(&self) -> Option<(RoomId, u64)> {
         self.open().map(|(state, task)| (state.id, task.number))
+    }
+
+    /// The selected room's id with task `number`, for the buttons on a slab.
+    fn task_ids(&self, number: u64) -> Option<(RoomId, u64)> {
+        self.selected_state().map(|s| (s.id, number))
     }
 
     // ---- calls --------------------------------------------------------------------------
@@ -1245,18 +1268,20 @@ impl App {
     fn select(&mut self, room: Option<RoomId>) {
         if self.selected != room {
             self.selected = room;
-            if matches!(self.dialog, Some(Dialog::Task(_) | Dialog::NewTask)) {
-                self.dialog = None;
+            self.open_task = None;
+            if self.page == Page::NewTask {
+                self.page = Page::Main;
             }
             self.reset_drafts();
         }
     }
 
-    fn open_dialog(&mut self, dialog: Dialog) {
-        if self.dialog != Some(dialog) {
+    fn open_page(&mut self, page: Page) {
+        if self.page != page {
             self.reset_drafts();
         }
-        self.dialog = Some(dialog);
+        self.open_task = None;
+        self.page = page;
     }
 
     fn reset_drafts(&mut self) {
@@ -1339,10 +1364,10 @@ fn key_message(event: keyboard::Event) -> Option<Message> {
         return None;
     };
     match key.as_ref() {
-        Key::Named(Named::Escape) => Some(Message::CloseDialog),
+        Key::Named(Named::Escape) => Some(Message::Back),
         Key::Named(Named::Tab) if modifiers.shift() => Some(Message::FocusPrevious),
         Key::Named(Named::Tab) => Some(Message::FocusNext),
-        Key::Character("n") if modifiers.command() => Some(Message::OpenNewTask),
+        Key::Character("n") if modifiers.command() => Some(Message::OpenNewTask { idea: false }),
         Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
         _ => None,
     }

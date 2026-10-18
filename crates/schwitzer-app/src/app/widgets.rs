@@ -5,12 +5,12 @@
 
 use iced::widget::{Space, button, container, row, text, tooltip};
 use iced::{Alignment, Element, Length, Theme};
-use schwitzer_proto::{Stage, Task};
+use schwitzer_proto::{Priority, Stage, Task};
 
 use super::Message;
-use super::icons::{Bloom, Icon, Tone, icon};
+use super::icons::{Icon, Tone, icon};
 use super::logic;
-use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
+use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 
 /// A button with a widget id. `on_press: None` shows it disabled. The button itself has no
 /// padding: the content brings its own.
@@ -114,29 +114,46 @@ pub fn with_tip<'a>(
     .into()
 }
 
-/// The flower colour of a task.
-pub fn bloom(task: &Task) -> Bloom {
+/// The lamp kind of a task.
+pub fn lamp_kind(task: &Task) -> Lamp {
     match (task.stage, &task.claim) {
-        (Stage::Idea, _) => Bloom::Idea,
-        (Stage::Proposed, _) => Bloom::New,
-        (Stage::Accepted | Stage::Ready, Some(_)) => Bloom::Running,
-        (Stage::Done, _) => Bloom::Closed,
-        (Stage::Rejected, _) => Bloom::Rejected,
-        _ if logic::pickable(task) => Bloom::Pickable,
-        _ => Bloom::Planning,
+        (Stage::Idea, _) => Lamp::Idea,
+        (Stage::Proposed, _) => Lamp::New,
+        (Stage::Accepted | Stage::Ready, Some(_)) => Lamp::Running,
+        (Stage::Done, _) => Lamp::Closed,
+        (Stage::Rejected, _) => Lamp::Rejected,
+        _ if logic::pickable(task) => Lamp::Pickable,
+        _ => Lamp::Planning,
     }
 }
 
-/// The status flower of a task: outlined while an idea or only proposed, filled in its stage
-/// colour after.
-pub fn flower<'a>(task: &Task, size: f32) -> Element<'a, Message> {
-    let bloom = bloom(task);
-    let glyph = if matches!(bloom, Bloom::New | Bloom::Idea) {
-        Icon::FlowerOutline
-    } else {
-        Icon::Flower
+/// The stage lamp of a task: a 10 px square, hollow while an idea or only proposed.
+pub fn lamp<'a>(task: &Task) -> Element<'a, Message> {
+    container(Space::new().width(10).height(10))
+        .style(theme::lamp(lamp_kind(task)))
+        .into()
+}
+
+/// The priority of a task as a pill; nothing for normal priority.
+pub fn priority_pill<'a>(priority: Priority) -> Option<Element<'a, Message>> {
+    let (glyph, tone, label, style): (_, _, _, fn(&Theme) -> text::Style) = match priority {
+        Priority::High => (Icon::ArrowUp, Tone::Danger, "High", theme::text_danger),
+        Priority::Low => (Icon::ArrowDown, Tone::Muted, "Low", theme::text_muted),
+        Priority::Normal => return None,
     };
-    icon(glyph, size, Tone::Bloom(bloom)).into()
+    Some(
+        container(
+            row![
+                icon(glyph, 12.0, tone),
+                text(label).size(TS_12).font(MEDIUM).style(style)
+            ]
+            .spacing(SP_1)
+            .align_y(Alignment::Center),
+        )
+        .padding([1.0, SP_2])
+        .style(theme::pill)
+        .into(),
+    )
 }
 
 /// A member's name tag in the member's colour.

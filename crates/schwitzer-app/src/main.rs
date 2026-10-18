@@ -35,7 +35,7 @@ fn main() -> iced::Result {
         .theme(App::theme)
         .subscription(App::subscription)
         .default_font(theme::REGULAR)
-        // A narrow buddy-list window beside the editor.
+        // A narrow window beside the editor.
         .window(iced::window::Settings {
             size: iced::Size::new(400.0, 780.0),
             min_size: Some(iced::Size::new(340.0, 520.0)),

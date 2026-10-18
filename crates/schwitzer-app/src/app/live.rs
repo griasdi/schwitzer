@@ -12,7 +12,7 @@ use super::{App, Message};
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 
 pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
-    let mut rows = column![].spacing(2);
+    let mut rows = column![].spacing(SP_1);
     let mut count = 0;
     for (member, list) in &state.sessions {
         let owner = logic::member_name(&state.members, member);
@@ -25,7 +25,7 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
     let shares = !app.room_repos().is_empty();
     let mut header = row![
         text("Sessions").size(TS_12).font(SEMIBOLD),
-        muted(count.to_string()),
+        widgets::pill(count.to_string()),
         Space::new().width(Length::Fill),
     ]
     .spacing(6)
@@ -53,6 +53,7 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
         .into()
     } else {
         scrollable(container(rows).padding([0.0, SP_2]))
+            .spacing(SP_1)
             .id("sessions")
             .height(Length::Fill)
             .style(theme::scroll)
@@ -120,6 +121,7 @@ fn session_row<'a>(
         .spacing(SP_2)
         .align_y(Alignment::Start),
     )
-    .padding([6.0, SP_2])
+    .padding([SP_2, SP_3])
+    .style(theme::slab_static)
     .into()
 }

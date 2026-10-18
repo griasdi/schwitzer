@@ -1,4 +1,4 @@
-//! The window chrome below the list: the button bar and the status bar with the room switcher.
+//! The header bar above the list and the status bar at the bottom.
 
 use std::fmt;
 
@@ -6,11 +6,11 @@ use iced::widget::{Space, container, pick_list, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::RoomId;
 
-use super::icons::{Bloom, Icon, Tone, icon};
-use super::widgets::{self, dot, icon_button, muted, with_tip};
+use super::icons::{Icon, Tone};
+use super::widgets::{dot, icon_button, muted, with_tip};
 use super::{App, Message};
 use crate::mcp::McpStatus;
-use crate::theme::{self, SEMIBOLD, SP_1, SP_2, TS_12};
+use crate::theme::{self, SEMIBOLD, SP_1, SP_2, TS_12, TS_14};
 
 /// A room as the switcher lists it.
 #[derive(Debug, Clone)]
@@ -31,22 +31,29 @@ impl fmt::Display for RoomChoice {
     }
 }
 
-pub fn toolbar(app: &App) -> Element<'_, Message> {
+/// The header bar: room switcher on the left, invite and settings on the right.
+pub fn header(app: &App) -> Element<'_, Message> {
     let in_room = app.selected_state().is_some();
+    let choices: Vec<RoomChoice> = app.room_choices();
+    let selected = choices.iter().find(|c| Some(c.id) == app.selected).cloned();
+    let rooms: Element<'_, Message> = if choices.is_empty() {
+        muted("No room").into()
+    } else {
+        container(
+            pick_list(choices, selected, |c: RoomChoice| Message::SelectRoom(c.id))
+                .text_size(TS_14)
+                .font(SEMIBOLD)
+                .padding([SP_1, SP_2])
+                .style(theme::picker)
+                .menu_style(theme::picker_menu),
+        )
+        .id("room-picker")
+        .into()
+    };
     container(
         row![
-            widgets::icon_text_button(
-                "new-task",
-                Icon::Plus,
-                if in_room {
-                    Tone::OnPrimary
-                } else {
-                    Tone::Muted
-                },
-                "New task",
-                in_room.then_some(Message::OpenNewTask),
-                theme::button_primary,
-            ),
+            rooms,
+            Space::new().width(Length::Fill),
             icon_button(
                 "copy-key",
                 Icon::UserPlus,
@@ -55,7 +62,6 @@ pub fn toolbar(app: &App) -> Element<'_, Message> {
                 in_room.then_some(Message::CopyKey),
                 theme::button_ghost,
             ),
-            Space::new().width(Length::Fill),
             icon_button(
                 "settings",
                 Icon::Settings,
@@ -68,34 +74,15 @@ pub fn toolbar(app: &App) -> Element<'_, Message> {
         .spacing(SP_1)
         .align_y(Alignment::Center),
     )
-    .padding([SP_1, SP_2])
+    .padding([SP_2, SP_2])
     .width(Length::Fill)
-    .style(theme::chrome)
+    .style(theme::bar)
     .into()
 }
 
+/// The status bar: my name, server and omp connection.
 pub fn status_bar(app: &App) -> Element<'_, Message> {
     let server = app.selected_server_online();
-    let bloom = match server {
-        Some(true) => Bloom::Running,
-        Some(false) => Bloom::Rejected,
-        None => Bloom::Closed,
-    };
-    let choices: Vec<RoomChoice> = app.room_choices();
-    let selected = choices.iter().find(|c| Some(c.id) == app.selected).cloned();
-    let rooms: Element<'_, Message> = if choices.is_empty() {
-        muted("No room").into()
-    } else {
-        container(
-            pick_list(choices, selected, |c: RoomChoice| Message::SelectRoom(c.id))
-                .text_size(TS_12)
-                .padding([2.0, SP_2])
-                .style(theme::picker)
-                .menu_style(theme::picker_menu),
-        )
-        .id("room-picker")
-        .into()
-    };
     let server_label = match server {
         Some(true) => "online",
         Some(false) => "offline",
@@ -112,9 +99,7 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
         Some(McpStatus::Failed(e)) => (Some(false), format!("omp connection: {e}")),
     };
     let mut bar = row![
-        icon(Icon::Flower, 14.0, Tone::Bloom(bloom)),
         text(&app.settings.name).size(TS_12).font(SEMIBOLD),
-        rooms,
         Space::new().width(Length::Fill),
     ]
     .spacing(SP_2)
@@ -140,6 +125,6 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
         .height(32)
         .align_y(Alignment::Center)
         .width(Length::Fill)
-        .style(theme::chrome)
+        .style(theme::bar)
         .into()
 }
