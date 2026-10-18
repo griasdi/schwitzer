@@ -7,7 +7,8 @@
 use rusqlite::Connection;
 use schwitzer_proto::{
     ApiError, Event, MAX_RPC_BYTES, Member, MemberId, PROTOCOL_VERSION, RPC_TIMEOUT, Reply,
-    Request, Response, RoomId, RoomToken, SessionInfo, Task, caps, from_bytes, now_ms, to_bytes,
+    Request, Response, RoomId, RoomToken, SessionInfo, Stage, Task, caps, from_bytes, now_ms,
+    to_bytes,
 };
 use tokio::time::timeout;
 use weida::{ErrorCode, IncomingRequest, Replier, TransferMeta};
@@ -119,7 +120,34 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             let body = text("body", &body, caps::BODY, false)?;
             task_reply(
                 mutate(state, caller, room, move |conn, now| {
-                    store::propose(conn, &room, &caller, &title, &body, now).map(Some)
+                    store::create_task(conn, &room, &caller, Stage::Proposed, &title, &body, now)
+                        .map(Some)
+                })
+                .await,
+            )
+        }
+        Request::AddIdea { room, title, body } => {
+            let title = text("title", &title, caps::TITLE, true)?;
+            let body = text("body", &body, caps::BODY, false)?;
+            task_reply(
+                mutate(state, caller, room, move |conn, now| {
+                    store::create_task(conn, &room, &caller, Stage::Idea, &title, &body, now)
+                        .map(Some)
+                })
+                .await,
+            )
+        }
+        Request::ProposeIdea {
+            room,
+            task,
+            title,
+            body,
+        } => {
+            let title = text("title", &title, caps::TITLE, true)?;
+            let body = text("body", &body, caps::BODY, false)?;
+            task_reply(
+                mutate(state, caller, room, move |conn, now| {
+                    store::propose_idea(conn, &room, task, &title, &body, now).map(Some)
                 })
                 .await,
             )

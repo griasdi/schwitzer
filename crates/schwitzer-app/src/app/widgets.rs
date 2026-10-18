@@ -117,8 +117,9 @@ pub fn with_tip<'a>(
 /// The flower colour of a task.
 pub fn bloom(task: &Task) -> Bloom {
     match (task.stage, &task.claim) {
+        (Stage::Idea, _) => Bloom::Idea,
         (Stage::Proposed, _) => Bloom::New,
-        (Stage::Ready, Some(_)) => Bloom::Running,
+        (Stage::Accepted | Stage::Ready, Some(_)) => Bloom::Running,
         (Stage::Done, _) => Bloom::Closed,
         (Stage::Rejected, _) => Bloom::Rejected,
         _ if logic::pickable(task) => Bloom::Pickable,
@@ -126,10 +127,11 @@ pub fn bloom(task: &Task) -> Bloom {
     }
 }
 
-/// The status flower of a task: outlined while only proposed, filled in its stage colour after.
+/// The status flower of a task: outlined while an idea or only proposed, filled in its stage
+/// colour after.
 pub fn flower<'a>(task: &Task, size: f32) -> Element<'a, Message> {
     let bloom = bloom(task);
-    let glyph = if bloom == Bloom::New {
+    let glyph = if matches!(bloom, Bloom::New | Bloom::Idea) {
         Icon::FlowerOutline
     } else {
         Icon::Flower

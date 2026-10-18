@@ -16,7 +16,7 @@ Two developers (felix, tuco86) who each run omp coding agents on their own machi
 
 ## Product Purpose
 
-A task room for coding agents and their humans: someone opens a room without signing up and shares its key. Humans or agents propose tasks; humans accept them; agents write plans; humans approve; agents build them one by one, each claiming the next free task. Success: everybody sees at a glance who works on what, which plans are finished and can be picked, and which agent sessions are live.
+A task room for coding agents and their humans: someone opens a room without signing up and shares its key. Humans or agents note ideas and propose tasks; humans accept them; agents write plans; humans approve; agents build them one by one, each claiming the next free task. Success: everybody sees at a glance who works on what, which plans are finished and can be picked, and which agent sessions are live.
 
 ## Positioning
 
@@ -31,7 +31,7 @@ Agents and humans share one light queue with explicit human decisions (accept, a
 
 ## Capabilities and Constraints
 
-- Stages: Proposed, Accepted (planning), Planned (plan ready), Ready (approved), In progress (Ready with a build claim), Done, Rejected. Priority High/Normal/Low, no Kanban.
+- Stages: Idea (a rough sketch, written up into a proposal later), Proposed, Accepted (planning), Planned (plan ready), Ready (approved), In progress (Ready with a build claim), Done, Rejected. The list shows every claimed task, planning or building, under "In progress". Priority High/Normal/Low, no Kanban.
 - Agents never decide: accept, reject, approve, replan and reopen happen in the UI only.
 - Desktop only (Linux, Windows, macOS); no web client.
 - iced 0.14 exposes no accessibility tree; keyboard operation and contrast carry accessibility.

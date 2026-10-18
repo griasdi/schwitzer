@@ -126,6 +126,7 @@ fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
         Priority::Normal => {}
     }
     if let Some(claim) = &task.claim {
+        line = line.push(muted(logic::work_label(claim.work)));
         line = line.push(member_tag(
             logic::member_name(&state.members, &claim.member),
             logic::member_hue(&claim.member),

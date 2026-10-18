@@ -4,7 +4,7 @@ use iced::widget::{
     Space, column, container, markdown, rich_text, row, span, text, text_editor, text_input,
 };
 use iced::{Alignment, Element, Font, Length};
-use schwitzer_proto::{Decision, Priority, RoomState, Task};
+use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task};
 
 use super::dialogs;
 use super::icons::{Icon, Tone, icon};
@@ -48,6 +48,36 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
 
 fn title_and_body<'a>(app: &'a App, task: &'a Task, editable: bool) -> Element<'a, Message> {
     if let Some(draft) = &app.task_draft {
+        let idea = task.stage == Stage::Idea;
+        let titled = !draft.title.trim().is_empty();
+        let mut buttons = row![
+            Space::new().width(Length::Fill),
+            text_button(
+                "cancel-task-edit",
+                "Cancel",
+                Some(Message::CancelEditTask),
+                theme::button_secondary
+            ),
+            text_button(
+                "save-task",
+                "Save",
+                titled.then_some(Message::SaveTask),
+                if idea {
+                    theme::button_secondary
+                } else {
+                    theme::button_primary
+                },
+            ),
+        ]
+        .spacing(SP_2);
+        if idea {
+            buttons = buttons.push(text_button(
+                "propose-idea",
+                "Propose",
+                titled.then_some(Message::ProposeIdea),
+                theme::button_primary,
+            ));
+        }
         return column![
             text_input("Title", &draft.title)
                 .id("task-title")
@@ -64,22 +94,7 @@ fn title_and_body<'a>(app: &'a App, task: &'a Task, editable: bool) -> Element<'
                 .size(TS_14)
                 .on_action(Message::EditBody)
                 .style(theme::editor),
-            row![
-                Space::new().width(Length::Fill),
-                text_button(
-                    "cancel-task-edit",
-                    "Cancel",
-                    Some(Message::CancelEditTask),
-                    theme::button_secondary
-                ),
-                text_button(
-                    "save-task",
-                    "Save",
-                    (!draft.title.trim().is_empty()).then_some(Message::SaveTask),
-                    theme::button_primary,
-                ),
-            ]
-            .spacing(SP_2),
+            buttons,
         ]
         .spacing(SP_2)
         .into();
@@ -112,7 +127,11 @@ fn title_and_body<'a>(app: &'a App, task: &'a Task, editable: bool) -> Element<'
 /// Who proposed it and who works on it.
 fn people<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     let mut line = row![
-        muted("Proposed by"),
+        muted(if task.stage == Stage::Idea {
+            "Idea by"
+        } else {
+            "Proposed by"
+        }),
         member_tag(
             logic::member_name(&state.members, &task.author),
             logic::member_hue(&task.author)
@@ -155,6 +174,15 @@ fn actions<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
     let mut row = row![].spacing(SP_2).align_y(Alignment::Center);
     let mut any = false;
     let pickable = logic::pickable(task);
+    if task.stage == Stage::Idea && app.task_draft.is_none() {
+        any = true;
+        row = row.push(text_button(
+            "write-up",
+            "Write up",
+            Some(Message::EditTask),
+            theme::button_primary,
+        ));
+    }
     if pickable {
         any = true;
         row = row.push(icon_text_button(

@@ -97,6 +97,7 @@ pub struct Tokens {
     pub shadow: Color,
     /// Status flower colours.
     pub stage_new: Color,
+    pub stage_idea: Color,
     pub stage_planning: Color,
     pub stage_pickable: Color,
     pub stage_running: Color,
@@ -126,6 +127,7 @@ const DAYLIGHT: Tokens = Tokens {
     scrim: Color::from_rgba8(12, 28, 17, 0.36),
     shadow: Color::from_rgba8(12, 28, 17, 0.18),
     stage_new: color!(0x7d8c80),
+    stage_idea: color!(0xa7b5aa),
     stage_planning: color!(0xc98410),
     stage_pickable: color!(0x2f7fd6),
     stage_running: color!(0x22a340),
@@ -179,6 +181,7 @@ const NIGHT: Tokens = Tokens {
     scrim: Color::from_rgba8(0, 0, 0, 0.55),
     shadow: Color::from_rgba8(0, 0, 0, 0.45),
     stage_new: color!(0x7d9182),
+    stage_idea: color!(0x5b6e61),
     stage_planning: color!(0xf0a630),
     stage_pickable: color!(0x5aa6f5),
     stage_running: color!(0x3dcb5c),

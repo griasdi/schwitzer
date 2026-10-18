@@ -12,30 +12,34 @@ use crate::sessions::LocalSession;
 /// A local session counts as idle when its files were last written this long ago.
 pub const IDLE_AFTER_MS: u64 = 2 * 60 * 1000;
 
-/// The sections of the task list, in display order: what runs, what can be picked, what is
-/// being planned, what waits for a decision, what is closed.
+/// The sections of the task list, in display order: what someone works on (planning or
+/// building), what can be picked, what waits for or in planning, what waits for a decision,
+/// the ideas, what is closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Group {
     InProgress,
     Pickable,
     Planning,
     Proposals,
+    Ideas,
     Closed,
 }
 
 impl Group {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::InProgress,
         Self::Pickable,
         Self::Planning,
         Self::Proposals,
+        Self::Ideas,
         Self::Closed,
     ];
 
     pub fn of(task: &Task) -> Self {
         match (task.stage, &task.claim) {
+            (Stage::Idea, _) => Self::Ideas,
             (Stage::Proposed, _) => Self::Proposals,
-            (Stage::Ready, Some(_)) => Self::InProgress,
+            (Stage::Accepted | Stage::Ready, Some(_)) => Self::InProgress,
             (Stage::Ready, None) => Self::Pickable,
             (Stage::Planned, None) if !task.plan.trim().is_empty() => Self::Pickable,
             (Stage::Accepted | Stage::Planned, _) => Self::Planning,
@@ -49,6 +53,7 @@ impl Group {
             Self::Pickable => "Ready to pick",
             Self::Planning => "Planning",
             Self::Proposals => "Proposals",
+            Self::Ideas => "Ideas",
             Self::Closed => "Done",
         }
     }
@@ -60,6 +65,7 @@ impl Group {
             Self::Pickable => "pickable",
             Self::Planning => "planning",
             Self::Proposals => "proposals",
+            Self::Ideas => "ideas",
             Self::Closed => "closed",
         }
     }
@@ -85,6 +91,7 @@ pub fn tasks_in(state: &RoomState, group: Group) -> Vec<&Task> {
 /// The decisions the server accepts for `task` right now (plan §3, `Decide`), in button order.
 pub fn legal_decisions(task: &Task) -> Vec<Decision> {
     match task.stage {
+        Stage::Idea => vec![Decision::Reject],
         Stage::Proposed => vec![Decision::Accept, Decision::Reject],
         Stage::Accepted => vec![Decision::Reject],
         Stage::Planned if task.plan.trim().is_empty() => vec![Decision::Replan, Decision::Reject],
@@ -103,6 +110,7 @@ pub fn editable(task: &Task) -> bool {
 /// The label of a stage as shown next to a task.
 pub fn stage_label(task: &Task) -> &'static str {
     match (task.stage, task.claim.as_ref().map(|c| c.work)) {
+        (Stage::Idea, _) => "Idea",
         (Stage::Proposed, _) => "Proposed",
         (Stage::Accepted, Some(Work::Plan)) => "Being planned",
         (Stage::Accepted, _) => "Accepted",
@@ -296,11 +304,13 @@ mod tests {
     #[test]
     fn groups_follow_stage_claim_and_plan() {
         let token = ClaimToken([1; 16]);
+        assert_eq!(Group::of(&task(1, Stage::Idea, None)), Group::Ideas);
         assert_eq!(Group::of(&task(1, Stage::Proposed, None)), Group::Proposals);
         assert_eq!(
             Group::of(&task(1, Stage::Accepted, Some(claim(Work::Plan, token)))),
-            Group::Planning
+            Group::InProgress
         );
+        assert_eq!(Group::of(&task(1, Stage::Accepted, None)), Group::Planning);
         // A planned task without plan text cannot be approved, so it is not pickable.
         let mut planned = task(1, Stage::Planned, None);
         assert_eq!(Group::of(&planned), Group::Planning);
@@ -333,6 +343,10 @@ mod tests {
     #[test]
     fn decisions_match_the_server_table() {
         let token = ClaimToken([1; 16]);
+        assert_eq!(
+            legal_decisions(&task(1, Stage::Idea, None)),
+            [Decision::Reject]
+        );
         assert_eq!(
             legal_decisions(&task(1, Stage::Proposed, None)),
             [Decision::Accept, Decision::Reject]

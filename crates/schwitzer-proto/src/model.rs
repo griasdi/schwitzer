@@ -7,7 +7,8 @@ use crate::{ClaimToken, MemberId, RoomId};
 // Postcard is positional: enum variants are append-only.
 
 /// Where a task stands. "In progress" is `Ready` with a Build claim;
-/// "being planned" is `Accepted` with a Plan claim.
+/// "being planned" is `Accepted` with a Plan claim. `Idea` is a rough sketch that someone
+/// writes up into a proposal; it comes first in the flow but is appended last for postcard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Stage {
     Proposed,
@@ -16,6 +17,7 @@ pub enum Stage {
     Ready,
     Done,
     Rejected,
+    Idea,
 }
 
 /// Sort order: `High` first.

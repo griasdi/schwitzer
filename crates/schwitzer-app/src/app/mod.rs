@@ -94,6 +94,7 @@ pub enum Message {
 
     ProposalTitle(String),
     ProposalBody(text_editor::Action),
+    NewIdea(bool),
     Propose,
     Proposed(Result<Response, String>),
     Pick(u64),
@@ -104,6 +105,7 @@ pub enum Message {
     EditTitle(String),
     EditBody(text_editor::Action),
     SaveTask,
+    ProposeIdea,
     TaskSaved(Result<Response, String>),
     EditPlan,
     CancelEditPlan,
@@ -149,6 +151,8 @@ struct Forms {
     repo: String,
     proposal_title: String,
     proposal_body: text_editor::Content,
+    /// Whether the New task dialog adds an idea instead of a proposal.
+    idea: bool,
     note: String,
 }
 
@@ -236,6 +240,7 @@ impl App {
                 repo: String::new(),
                 proposal_title: String::new(),
                 proposal_body: text_editor::Content::new(),
+                idea: false,
                 note: String::new(),
             },
             saved: settings.clone(),
@@ -554,16 +559,21 @@ impl App {
                 self.forms.proposal_body.perform(action);
                 Task::none()
             }
+            Message::NewIdea(on) => {
+                self.forms.idea = on;
+                Task::none()
+            }
             Message::Propose => self.propose(),
             Message::Proposed(result) => {
                 match result {
-                    Ok(_) => {
+                    Ok(response) => {
                         self.forms.proposal_title.clear();
                         self.forms.proposal_body = text_editor::Content::new();
                         if self.dialog == Some(Dialog::NewTask) {
                             self.dialog = None;
                         }
-                        self.notify("Task proposed");
+                        let idea = matches!(&response, Response::Task(t) if t.stage == Stage::Idea);
+                        self.notify(if idea { "Idea added" } else { "Task proposed" });
                     }
                     Err(e) => self.banner = Some(e),
                 }
@@ -612,6 +622,7 @@ impl App {
                 Task::none()
             }
             Message::SaveTask => self.save_task(),
+            Message::ProposeIdea => self.propose_idea(),
             Message::TaskSaved(result) => {
                 match result {
                     Ok(_) => self.task_draft = None,
@@ -1031,10 +1042,11 @@ impl App {
         if title.is_empty() {
             return Task::none();
         }
-        let req = Request::Propose {
-            room,
-            title: title.to_owned(),
-            body: self.forms.proposal_body.text(),
+        let (title, body) = (title.to_owned(), self.forms.proposal_body.text());
+        let req = if self.forms.idea {
+            Request::AddIdea { room, title, body }
+        } else {
+            Request::Propose { room, title, body }
         };
         call(self.request(room, req), Message::Proposed)
     }
@@ -1101,6 +1113,24 @@ impl App {
             title: draft.title.clone(),
             body: draft.body.text(),
             plan: task.plan.clone(),
+        };
+        call(self.request(room, req), Message::TaskSaved)
+    }
+
+    /// Writes the open idea up into a proposal with the draft's title and body.
+    fn propose_idea(&self) -> Task<Message> {
+        let (Some((state, task)), Some(draft)) = (self.open(), &self.task_draft) else {
+            return Task::none();
+        };
+        if task.stage != Stage::Idea || draft.title.trim().is_empty() {
+            return Task::none();
+        }
+        let room = state.id;
+        let req = Request::ProposeIdea {
+            room,
+            task: task.number,
+            title: draft.title.clone(),
+            body: draft.body.text(),
         };
         call(self.request(room, req), Message::TaskSaved)
     }

@@ -55,6 +55,7 @@ icons! {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bloom {
     New,
+    Idea,
     Planning,
     Pickable,
     Running,
@@ -88,6 +89,7 @@ pub fn icon<'a>(icon: Icon, size: f32, tone: Tone) -> svg::Svg<'a, Theme> {
                     Tone::OnPrimary => t.on_primary,
                     Tone::Danger => t.danger,
                     Tone::Bloom(Bloom::New) => t.stage_new,
+                    Tone::Bloom(Bloom::Idea) => t.stage_idea,
                     Tone::Bloom(Bloom::Planning) => t.stage_planning,
                     Tone::Bloom(Bloom::Pickable) => t.stage_pickable,
                     Tone::Bloom(Bloom::Running) => t.stage_running,

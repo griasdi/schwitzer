@@ -294,10 +294,11 @@ A mint-and-green palette: white or green-black ground, mint chrome, one action g
 
 ### Secondary (stage flower colours)
 Each is a flower tint; none is used as a surface.
-- **New, Outline Grey** (#7d8c80 / #7d9182): Proposed. Drawn as the *outline* flower. The only stage not filled.
+- **New, Outline Grey** (#7d8c80 / #7d9182): Proposed. Drawn as the *outline* flower.
+- **Idea, Faint Grey** (#a7b5aa / #5b6e61): an idea not yet written up into a proposal. Outline flower, fainter than New: an idea is less than a proposal. Idea and New are the only stages not filled.
 - **Planning Amber** (#c98410 / #f0a630): Accepted and Planned without a ready plan; someone is writing or the plan is not final.
 - **Pickable Blue** (#2f7fd6 / #5aa6f5): a plan is ready or approved and nobody builds it; the Pick button is available.
-- **Running Green** (#22a340 / #3dcb5c): Ready with a build claim; an agent is working. Also the online dot, and the status-bar flower when the server is online.
+- **Running Green** (#22a340 / #3dcb5c): a claimed task, Accepted with a plan claim or Ready with a build claim; someone is working. Also the online dot, and the status-bar flower when the server is online.
 - **Closed Muted** (#9aa89d / #5f7064): Done. Also the status-bar flower while connecting.
 - **Rejected Red** (#d9473f / #f06a62): Rejected. Also the status-bar flower when the server is offline.
 - **Alarm Red** (#c53a35 / #f06a62, `danger`): destructive buttons, high-priority arrow, offline dots, the alert strip border. Soft fill **Alarm Wash** (#fbe9e7 / #3a1a19, `danger-soft`); text on a pressed danger button **#ffffff / #2a0605**.
@@ -330,7 +331,7 @@ Six hues, picked per member by a fixed hash, the same on every machine. Day: lig
 
 **The Mint Neutrals Rule.** Every neutral is tinted toward the green hue; chrome is mint, lines are mint, text is green-black. No pure grey, no blue-grey.
 
-**The Colour Plus Form Rule.** Colour is never the only carrier. The flower sits next to a group title and, in the task dialog, next to a stage pill ("Plan ready", "In progress"); New is outline, not just grey. Name tags carry the member's name.
+**The Colour Plus Form Rule.** Colour is never the only carrier. The flower sits next to a group title and, in the task dialog, next to a stage pill ("Plan ready", "In progress"); Idea and New are outline, not just grey. Name tags carry the member's name.
 
 ## Typography
 
@@ -363,7 +364,7 @@ A single narrow column, designed for a 400x780 window (minimum 340x520), pinned 
 
 Spacing is a four-step scale: 4 / 8 / 12 / 16 (`sp-1`..`sp-4`). List rows sit 2px apart with 6px vertical and 8px horizontal inner padding; the list inset is 8px left, 12px right (keeps the Pick button clear of the scroll rail), 8px top and bottom. Dialog padding is 16px left/right/bottom, with a 4px-tighter header. Controls are 32px tall (text buttons, icon buttons at 16px glyph + 8px padding, status bar, sessions header).
 
-The list is grouped in fixed order: **In progress**, **Ready to pick**, **Planning**, **Proposals**, **Done**. Empty groups disappear; groups fold with a chevron; within a group, higher priority first, then task number. Row content, left to right: flower (16px), `#n`, title (fills, wraps), priority arrow, member tag, Pick button. A wide window changes nothing except that dialogs grow to at most 560px wide.
+The list is grouped in fixed order: **In progress** (every claimed task, planning or building), **Ready to pick**, **Planning**, **Proposals**, **Ideas**, **Done**. Empty groups disappear; groups fold with a chevron; within a group, higher priority first, then task number. Row content, left to right: flower (16px), `#n`, title (fills, wraps), priority arrow, the claim's work ("planning"/"building", muted) and member tag, Pick button. A wide window changes nothing except that dialogs grow to at most 560px wide.
 
 Empty states are centred, max 280px: outline flower (40px, muted), a semibold title, a muted hint, one action.
 

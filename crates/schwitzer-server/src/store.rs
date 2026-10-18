@@ -139,6 +139,7 @@ fn stage_to_int(stage: Stage) -> i64 {
         Stage::Ready => 3,
         Stage::Done => 4,
         Stage::Rejected => 5,
+        Stage::Idea => 6,
     }
 }
 
@@ -150,6 +151,7 @@ fn stage_from_int(v: i64) -> Option<Stage> {
         3 => Stage::Ready,
         4 => Stage::Done,
         5 => Stage::Rejected,
+        6 => Stage::Idea,
         _ => return None,
     })
 }
@@ -537,11 +539,12 @@ fn set_stage(conn: &Connection, room: &RoomId, number: u64, stage: Stage, now: u
     Ok(())
 }
 
-/// A new task in stage `Proposed` with priority `Normal`.
-pub fn propose(
+/// A new task in `stage` (`Idea` or `Proposed`) with priority `Normal`.
+pub fn create_task(
     conn: &Connection,
     room: &RoomId,
     author: &MemberId,
+    stage: Stage,
     title: &str,
     body: &str,
     now: u64,
@@ -563,13 +566,41 @@ pub fn propose(
             number,
             title,
             body,
-            stage_to_int(Stage::Proposed),
+            stage_to_int(stage),
             priority_to_int(Priority::Normal),
             author.as_bytes().as_slice(),
             int(now)
         ],
     )?;
     require_task(conn, room, uns(number))
+}
+
+/// Writes an idea up into a proposal: new title and body, stage `Proposed`; the author stays.
+pub fn propose_idea(
+    conn: &Connection,
+    room: &RoomId,
+    number: u64,
+    title: &str,
+    body: &str,
+    now: u64,
+) -> R<Task> {
+    let task = require_task(conn, room, number)?;
+    if task.stage != Stage::Idea {
+        return Err(ApiError::WrongStage(task.stage).into());
+    }
+    conn.execute(
+        "UPDATE tasks SET title = ?3, body = ?4, stage = ?5, updated_ms = ?6
+         WHERE room = ?1 AND number = ?2",
+        params![
+            room.as_bytes().as_slice(),
+            int(number),
+            title,
+            body,
+            stage_to_int(Stage::Proposed),
+            int(now)
+        ],
+    )?;
+    require_task(conn, room, number)
 }
 
 /// Rewrites title, body and plan; not allowed once a task is `Done` or `Rejected`.
@@ -626,7 +657,7 @@ fn next_stage(decision: Decision, task: &Task) -> Result<Stage, ApiError> {
     let wrong = || ApiError::WrongStage(task.stage);
     match (decision, task.stage) {
         (Decision::Accept, Stage::Proposed) => Ok(Stage::Accepted),
-        (Decision::Reject, Stage::Proposed | Stage::Accepted | Stage::Planned) => {
+        (Decision::Reject, Stage::Idea | Stage::Proposed | Stage::Accepted | Stage::Planned) => {
             Ok(Stage::Rejected)
         }
         (Decision::Approve, Stage::Planned) => {
@@ -844,11 +875,18 @@ mod tests {
         (conn, room, me)
     }
 
-    /// Proposes a task and walks it to `stage` (Accepted, Planned or Ready).
+    /// Creates a task and walks it to `stage` (Idea, Proposed, Accepted, Planned or Ready).
     fn task_in(conn: &Connection, room: &RoomId, me: &MemberId, stage: Stage) -> u64 {
-        let n = propose(conn, room, me, "t", "", NOW).unwrap().number;
+        let first = if stage == Stage::Idea {
+            Stage::Idea
+        } else {
+            Stage::Proposed
+        };
+        let n = create_task(conn, room, me, first, "t", "", NOW)
+            .unwrap()
+            .number;
         let steps: &[Decision] = match stage {
-            Stage::Proposed => &[],
+            Stage::Idea | Stage::Proposed => &[],
             Stage::Accepted => &[Decision::Accept],
             Stage::Planned => &[Decision::Accept],
             Stage::Ready => &[Decision::Accept],
@@ -925,6 +963,25 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn an_idea_is_written_up_into_a_proposal() {
+        let (conn, room, me) = setup();
+        let n = task_in(&conn, &room, &me, Stage::Idea);
+        assert!(matches!(
+            claim(&conn, &room, &me, Work::Plan, Some(n), "a", NOW),
+            Err(Fail::Api(ApiError::WrongStage(Stage::Idea)))
+        ));
+        let task = propose_idea(&conn, &room, n, "T2", "b2", NOW + 1).unwrap();
+        assert_eq!(task.number, n);
+        assert_eq!(task.stage, Stage::Proposed);
+        assert_eq!((task.title.as_str(), task.body.as_str()), ("T2", "b2"));
+        assert_eq!(task.author, me);
+        assert!(matches!(
+            propose_idea(&conn, &room, n, "T3", "", NOW),
+            Err(Fail::Api(ApiError::WrongStage(Stage::Proposed)))
+        ));
+    }
+
     /// Runs `decision` on a fresh task prepared by `prepare`; the resulting
     /// stage or the error.
     fn decide_from(
@@ -949,7 +1006,7 @@ mod tests {
         use Decision::*;
         use Stage::*;
         assert_eq!(decide_from(at(Proposed), Accept), Ok(Accepted));
-        for from in [Proposed, Accepted, Planned] {
+        for from in [Idea, Proposed, Accepted, Planned] {
             assert_eq!(decide_from(at(from), Reject), Ok(Rejected));
         }
         assert_eq!(decide_from(at(Planned), Approve), Ok(Ready));
@@ -975,6 +1032,10 @@ mod tests {
         use Decision::*;
         use Stage::*;
         let illegal = [
+            (Idea, Accept),
+            (Idea, Approve),
+            (Idea, Replan),
+            (Idea, Reopen),
             (Proposed, Approve),
             (Proposed, Replan),
             (Proposed, Reopen),

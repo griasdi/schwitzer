@@ -156,7 +156,37 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
         .await;
     assert_eq!(api_error(refused), ApiError::WrongStage(Stage::Proposed));
 
-    // 4. After both are accepted, B's next plan claim is the High one.
+    // 4. An idea is written up into a proposal, once.
+    let idea = task(
+        a.request(
+            room,
+            Request::AddIdea {
+                room,
+                title: "faster sync".into(),
+                body: String::new(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(idea.stage, Stage::Idea);
+    let write_up = Request::ProposeIdea {
+        room,
+        task: idea.number,
+        title: "Sync rooms in parallel".into(),
+        body: "why".into(),
+    };
+    let proposal = task(b.request(room, write_up.clone()).await.unwrap());
+    assert_eq!(proposal.stage, Stage::Proposed);
+    assert_eq!(proposal.number, idea.number);
+    assert_eq!(proposal.title, "Sync rooms in parallel");
+    assert_eq!(proposal.author, idea.author);
+    assert_eq!(
+        api_error(b.request(room, write_up).await),
+        ApiError::WrongStage(Stage::Proposed)
+    );
+
+    // 5. After both are accepted, B's next plan claim is the High one.
     for number in [normal.number, urgent.number] {
         let accepted = task(
             a.request(
@@ -188,7 +218,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
     assert_eq!(plan_claim.number, urgent.number);
     assert_eq!(plan_claim.claim.as_ref().unwrap().member, b.member());
 
-    // 5. A cannot submit a plan on B's claim.
+    // 6. A cannot submit a plan on B's claim.
     let stolen = a
         .request(
             room,
@@ -201,7 +231,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
         .await;
     assert_eq!(api_error(stolen), ApiError::NotYourClaim);
 
-    // 6. B submits the plan, A approves it.
+    // 7. B submits the plan, A approves it.
     let planned = task(
         b.request(
             room,
@@ -229,7 +259,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
     );
     assert_eq!(approved.stage, Stage::Ready);
 
-    // 7. B builds and finishes with a note; A sees it done.
+    // 8. B builds and finishes with a note; A sees it done.
     let build_claim = claimed(
         b.request(
             room,
@@ -271,7 +301,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
         .unwrap();
     assert!(finished.notes.iter().any(|n| n.text == "shipped"));
 
-    // 8. The server restarts on its port with the same data: the key still joins and the
+    // 9. The server restarts on its port with the same data: the key still joins and the
     // tasks are still there.
     let port = addr.port;
     server.shutdown().await;
@@ -281,7 +311,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
     assert_eq!(server.addr, addr);
     assert_eq!(b.join_room(key.clone()).await.unwrap(), room);
     let state = room_where(&mut rx_b, |s| {
-        s.tasks.len() == 2
+        s.tasks.len() == 3
             && s.tasks
                 .iter()
                 .any(|t| t.number == urgent.number && t.stage == Stage::Done)

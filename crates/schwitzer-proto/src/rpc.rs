@@ -77,6 +77,19 @@ pub enum Request {
         room: RoomId,
         sessions: Vec<SessionInfo>,
     },
+    /// A new task in stage `Idea`.
+    AddIdea {
+        room: RoomId,
+        title: String,
+        body: String,
+    },
+    /// Writes an `Idea` up into a proposal: new title and body, stage `Proposed`, same number.
+    ProposeIdea {
+        room: RoomId,
+        task: u64,
+        title: String,
+        body: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
