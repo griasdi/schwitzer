@@ -12,7 +12,7 @@ use super::pages::{frame, section};
 use super::widgets::{
     dot, heading, icon_button, icon_text_button, id_button, input, muted, text_button,
 };
-use super::{App, Message, tilde};
+use super::{App, FolderFor, Message, tilde};
 use crate::mcp::McpStatus;
 use crate::omp_plugin::PluginState;
 use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
@@ -95,6 +95,14 @@ fn projects_folders(app: &App) -> Element<'_, Message> {
                 &app.forms.new_projects_dir,
                 Message::ProjectsDirInput,
                 Message::AddProjectsDir
+            ),
+            icon_button(
+                "projects-dir-browse",
+                Icon::FolderOpen,
+                Tone::Muted,
+                "Choose a folder",
+                (!app.folder_dialog).then_some(Message::ChooseFolder(FolderFor::ProjectsDir)),
+                theme::button_secondary,
             ),
             text_button(
                 "projects-dir-add",
@@ -353,6 +361,14 @@ fn this_project(app: &App) -> Element<'_, Message> {
                 &app.forms.repo,
                 Message::RepoInput,
                 Message::AddRepo
+            ),
+            icon_button(
+                "repo-browse",
+                Icon::FolderOpen,
+                Tone::Muted,
+                "Choose a folder",
+                (!app.folder_dialog).then_some(Message::ChooseFolder(FolderFor::Repo)),
+                theme::button_secondary,
             ),
             text_button(
                 "repo-add",

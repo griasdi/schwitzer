@@ -33,6 +33,7 @@ icons! {
     Leave => "log-out",
     Folder => "folder",
     FolderPlus => "folder-plus",
+    FolderOpen => "folder-open",
     Trash => "trash-2",
     Check => "check",
     Pencil => "pencil",

@@ -126,6 +126,10 @@ pub enum Message {
     AddRepo,
     /// Links a suggested folder to the selected project.
     LinkRepo(PathBuf),
+    /// Opens the folder dialog.
+    ChooseFolder(FolderFor),
+    /// The folder dialog closed; `None` when cancelled.
+    FolderChosen(FolderFor, Option<PathBuf>),
     RemoveRepo(usize),
     /// Index into the selected project's repos.
     InstallPlugin(usize),
@@ -206,6 +210,15 @@ struct Notice {
     until_ms: u64,
 }
 
+/// What a chosen folder is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderFor {
+    /// Linked to the selected project.
+    Repo,
+    /// Added to the projects folders.
+    ProjectsDir,
+}
+
 /// The inputs of the settings page, the draft of a new task and the note field of the open
 /// task.
 struct Forms {
@@ -259,6 +272,9 @@ pub struct App {
     sessions_open: bool,
     /// The task whose pick is under way.
     picking: Option<u64>,
+    /// Whether a folder dialog is open; its buttons are disabled meanwhile, so a second click
+    /// opens no second dialog.
+    folder_dialog: bool,
     forms: Forms,
     task_draft: Option<TaskDraft>,
     plan_draft: Option<text_editor::Content>,
@@ -369,6 +385,7 @@ impl App {
             collapsed: HashSet::from([Group::Closed]),
             sessions_open: true,
             picking: None,
+            folder_dialog: false,
             task_draft: None,
             plan_draft: None,
             plan_md: markdown::Content::new(),
@@ -585,6 +602,14 @@ impl App {
                     &self.forms.repo,
                     Message::RepoInput,
                     Message::AddRepo,
+                ),
+                widgets::icon_button(
+                    "repo-browse",
+                    Icon::FolderOpen,
+                    Tone::Muted,
+                    "Choose a folder",
+                    (!self.folder_dialog).then_some(Message::ChooseFolder(FolderFor::Repo)),
+                    theme::button_secondary,
                 ),
                 widgets::text_button(
                     "repo-add",
@@ -888,6 +913,46 @@ impl App {
                 None => Task::none(),
             },
             Message::LinkRepo(path) => self.link_repo(path).unwrap_or_else(Task::none),
+            Message::ChooseFolder(for_) => {
+                if self.folder_dialog {
+                    return Task::none();
+                }
+                self.folder_dialog = true;
+                let (title, typed) = match for_ {
+                    FolderFor::Repo => ("Choose a repo", self.forms.repo.trim()),
+                    FolderFor::ProjectsDir => (
+                        "Choose a projects folder",
+                        self.forms.new_projects_dir.trim(),
+                    ),
+                };
+                let typed = expand_home(typed);
+                let start = if typed.is_dir() {
+                    Some(typed)
+                } else {
+                    match for_ {
+                        FolderFor::Repo => self.searched_dirs().first().map(|p| p.to_path_buf()),
+                        FolderFor::ProjectsDir => {
+                            directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf())
+                        }
+                    }
+                };
+                Task::perform(choose_folder(title, start), move |path| {
+                    Message::FolderChosen(for_, path)
+                })
+            }
+            Message::FolderChosen(for_, path) => {
+                self.folder_dialog = false;
+                let Some(path) = path else {
+                    return Task::none();
+                };
+                match for_ {
+                    FolderFor::Repo => self.link_repo(path).unwrap_or_else(Task::none),
+                    FolderFor::ProjectsDir => {
+                        self.add_projects_dir(path);
+                        Task::none()
+                    }
+                }
+            }
             Message::RemoveRepo(index) => {
                 let (Some(room), Some(project)) = (self.selected, self.selected_project()) else {
                     return Task::none();
@@ -1054,20 +1119,9 @@ impl App {
                 if input.is_empty() {
                     return Task::none();
                 }
-                let path = wsl::canonical(expand_home(input));
-                if !path.is_absolute() || !path.is_dir() {
-                    self.banner = Some(format!("Not a folder on this machine: {}", path.display()));
-                    return Task::none();
+                if self.add_projects_dir(expand_home(input)) {
+                    self.forms.new_projects_dir.clear();
                 }
-                self.forms.new_projects_dir.clear();
-                let dirs = self.settings.projects_dirs.get_or_insert_with(Vec::new);
-                if dirs.contains(&path) {
-                    return Task::none();
-                }
-                dirs.push(path);
-                self.save_settings();
-                self.read_project_dirs();
-                self.notify("Projects folder added");
                 Task::none()
             }
             Message::RemoveProjectsDir(index) => {
@@ -1483,6 +1537,25 @@ impl App {
         Task::perform(async move { client.set_name(name).await }, |()| {
             Message::Noop
         })
+    }
+
+    /// Adds `path` to the projects folders; `false` when it is not a folder on this machine
+    /// (with a banner). A folder already listed counts as added.
+    fn add_projects_dir(&mut self, path: PathBuf) -> bool {
+        let path = wsl::canonical(path);
+        if !path.is_absolute() || !path.is_dir() {
+            self.banner = Some(format!("Not a folder on this machine: {}", path.display()));
+            return false;
+        }
+        let dirs = self.settings.projects_dirs.get_or_insert_with(Vec::new);
+        if dirs.contains(&path) {
+            return true;
+        }
+        dirs.push(path);
+        self.save_settings();
+        self.read_project_dirs();
+        self.notify("Projects folder added");
+        true
     }
 
     /// Links `path` to the selected project; `None` when nothing was linked.
@@ -2173,6 +2246,26 @@ fn reveal(id: &'static str) -> Task<Message> {
             )
         })
     })
+}
+
+/// Env var a headless instance answers the folder dialog with (it never opens one).
+#[cfg(feature = "remote")]
+const PICK_FOLDER_ENV: &str = "SCHWITZER_PICK_FOLDER";
+
+/// Asks the user for a folder, starting in `start`; `None` when cancelled. A headless
+/// instance opens no dialog: it answers with `$SCHWITZER_PICK_FOLDER`, or `None` when unset.
+async fn choose_folder(title: &'static str, start: Option<PathBuf>) -> Option<PathBuf> {
+    #[cfg(feature = "remote")]
+    if iced_impeccable::is_headless() {
+        return std::env::var_os(PICK_FOLDER_ENV)
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from);
+    }
+    let mut dialog = rfd::AsyncFileDialog::new().set_title(title);
+    if let Some(start) = start {
+        dialog = dialog.set_directory(start);
+    }
+    dialog.pick_folder().await.map(|f| f.path().to_path_buf())
 }
 
 /// `~/x` as a path under the home directory; anything else as given.
