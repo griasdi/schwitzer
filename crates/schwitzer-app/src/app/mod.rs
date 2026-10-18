@@ -168,7 +168,7 @@ pub enum Message {
     AddNote,
     NoteAdded(Result<Response, String>),
     Published(RoomId, Result<(), String>),
-    /// The five-minute update check, the one at start, and "Check now".
+    /// The five-minute update check and "Check now"; a server's announcement checks too.
     CheckUpdate,
     UpdateChecked(Result<Option<update::Release>, String>),
     InstallUpdate,
@@ -317,6 +317,8 @@ pub struct App {
     /// The version whose install failed and why, so the periodic check does not download it
     /// again by itself.
     update_failed: Option<(semver::Version, String)>,
+    /// The release each server announced, the newest one it is compatible with.
+    releases: HashMap<ServerAddr, semver::Version>,
     /// What to focus or reveal after a restart for an update, once it shows.
     resume_focus: Option<PendingFocus>,
     now_ms: u64,
@@ -414,6 +416,7 @@ impl App {
             program: update::Program::current(),
             updater: UpdateState::Idle,
             update_failed: None,
+            releases: HashMap::new(),
             resume_focus: None,
             now_ms: now_ms(),
         };
@@ -430,15 +433,8 @@ impl App {
         // update or a new MCP port.
         app.check_plugins();
         app.save_settings();
-        let check = if update::ENABLED {
-            Task::done(Message::CheckUpdate)
-        } else {
-            Task::none()
-        };
-        (
-            app,
-            Task::batch([iced::system::theme().map(Message::SystemMode), check]),
-        )
+        // Nothing is announced yet: the first `ClientEvent::Release` starts the update check.
+        (app, iced::system::theme().map(Message::SystemMode))
     }
 
     pub fn title(&self) -> String {
@@ -1970,8 +1966,23 @@ impl App {
                 self.publish()
             }
             ClientEvent::RoomRemoved(_) => {
+                // A removed room may drop the server that held the update back.
+                let before = self.release_target();
                 self.sync_rooms();
-                Task::none()
+                self.follow_release(before)
+            }
+            ClientEvent::Release { server, version } => {
+                let Ok(version) = version.parse::<semver::Version>() else {
+                    tracing::warn!(
+                        "{}:{} announced an unreadable version {version:?}",
+                        server.host,
+                        server.port
+                    );
+                    return Task::none();
+                };
+                let before = self.release_target();
+                self.releases.insert(server, version);
+                self.follow_release(before)
             }
         }
     }
@@ -2023,8 +2034,28 @@ impl App {
 
     // ---- self-update ----------------------------------------------------------------------
 
-    /// Asks GitHub for a newer release unless a check or an install is under way, or an
-    /// update waits for its restart.
+    /// The release to update to: the lowest one the servers of the kept rooms announced, so the
+    /// app never runs ahead of any of them.
+    fn release_target(&self) -> Option<semver::Version> {
+        self.releases
+            .iter()
+            .filter(|(server, _)| self.rooms.iter().any(|(key, _)| key.server == **server))
+            .map(|(_, version)| version)
+            .min()
+            .cloned()
+    }
+
+    /// Checks again when the target moved.
+    fn follow_release(&mut self, before: Option<semver::Version>) -> Task<Message> {
+        if update::ENABLED && self.release_target() != before {
+            self.check_update()
+        } else {
+            Task::none()
+        }
+    }
+
+    /// Looks up the release the servers announced unless a check or an install is under way,
+    /// or an update waits for its restart.
     fn check_update(&mut self) -> Task<Message> {
         if !update::ENABLED
             || matches!(
@@ -2039,8 +2070,16 @@ impl App {
             return Task::none();
         };
         let package = program.package;
-        self.updater = UpdateState::Checking;
-        Task::perform(update::check(package), Message::UpdateChecked)
+        match self.release_target() {
+            Some(version) if version > update::current() => {
+                self.updater = UpdateState::Checking;
+                Task::perform(update::check(version, package), Message::UpdateChecked)
+            }
+            _ => {
+                self.updater = UpdateState::UpToDate;
+                Task::none()
+            }
+        }
     }
 
     fn update_checked(&mut self, result: Result<Option<update::Release>, String>) -> Task<Message> {
@@ -2049,6 +2088,11 @@ impl App {
         }
         match result {
             Ok(None) => self.updater = UpdateState::UpToDate,
+            Ok(Some(release)) if Some(&release.version) != self.release_target().as_ref() => {
+                // The announcements moved while GitHub answered: look up the new target.
+                self.updater = UpdateState::Idle;
+                return self.check_update();
+            }
             Ok(Some(release)) => {
                 // A version that failed to install waits for the Install button.
                 let error = self

@@ -4099,9 +4099,13 @@ dependencies = [
  "rand 0.8.8",
  "rusqlite",
  "schwitzer-proto",
+ "semver",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "ureq",
  "weida",
 ]
 

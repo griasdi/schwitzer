@@ -1,5 +1,5 @@
-//! The `/events` endpoint: the member's rooms as a backlog, `Ready`, then live
-//! events until the stream or its connection ends.
+//! The `/events` endpoint: the member's rooms as a backlog, `Ready`, the app release the server
+//! announces (if it knows one), then live events until the stream or its connection ends.
 
 use std::time::Duration;
 
@@ -85,6 +85,21 @@ async fn handle(state: State, mut request: IncomingRequest) {
             }
         }
         if let Some(frame) = frame_of(&Event::Ready)
+            && write(&mut out, &frame).await.is_err()
+        {
+            return;
+        }
+        // Read after subscribing; the release check stores before it publishes, so a change
+        // meanwhile arrives at least once.
+        let release = state
+            .release
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(version) = release
+            && let Some(frame) = frame_of(&Event::Release {
+                version: version.to_string(),
+            })
             && write(&mut out, &frame).await.is_err()
         {
             return;

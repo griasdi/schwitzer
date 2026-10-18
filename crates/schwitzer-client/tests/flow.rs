@@ -19,6 +19,8 @@ fn options(listen: SocketAddr, data: &TempDir) -> Options {
         listen,
         public_host: "127.0.0.1".into(),
         data_dir: data.path().to_path_buf(),
+        // Tests never reach GitHub.
+        releases_url: None,
     }
 }
 
@@ -477,5 +479,73 @@ async fn a_forgotten_room_closes_its_server_connection() {
 
     a.shutdown();
     b.shutdown();
+    server.shutdown().await;
+}
+
+/// Serves `body` as JSON to every HTTP request; returns the URL of the release list.
+fn serve_feed(body: String) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = Vec::new();
+            let mut buf = [0; 1024];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => request.extend_from_slice(&buf[..n]),
+                }
+            }
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    format!("http://127.0.0.1:{port}/releases")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_server_announces_the_newest_release_not_above_its_own_version() {
+    let own = env!("CARGO_PKG_VERSION");
+    let release = |tag: &str| format!(r#"{{"tag_name":"{tag}","draft":false,"prerelease":false}}"#);
+    let body = format!(
+        "[{},{},{}]",
+        release("v999.0.0"),
+        release(&format!("v{own}")),
+        release("v0.0.1")
+    );
+    let data = TempDir::new().unwrap();
+    let listen: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let server = schwitzer_server::start(Options {
+        releases_url: Some(serve_feed(body)),
+        ..options(listen, &data)
+    })
+    .await
+    .unwrap();
+    let addr: ServerAddr = server.addr.clone();
+
+    let dir = TempDir::new().unwrap();
+    let a = Client::start(dir.path(), "alice".into()).unwrap();
+    let mut rx = a.subscribe();
+    a.create_room(addr.clone(), "crew".into()).await.unwrap();
+    let (server_of, version) = tokio::time::timeout(WAIT, async {
+        loop {
+            match rx.recv().await {
+                Ok(ClientEvent::Release { server, version }) => return (server, version),
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => panic!("the event channel closed"),
+            }
+        }
+    })
+    .await
+    .expect("no release announced");
+    assert_eq!(version, own);
+    assert_eq!(server_of, addr);
+
+    a.shutdown();
     server.shutdown().await;
 }

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use schwitzer_server::{Options, start};
+use schwitzer_server::{Options, RELEASES_URL, start};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -20,6 +20,9 @@ struct Cli {
     /// Directory for the database and the server identity.
     #[arg(long, default_value = "./schwitzer-data")]
     data_dir: PathBuf,
+    /// GitHub API URL of the release list the server checks for app updates.
+    #[arg(long, default_value = RELEASES_URL)]
+    releases_url: String,
 }
 
 #[tokio::main]
@@ -36,6 +39,7 @@ async fn main() -> ExitCode {
         listen: cli.listen,
         public_host: cli.public_host,
         data_dir: cli.data_dir,
+        releases_url: Some(cli.releases_url),
     };
     let mut server = match start(opts).await {
         Ok(server) => server,

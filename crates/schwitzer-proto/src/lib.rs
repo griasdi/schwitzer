@@ -20,7 +20,7 @@ pub use model::{
 };
 pub use rpc::{ApiError, Reply, Request, Response};
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 pub const PATH_RPC: &str = "/rpc";
 pub const PATH_EVENTS: &str = "/events";

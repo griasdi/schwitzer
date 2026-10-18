@@ -23,7 +23,7 @@ Download the [latest release](https://github.com/griasdi/schwitzer/releases/late
 - macOS (Apple silicon): unpack, move `Schwitzer.app` to Applications and run `xattr -dr com.apple.quarantine /Applications/Schwitzer.app` once; the app is not notarized.
 - Windows: run `schwitzer-<version>-windows-x86_64-setup.exe`; it installs for your user, without admin rights. Or unpack the zip and run `schwitzer.exe`. SmartScreen asks once because the app is not signed.
 
-Keep the app (the AppImage too) in a folder you can write to: it checks for new releases every 5 minutes, installs them in place and restarts. Settings → Updates switches this off.
+Keep the app (the AppImage too) in a folder you can write to: it installs the newest release your servers announce, never one newer than a server, in place and restarts. Settings → Updates switches this off.
 
 ## Getting started
 

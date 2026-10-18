@@ -209,6 +209,13 @@ impl Client {
                 self.forget_room(room);
                 return;
             }
+            Event::Release { version } => {
+                self.emit(ClientEvent::Release {
+                    server: server.clone(),
+                    version,
+                });
+                return;
+            }
             Event::Room(state) => {
                 seen.insert(state.id);
                 let room = state.id;

@@ -3,7 +3,7 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use rusqlite::Connection;
@@ -18,11 +18,14 @@ use weida::{
 mod auth;
 mod events;
 mod hub;
+mod release;
 mod rpc;
 pub mod store;
 
 use hub::{Hub, Sessions};
 use store::{R, Store};
+
+pub use release::RELEASES_URL;
 
 /// How the server is run.
 #[derive(Debug, Clone)]
@@ -34,6 +37,8 @@ pub struct Options {
     pub public_host: String,
     /// Directory for the database and the server's identity.
     pub data_dir: PathBuf,
+    /// GitHub API URL of the release list, checked every five minutes; `None` checks nothing.
+    pub releases_url: Option<String>,
 }
 
 /// What every request handler shares.
@@ -41,6 +46,8 @@ pub(crate) struct Shared {
     pub store: Store,
     pub hub: Hub,
     pub sessions: Sessions,
+    /// The app release announced to every stream, once the release check found one.
+    pub release: Mutex<Option<semver::Version>>,
 }
 
 pub(crate) type State = Arc<Shared>;
@@ -144,6 +151,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Server> {
         store,
         hub: Hub::default(),
         sessions: Sessions::default(),
+        release: Mutex::new(None),
     });
     let mut tasks: JoinSet<&'static str> = JoinSet::new();
     macro_rules! spawn {
@@ -157,6 +165,9 @@ pub async fn start(opts: Options) -> anyhow::Result<Server> {
     }
     spawn!("rpc", rpc::serve(state.clone(), rpc_replier));
     spawn!("events", events::serve(state.clone(), events_replier));
+    if let Some(url) = opts.releases_url {
+        spawn!("release check", release::watch(state.clone(), url));
+    }
 
     let addr = ServerAddr {
         host: opts.public_host,

@@ -37,6 +37,18 @@ struct Sub {
     tx: mpsc::Sender<Frame>,
 }
 
+/// Queues `frame` on `sub`; `false` if the stream is to be dropped (queue full or closed).
+fn deliver(sub: &Sub, frame: &Frame) -> bool {
+    match sub.tx.try_send(Arc::clone(frame)) {
+        Ok(()) => true,
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            tracing::warn!("event queue full; dropping a subscription");
+            false
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => false,
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     next: u64,
@@ -111,18 +123,22 @@ impl Hub {
             let Some(subs) = inner.subs.get_mut(member) else {
                 continue;
             };
-            subs.retain(|s| match s.tx.try_send(Arc::clone(&frame)) {
-                Ok(()) => true,
-                Err(mpsc::error::TrySendError::Full(_)) => {
-                    tracing::warn!("event queue full; dropping a subscription");
-                    false
-                }
-                Err(mpsc::error::TrySendError::Closed(_)) => false,
-            });
+            subs.retain(|s| deliver(s, &frame));
             if subs.is_empty() {
                 inner.subs.remove(member);
             }
         }
+    }
+
+    /// Sends `event` to every stream of every member.
+    pub fn publish_all(&self, event: &Event) {
+        let Some(frame) = frame_of(event) else {
+            return;
+        };
+        self.lock().subs.retain(|_, subs| {
+            subs.retain(|s| deliver(s, &frame));
+            !subs.is_empty()
+        });
     }
 }
 

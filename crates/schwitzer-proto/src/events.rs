@@ -37,4 +37,9 @@ pub enum Event {
         room: RoomId,
         project: Project,
     },
+    /// The newest stable app release whose version is not above the server's own. Sent after
+    /// `Ready` when the server knows one, and to every stream whenever it changes.
+    Release {
+        version: String,
+    },
 }

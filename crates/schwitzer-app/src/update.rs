@@ -1,6 +1,6 @@
-//! Self-update from the GitHub releases: check for a newer release, download its archive (or
-//! AppImage) for this platform, verify it against the digest GitHub publishes, swap the program
-//! file in place and start the new program.
+//! Self-update to the release the app's servers announced: fetch that release from GitHub,
+//! download its archive (or AppImage) for this platform, verify it against the digest GitHub
+//! publishes, swap the program file in place and start the new program.
 //!
 //! Only builds with the `self-update` feature use it ([`ENABLED`]); the module is compiled and
 //! tested in every build.
@@ -21,8 +21,8 @@ pub const ENABLED: bool = cfg!(feature = "self-update");
 pub const CHECK_INTERVAL: Duration = Duration::from_secs(300);
 /// The version of this build.
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
-const LATEST_URL: &str = "https://api.github.com/repos/griasdi/schwitzer/releases/latest";
-/// Replaces LATEST_URL, for a local test feed.
+const RELEASES_URL: &str = "https://api.github.com/repos/griasdi/schwitzer/releases";
+/// Replaces RELEASES_URL, for a local test feed.
 const URL_ENV: &str = "SCHWITZER_UPDATE_URL";
 const MAX_RELEASE_JSON: u64 = 1 << 20;
 const MAX_ARCHIVE: u64 = 256 << 20;
@@ -106,6 +106,11 @@ pub struct Release {
     pub sha256: [u8; 32],
 }
 
+/// The version of this build, parsed.
+pub fn current() -> semver::Version {
+    CURRENT.parse().expect("CARGO_PKG_VERSION is semver")
+}
+
 /// Where the updater stands, as the settings page shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateState {
@@ -124,7 +129,7 @@ pub enum UpdateState {
 }
 
 #[derive(Deserialize)]
-struct Latest {
+struct GitHubRelease {
     tag_name: String,
     #[serde(default)]
     draft: bool,
@@ -150,16 +155,16 @@ pub fn asset_name(version: &semver::Version, platform: &str, package: Package) -
     format!("schwitzer-{version}-{platform}.{ext}")
 }
 
-/// The release in GitHub's "latest release" answer `json` when it is newer than `current` and
-/// a stable version; its asset for `platform` and `package` must be there with a sha256 digest.
-pub fn parse_latest(
+/// The release in GitHub's answer `json` for one release when it is newer than `current` and a
+/// stable version; its asset for `platform` and `package` must be there with a sha256 digest.
+pub fn parse_release(
     json: &[u8],
     current: &semver::Version,
     platform: &str,
     package: Package,
 ) -> Result<Option<Release>, String> {
-    let latest: Latest =
-        serde_json::from_slice(json).map_err(|e| format!("unreadable release list: {e}"))?;
+    let latest: GitHubRelease =
+        serde_json::from_slice(json).map_err(|e| format!("unreadable release: {e}"))?;
     if latest.draft || latest.prerelease {
         return Ok(None);
     }
@@ -193,12 +198,13 @@ pub fn parse_latest(
     }))
 }
 
-/// Asks GitHub for the latest release; `None` when there is nothing newer for this platform.
-pub async fn check(package: Package) -> Result<Option<Release>, String> {
+/// Asks GitHub for release `version`, which the servers announced; `None` when it is not newer
+/// than this build.
+pub async fn check(version: semver::Version, package: Package) -> Result<Option<Release>, String> {
     let Some(platform) = PLATFORM else {
         return Err("No release is built for this platform".into());
     };
-    blocking(move || fetch_latest(platform, package)).await
+    blocking(move || fetch_release(version, platform, package)).await
 }
 
 /// Downloads `release`, verifies it and puts it in place of `program`.
@@ -261,8 +267,13 @@ fn agent(timeout: Duration) -> ureq::Agent {
         .into()
 }
 
-fn fetch_latest(platform: &str, package: Package) -> Result<Option<Release>, String> {
-    let url = std::env::var(URL_ENV).unwrap_or_else(|_| LATEST_URL.to_owned());
+fn fetch_release(
+    version: semver::Version,
+    platform: &str,
+    package: Package,
+) -> Result<Option<Release>, String> {
+    let base = std::env::var(URL_ENV).unwrap_or_else(|_| RELEASES_URL.to_owned());
+    let url = format!("{base}/tags/v{version}");
     let response = agent(Duration::from_secs(30))
         .get(&url)
         .header("Accept", "application/vnd.github+json")
@@ -270,8 +281,9 @@ fn fetch_latest(platform: &str, package: Package) -> Result<Option<Release>, Str
         .call();
     let mut response = match response {
         Ok(response) => response,
-        // The repository has no release yet.
-        Err(ureq::Error::StatusCode(404)) => return Ok(None),
+        Err(ureq::Error::StatusCode(404)) => {
+            return Err(format!("release v{version} is not on GitHub"));
+        }
         Err(e) => return Err(format!("GitHub: {e}")),
     };
     let json = response
@@ -280,8 +292,7 @@ fn fetch_latest(platform: &str, package: Package) -> Result<Option<Release>, Str
         .limit(MAX_RELEASE_JSON)
         .read_to_vec()
         .map_err(|e| format!("GitHub: {e}"))?;
-    let current = CURRENT.parse().expect("CARGO_PKG_VERSION is semver");
-    parse_latest(&json, &current, platform, package)
+    parse_release(&json, &current(), platform, package)
 }
 
 fn download(release: &Release) -> Result<Vec<u8>, String> {
@@ -409,7 +420,7 @@ mod tests {
         s.parse().unwrap()
     }
 
-    fn latest(tag: &str, asset: &str, digest: Option<&str>) -> Vec<u8> {
+    fn release_json(tag: &str, asset: &str, digest: Option<&str>) -> Vec<u8> {
         serde_json::json!({
             "tag_name": tag,
             "draft": false,
@@ -425,12 +436,12 @@ mod tests {
 
     #[test]
     fn newer_release_is_found_with_its_archive() {
-        let json = latest(
+        let json = release_json(
             "v1.2.0",
             &asset_name(&v("1.2.0"), PLATFORM, Package::Archive),
             Some(DIGEST),
         );
-        let release = parse_latest(&json, &v("1.1.9"), PLATFORM, Package::Archive)
+        let release = parse_release(&json, &v("1.1.9"), PLATFORM, Package::Archive)
             .unwrap()
             .unwrap();
         assert_eq!(release.version, v("1.2.0"));
@@ -441,17 +452,17 @@ mod tests {
 
     #[test]
     fn same_or_older_release_is_no_update() {
-        let json = latest(
+        let json = release_json(
             "v1.2.0",
             &asset_name(&v("1.2.0"), PLATFORM, Package::Archive),
             Some(DIGEST),
         );
         assert_eq!(
-            parse_latest(&json, &v("1.2.0"), PLATFORM, Package::Archive),
+            parse_release(&json, &v("1.2.0"), PLATFORM, Package::Archive),
             Ok(None)
         );
         assert_eq!(
-            parse_latest(&json, &v("2.0.0"), PLATFORM, Package::Archive),
+            parse_release(&json, &v("2.0.0"), PLATFORM, Package::Archive),
             Ok(None)
         );
     }
@@ -461,29 +472,29 @@ mod tests {
         let name = asset_name(&v("1.0.0"), PLATFORM, Package::Archive);
         for flag in ["draft", "prerelease"] {
             let mut json: serde_json::Value =
-                serde_json::from_slice(&latest("v1.0.0", &name, Some(DIGEST))).unwrap();
+                serde_json::from_slice(&release_json("v1.0.0", &name, Some(DIGEST))).unwrap();
             json[flag] = true.into();
             let json = json.to_string();
             assert_eq!(
-                parse_latest(json.as_bytes(), &v("0.1.0"), PLATFORM, Package::Archive),
+                parse_release(json.as_bytes(), &v("0.1.0"), PLATFORM, Package::Archive),
                 Ok(None)
             );
         }
-        let rc = latest(
+        let rc = release_json(
             "v1.0.0-rc.1",
             &asset_name(&v("1.0.0-rc.1"), PLATFORM, Package::Archive),
             Some(DIGEST),
         );
         assert_eq!(
-            parse_latest(&rc, &v("0.1.0"), PLATFORM, Package::Archive),
+            parse_release(&rc, &v("0.1.0"), PLATFORM, Package::Archive),
             Ok(None)
         );
     }
 
     #[test]
     fn missing_archive_is_an_error_naming_it() {
-        let json = latest("v1.0.0", "schwitzer-1.0.0-other.tar.gz", Some(DIGEST));
-        let error = parse_latest(&json, &v("0.1.0"), PLATFORM, Package::Archive).unwrap_err();
+        let json = release_json("v1.0.0", "schwitzer-1.0.0-other.tar.gz", Some(DIGEST));
+        let error = parse_release(&json, &v("0.1.0"), PLATFORM, Package::Archive).unwrap_err();
         assert!(
             error.contains(&asset_name(&v("1.0.0"), PLATFORM, Package::Archive)),
             "{error}"
@@ -495,15 +506,15 @@ mod tests {
         let name = asset_name(&v("1.0.0"), PLATFORM, Package::Archive);
         let md5 = DIGEST.replace("sha256", "md5");
         for digest in [None, Some("sha256:abc"), Some(md5.as_str())] {
-            let json = latest("v1.0.0", &name, digest);
-            assert!(parse_latest(&json, &v("0.1.0"), PLATFORM, Package::Archive).is_err());
+            let json = release_json("v1.0.0", &name, digest);
+            assert!(parse_release(&json, &v("0.1.0"), PLATFORM, Package::Archive).is_err());
         }
     }
 
     #[test]
     fn tag_that_is_no_version_is_an_error() {
-        let json = latest("nightly", "x", Some(DIGEST));
-        assert!(parse_latest(&json, &v("0.1.0"), PLATFORM, Package::Archive).is_err());
+        let json = release_json("nightly", "x", Some(DIGEST));
+        assert!(parse_release(&json, &v("0.1.0"), PLATFORM, Package::Archive).is_err());
     }
 
     #[test]
@@ -520,7 +531,7 @@ mod tests {
         })
         .to_string();
         let found = |package| {
-            parse_latest(json.as_bytes(), &v("1.1.0"), PLATFORM, package)
+            parse_release(json.as_bytes(), &v("1.1.0"), PLATFORM, package)
                 .unwrap()
                 .unwrap()
                 .url
