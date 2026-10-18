@@ -9,6 +9,7 @@
 // lets the agent draft a proposal, ask the user, then send it with propose. /schwitzer idea
 // <text> notes an idea in a room right away (add_idea); /schwitzer propose offers the open
 // ideas to write up into a proposal. A bare /schwitzer offers a menu of the four.
+// omp-plugin/README.md describes what the plugin does.
 
 import { join } from "node:path";
 
