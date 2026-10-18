@@ -1,0 +1,58 @@
+# cargo-deny configuration, run as `cargo deny check` in the gate (AGENTS.md) and in CI.
+
+# Every feature: `remote` (iced_impeccable, headless control) is not shipped but built by
+# everyone who drives the app headless, so its crates get the same checks.
+[graph]
+all-features = true
+
+# https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
+[advisories]
+# Vulnerabilities fail for every crate in the graph. "Unmaintained" notices fail only for
+# direct dependencies, the ones Schwitzer can replace itself; deeper ones are for the
+# upstream crates to resolve.
+unmaintained = "workspace"
+
+# https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
+# The same list as crates/schwitzer-app/about.toml: licenses that let the app ship under
+# MIT OR Apache-2.0. GPL and LGPL are not allowed; a crate offering them among others
+# passes on its permissive option.
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "MIT-0",
+    "CC0-1.0",
+    "Unlicense",
+    "CDLA-Permissive-2.0",
+    "BlueOak-1.0.0",
+    "MPL-2.0",
+]
+
+# https://embarkstudios.github.io/cargo-deny/checks/sources/cfg.html
+# Crates come from crates.io and from the git repositories of the root `Cargo.toml`,
+# nowhere else; a new source is a decision, not a side effect.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# A git dependency names its commit (`rev`), never a branch that moves.
+required-git-spec = "rev"
+allow-git = [
+    # `weida` (`[workspace.dependencies]`), pinned to a rev: alpha, not on crates.io at this rev.
+    "https://github.com/tuco86/weida.git",
+    # `iced_impeccable`, the optional feature `remote` of schwitzer-app.
+    "https://github.com/tuco86/iced_impeccable.git",
+]
+
+# https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
+[bans]
+# Two versions of one crate are reported, not refused: iced and the crates around it move
+# at their own pace.
+multiple-versions = "warn"

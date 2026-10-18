@@ -6,6 +6,7 @@ This document explains how to build and test Schwitzer and how to commit changes
 
 - Stable Rust, at least the `rust-version` in `Cargo.toml` (1.91), with rustfmt and clippy.
 - A C compiler: `rusqlite` builds SQLite from source (`bundled`).
+- `cargo-deny` (`cargo install --locked cargo-deny`) for the dependency check.
 
 ## Build & run
 
@@ -29,6 +30,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy --workspace --all-targets --features schwitzer-app/remote -- -D warnings
 cargo test --workspace
+cargo deny check
 ```
 
 For UI changes, also click through the affected flow in Daylight and Night (DESIGN.md is the reference) at the default window size of 400×780.
@@ -129,3 +131,7 @@ This prints Markdown release notes, one section per category, oldest commit firs
 
 - Keep a PR to one topic. Multiple commits are fine as long as each one makes sense on its own.
 - If a PR is squash-merged, the `Changelog:` trailer must be kept in the final squash message, and the subject stays without a prefix.
+
+## License
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in Schwitzer by you, as defined in the Apache-2.0 license, shall be dual licensed under the MIT license and the Apache License 2.0 (`MIT OR Apache-2.0`), without any additional terms or conditions.

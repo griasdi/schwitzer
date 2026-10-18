@@ -26,9 +26,12 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy --workspace --all-targets --features schwitzer-app/remote -- -D warnings
 cargo test --workspace
+cargo deny check
 ```
 
 After the push, every change that touches code ends with `deploy/deploy.sh stkn` (see "Finishing a change"): the server on stkn.org always runs the latest `main`.
+
+`cargo deny check` (`deny.toml`) fetches the RustSec advisory database and checks the graph with every feature: it fails on every vulnerability, on an "unmaintained" notice only for a direct dependency, on a license outside the allow list, and on a source other than crates.io and the two git repositories listed there; a crate in two versions is a warning. An advisory is never silenced, a license never allowed and a source never added without the user's decision. Install it with `cargo install --locked cargo-deny`.
 
 A change to doc comments also runs `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`. A UI change is checked the way a user meets it: clicked through headless and screenshotted, not only compiled. `crates/schwitzer-client/tests/flow.rs` starts a real server on loopback UDP and restarts it on the same data dir; it needs no network beyond `127.0.0.1`.
 

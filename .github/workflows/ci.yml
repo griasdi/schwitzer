@@ -24,6 +24,11 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo clippy --workspace --all-targets --features schwitzer-app/remote -- -D warnings
       - run: cargo test --workspace
+  deny:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
   app:
     strategy:
       fail-fast: false
