@@ -192,19 +192,27 @@ pub fn member_hue(id: &MemberId) -> usize {
     usize::from(id.0[0] ^ id.0[31]) % 6
 }
 
-/// The sessions of `local` the room sees: those whose working directory lies in one of
-/// `repos`. A session that holds a claim of `me` on a task of the room (its latest such marker)
-/// is linked to that task.
+/// The sessions of `local` the room sees: those whose working directory lies in a repo linked
+/// to one of the room's projects; each names its projects, see `SessionInfo::projects`. A
+/// session that holds a claim of `me` on a task of the room (its latest such marker) is linked
+/// to that task.
 pub fn shared_sessions(
     local: &[LocalSession],
     room: &RoomState,
     me: MemberId,
-    repos: &[PathBuf],
+    repos: &[(u64, &[PathBuf])],
 ) -> Vec<SessionInfo> {
     let mut shared: Vec<SessionInfo> = local
         .iter()
-        .filter(|session| in_repos(&session.cwd, repos))
-        .map(|session| {
+        .filter_map(|session| {
+            let mut projects: Vec<u64> = repos
+                .iter()
+                .filter(|(_, paths)| in_repos(&session.cwd, paths))
+                .map(|(project, _)| *project)
+                .collect();
+            if projects.is_empty() {
+                return None;
+            }
             let task = session.markers.iter().rev().find_map(|marker| {
                 room.tasks.iter().find(|t| {
                     t.claim
@@ -212,7 +220,11 @@ pub fn shared_sessions(
                         .is_some_and(|c| &c.token == marker && c.member == me)
                 })
             });
-            SessionInfo {
+            if let Some(task) = task {
+                projects = vec![task.project];
+            }
+            projects.truncate(caps::SESSION_PROJECTS);
+            Some(SessionInfo {
                 id: session.id.clone(),
                 title: truncate(&session.title, caps::SESSION_TITLE),
                 project: session.project.clone(),
@@ -221,7 +233,8 @@ pub fn shared_sessions(
                 active_ms: session.active_ms,
                 tokens: session.tokens,
                 task: task.map(|t| t.number),
-            }
+                projects,
+            })
         })
         .collect();
     shared.sort_by(|a, b| a.id.cmp(&b.id));
@@ -537,18 +550,51 @@ mod tests {
             local("d", "/code/app-old", vec![first]),
             local("e", "/home/me", Vec::new()),
         ];
-        let shared = shared_sessions(&sessions, &state, member(1), &repos);
+        let shared = shared_sessions(&sessions, &state, member(1), &[(1, &repos[..])]);
         let pairs: Vec<(&str, Option<u64>)> =
             shared.iter().map(|s| (s.id.as_str(), s.task)).collect();
         // `stale` matches no claimed task, so the latest marker of "b" that matches is `second`.
         assert_eq!(pairs, [("a", None), ("b", Some(2)), ("c", Some(1))]);
         assert_eq!(shared[0].tokens, 30);
         // Another member's claim tokens in a local log link nothing, but the session is shared.
-        let other = shared_sessions(&sessions, &state, member(2), &repos);
+        let other = shared_sessions(&sessions, &state, member(2), &[(1, &repos[..])]);
         assert!(other.iter().all(|s| s.task.is_none()));
         assert_eq!(other.len(), 3);
         // A room without repos sees nothing.
         assert!(shared_sessions(&sessions, &state, member(1), &[]).is_empty());
+    }
+
+    #[test]
+    fn sessions_belong_to_the_projects_of_their_repos() {
+        let token = ClaimToken([4; 16]);
+        let mut linked = task(4, Stage::Ready, Some(claim(Work::Build, token)));
+        linked.project = 2;
+        let state = room(vec![linked]);
+        let first = [PathBuf::from("/code/app"), PathBuf::from("/code/shared")];
+        let second = [PathBuf::from("/code/web"), PathBuf::from("/code/shared")];
+        let repos = [(1, &first[..]), (2, &second[..])];
+        let sessions = [
+            local("a", "/code/app", Vec::new()),
+            local("s", "/code/shared", Vec::new()),
+            local("w", "/code/web/src", Vec::new()),
+            // Linked to a task of project 2, though its repo belongs to project 1 only.
+            local("t", "/code/app", vec![token]),
+            local("o", "/home/me", Vec::new()),
+        ];
+        let shared = shared_sessions(&sessions, &state, member(1), &repos);
+        let pairs: Vec<(&str, Vec<u64>)> = shared
+            .iter()
+            .map(|s| (s.id.as_str(), s.projects.clone()))
+            .collect();
+        assert_eq!(
+            pairs,
+            [
+                ("a", vec![1]),
+                ("s", vec![1, 2]),
+                ("t", vec![2]),
+                ("w", vec![2])
+            ]
+        );
     }
 
     #[test]

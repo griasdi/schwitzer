@@ -102,6 +102,9 @@ pub struct SessionInfo {
     pub active_ms: u64,
     pub tokens: u64,
     pub task: Option<u64>,
+    /// The room's projects the session belongs to, ascending: the project of its linked task,
+    /// else every project with a linked repo that holds its working directory.
+    pub projects: Vec<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

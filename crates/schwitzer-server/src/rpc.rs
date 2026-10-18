@@ -497,6 +497,15 @@ async fn publish_sessions(
             caps::SESSIONS_PER_PUBLISH
         )));
     }
+    if sessions
+        .iter()
+        .any(|s| s.projects.len() > caps::SESSION_PROJECTS)
+    {
+        return Err(ApiError::Invalid(format!(
+            "a session names more than {} projects",
+            caps::SESSION_PROJECTS
+        )));
+    }
     let sessions: Vec<SessionInfo> = sessions
         .into_iter()
         .map(|s| SessionInfo {

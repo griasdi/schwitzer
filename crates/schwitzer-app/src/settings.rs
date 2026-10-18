@@ -163,18 +163,19 @@ impl Settings {
             .map_or(&[], Vec::as_slice)
     }
 
-    /// The repos linked to any project of `room`, sorted and without duplicates.
-    pub fn room_repos(&self, room: &RoomId) -> Vec<PathBuf> {
+    /// The projects of `room` with linked repos, and those repos, ordered by project id.
+    pub fn room_project_repos(&self, room: &RoomId) -> Vec<(u64, &[PathBuf])> {
         let hex = room.to_hex();
-        let mut repos: Vec<PathBuf> = self
+        let mut linked: Vec<(u64, &[PathBuf])> = self
             .repos
             .iter()
-            .filter(|(key, _)| parse_repo_key(key).is_some_and(|(r, _)| r == hex))
-            .flat_map(|(_, paths)| paths.iter().cloned())
+            .filter_map(|(key, paths)| match parse_repo_key(key) {
+                Some((r, project)) if r == hex => Some((project, paths.as_slice())),
+                _ => None,
+            })
             .collect();
-        repos.sort();
-        repos.dedup();
-        repos
+        linked.sort_by_key(|(project, _)| *project);
+        linked
     }
 
     /// Writes `settings.toml` into `dir` through a temporary file and a rename.

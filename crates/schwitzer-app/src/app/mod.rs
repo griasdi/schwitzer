@@ -542,7 +542,7 @@ impl App {
                 Some(project) => column![
                     container(list::view(self, state, project)).height(Length::Fill),
                     widgets::hrule(),
-                    live::view(self, state),
+                    live::view(self, state, project.id),
                 ]
                 .into(),
             },
@@ -2322,7 +2322,7 @@ impl App {
         for (key, state) in &self.rooms {
             let Some(state) = state else { continue };
             let room = RoomId::of(&key.token);
-            let repos = self.settings.room_repos(&room);
+            let repos = self.settings.room_project_repos(&room);
             let sessions =
                 logic::shared_sessions(&self.local_sessions, state, self.client.member(), &repos);
             if self.published.get(&room) == Some(&sessions) {

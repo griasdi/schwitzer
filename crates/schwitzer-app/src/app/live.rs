@@ -1,4 +1,4 @@
-//! The live agent sessions of the room's members: whose they are, what they are called, which
+//! The live agent sessions of the open project: whose they are, what they are called, which
 //! task they work on, how long and how many tokens.
 
 use iced::widget::text::Wrapping;
@@ -17,13 +17,13 @@ const SLAB_HEIGHT: f32 = 60.0;
 /// The panel grows with its sessions up to this many, then scrolls.
 const MAX_VISIBLE: f32 = 3.0;
 
-pub fn view<'a>(app: &'a App, state: &'a RoomState) -> Element<'a, Message> {
+pub fn view<'a>(app: &'a App, state: &'a RoomState, project: u64) -> Element<'a, Message> {
     let mut rows = column![].spacing(SP_1);
     let mut count = 0;
     for (member, list) in &state.sessions {
         let owner = logic::member_name(&state.members, member);
         let hue = logic::member_hue(member);
-        for session in list {
+        for session in list.iter().filter(|s| s.projects.contains(&project)) {
             count += 1;
             rows = rows.push(session_row(app, owner.clone(), hue, session));
         }
