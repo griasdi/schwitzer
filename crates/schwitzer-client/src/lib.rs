@@ -80,7 +80,7 @@ pub enum ClientEvent {
     },
     /// A room has a new state.
     Room(Box<RoomState>),
-    /// The user is no longer in the room.
+    /// The room is no longer kept: the user left it, or it was forgotten on this machine.
     RoomRemoved(RoomId),
 }
 
@@ -299,15 +299,28 @@ impl Client {
         Ok(self.ensure_server(server))
     }
 
-    /// Forgets the room: its key and its state. Tells the application if anything changed.
-    pub(crate) fn forget_room(&self, room: RoomId) {
-        let key_gone = {
+    /// Forgets the room on this machine without telling its server: its key and its state.
+    /// The connection to its server stops when no other kept room lives there. Tells the
+    /// application if anything changed.
+    pub fn forget_room(&self, room: RoomId) {
+        let (key_gone, idle) = {
             let mut keys = lock(&self.0.keys);
-            let before = keys.len();
+            let server = keys
+                .iter()
+                .find(|key| RoomId::of(&key.token) == room)
+                .map(|key| key.server.clone());
             keys.retain(|key| RoomId::of(&key.token) != room);
-            keys.len() != before
+            let key_gone = server.is_some();
+            let idle = server.filter(|server| !keys.iter().any(|key| key.server == *server));
+            (key_gone, idle)
         };
         let state_gone = lock(&self.0.rooms).remove(&room).is_some();
+        if let Some(server) = idle {
+            let conn = lock(&self.0.servers).remove(&server);
+            if let Some(conn) = conn {
+                conn.stop();
+            }
+        }
         if key_gone || state_gone {
             self.emit(ClientEvent::RoomRemoved(room));
         }

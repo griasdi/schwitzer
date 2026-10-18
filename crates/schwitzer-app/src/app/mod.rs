@@ -92,6 +92,9 @@ pub enum Message {
     CopyKey,
     LeaveRoom,
     Left(Result<(), String>),
+    /// Forgets the selected room on this machine without asking its server, which does not
+    /// answer.
+    RemoveRoom,
     NameInput(String),
     SubmitName,
     /// Shows project `id` of the selected room.
@@ -413,19 +416,34 @@ impl App {
                 ]
                 .into(),
             },
-            (None, Some(_)) => list::empty(
-                Icon::Plug,
-                "Connecting…",
-                "The room shows up as soon as its server answers.",
-                widgets::icon_text_button(
-                    "empty-settings",
-                    Icon::Settings,
-                    Tone::Text,
-                    "Settings",
-                    Some(Message::OpenSettings),
-                    theme::button_secondary,
-                ),
-            ),
+            (None, Some(_)) => {
+                let (title, hint) = match self.selected_key() {
+                    Some(key) if self.selected_server_online() == Some(false) => (
+                        "Server not reachable",
+                        format!(
+                            "{}:{} does not answer. If it is gone for good, remove the room in Settings.",
+                            key.server.host, key.server.port
+                        ),
+                    ),
+                    _ => (
+                        "Connecting…",
+                        "The room shows up as soon as its server answers.".to_owned(),
+                    ),
+                };
+                list::empty(
+                    Icon::Plug,
+                    title,
+                    hint,
+                    widgets::icon_text_button(
+                        "empty-settings",
+                        Icon::Settings,
+                        Tone::Text,
+                        "Settings",
+                        Some(Message::OpenSettings),
+                        theme::button_secondary,
+                    ),
+                )
+            }
             (None, None) => list::empty(
                 Icon::Users,
                 "Welcome to Schwitzer",
@@ -722,6 +740,14 @@ impl App {
                 match result {
                     Ok(()) => self.sync_rooms(),
                     Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
+            Message::RemoveRoom => {
+                if let Some(room) = self.selected {
+                    self.client.forget_room(room);
+                    self.sync_rooms();
+                    self.notify("Room removed from this app");
                 }
                 Task::none()
             }

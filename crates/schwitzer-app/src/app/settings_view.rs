@@ -4,7 +4,7 @@
 
 use iced::widget::{Space, column, container, row, text};
 use iced::{Alignment, Element, Length};
-use schwitzer_proto::RoomId;
+use schwitzer_proto::{RoomId, RoomKey, RoomState};
 
 use super::icons::{Icon, Tone, icon};
 use super::logic;
@@ -19,7 +19,7 @@ use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let mut body = column![section(you(app)), section(projects_folders(app))].spacing(SP_4);
-    if app.selected_state().is_some() {
+    if app.selected_key().is_some() {
         body = body.push(section(this_room(app)));
     }
     if app.selected_project().is_some() {
@@ -110,9 +110,62 @@ fn projects_folders(app: &App) -> Element<'_, Message> {
     .into()
 }
 
+/// The room's name, or `Room <first 8 hex digits>` before its server sent it.
+fn room_label(key: &RoomKey, state: Option<&RoomState>) -> String {
+    state.map_or_else(
+        || format!("Room {}", &RoomId::of(&key.token).to_hex()[..8]),
+        |state| state.name.clone(),
+    )
+}
+
 fn this_room(app: &App) -> Element<'_, Message> {
-    let Some(state) = app.selected_state() else {
+    let Some(key) = app.selected_key() else {
         return Space::new().into();
+    };
+    let state = app.selected_state();
+    let online = app.servers.get(&key.server).is_some_and(|s| s.online);
+    let action = if online {
+        icon_text_button(
+            "leave-room",
+            Icon::Leave,
+            Tone::Danger,
+            "Leave",
+            Some(Message::LeaveRoom),
+            theme::button_danger,
+        )
+    } else {
+        icon_text_button(
+            "remove-room",
+            Icon::Trash,
+            Tone::Danger,
+            "Remove",
+            Some(Message::RemoveRoom),
+            theme::button_danger,
+        )
+    };
+    let head = row![
+        heading(room_label(key, state)).width(Length::Fill),
+        icon_text_button(
+            "settings-copy-key",
+            Icon::Copy,
+            Tone::Text,
+            "Copy key",
+            Some(Message::CopyKey),
+            theme::button_secondary,
+        ),
+        action,
+    ]
+    .spacing(SP_2)
+    .align_y(Alignment::Center);
+    let mut col = column![head].spacing(SP_3);
+    if !online {
+        col = col.push(muted(format!(
+            "{}:{} does not answer. Remove forgets the room on this machine only: the server keeps you as a member, and the key brings you back.",
+            key.server.host, key.server.port
+        )));
+    }
+    let Some(state) = state else {
+        return col.into();
     };
     let selected = app.selected_project().map(|p| p.id);
     let mut projects = column![].spacing(2);
@@ -145,50 +198,28 @@ fn this_room(app: &App) -> Element<'_, Message> {
         projects = projects.push(muted("No projects yet."));
     }
     let filled = !app.forms.new_project.trim().is_empty();
-    column![
-        row![
-            heading(&state.name).width(Length::Fill),
-            icon_text_button(
-                "settings-copy-key",
-                Icon::Copy,
-                Tone::Text,
-                "Copy key",
-                Some(Message::CopyKey),
-                theme::button_secondary,
-            ),
-            icon_text_button(
-                "leave-room",
-                Icon::Leave,
-                Tone::Danger,
-                "Leave",
-                Some(Message::LeaveRoom),
-                theme::button_danger,
-            ),
-        ]
-        .spacing(SP_2)
-        .align_y(Alignment::Center),
-        text("Projects").size(TS_14).font(MEDIUM),
-        projects,
-        row![
-            input(
-                "new-project-name",
-                "New project",
-                &app.forms.new_project,
-                Message::NewProjectName,
-                Message::CreateProject
-            ),
-            text_button(
-                "create-project",
-                "Create",
-                filled.then_some(Message::CreateProject),
-                theme::button_secondary
-            ),
-        ]
-        .spacing(SP_2)
-        .align_y(Alignment::Center),
-    ]
-    .spacing(SP_3)
-    .into()
+    col.push(text("Projects").size(TS_14).font(MEDIUM))
+        .push(projects)
+        .push(
+            row![
+                input(
+                    "new-project-name",
+                    "New project",
+                    &app.forms.new_project,
+                    Message::NewProjectName,
+                    Message::CreateProject
+                ),
+                text_button(
+                    "create-project",
+                    "Create",
+                    filled.then_some(Message::CreateProject),
+                    theme::button_secondary
+                ),
+            ]
+            .spacing(SP_2)
+            .align_y(Alignment::Center),
+        )
+        .into()
 }
 
 fn this_project(app: &App) -> Element<'_, Message> {
@@ -338,10 +369,7 @@ fn rooms(app: &App) -> Element<'_, Message> {
     for (key, state) in &app.rooms {
         let id = RoomId::of(&key.token);
         let online = app.servers.get(&key.server).map(|s| s.online);
-        let name = state.as_ref().map_or_else(
-            || format!("Room {}", &id.to_hex()[..8]),
-            |state| state.name.clone(),
-        );
+        let name = room_label(key, state.as_ref());
         let selected = app.selected == Some(id);
         let mut line = row![dot(online), text(name).size(TS_14).width(Length::Fill)]
             .spacing(SP_2)

@@ -437,3 +437,45 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
     b.shutdown();
     server.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forgotten_room_closes_its_server_connection() {
+    let data = TempDir::new().unwrap();
+    let listen: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let server = start_server(listen, &data).await;
+    let addr: ServerAddr = server.addr.clone();
+
+    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
+    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
+    let (mut rx_a, mut rx_b) = (a.subscribe(), b.subscribe());
+
+    let key = a.create_room(addr, "crew".into()).await.unwrap();
+    let room = RoomId::of(&key.token);
+    assert_eq!(b.join_room(key.clone()).await.unwrap(), room);
+    let alice_online = |online: bool| {
+        let alice = a.member();
+        move |s: &RoomState| {
+            s.members
+                .iter()
+                .any(|m| m.id == alice && m.online == online)
+        }
+    };
+    room_where(&mut rx_b, alice_online(true)).await;
+
+    // A forgets the room: no room is kept, and the server sees A's connection end while A
+    // stays a member.
+    a.forget_room(room);
+    assert!(a.rooms().is_empty());
+    let state = room_where(&mut rx_b, alice_online(false)).await;
+    assert!(has_member(&state, a.member()));
+
+    // The key brings A back on a fresh connection to the same server.
+    a.add_room(key.clone());
+    room_where(&mut rx_a, |s| s.id == room).await;
+    room_where(&mut rx_b, alice_online(true)).await;
+
+    a.shutdown();
+    b.shutdown();
+    server.shutdown().await;
+}
