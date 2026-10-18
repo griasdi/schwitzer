@@ -64,6 +64,8 @@ pub enum Message {
     Wsl(Vec<wsl::Distro>),
     Mcp(McpStatus),
     Noop,
+    /// A link in task text was clicked.
+    OpenLink(markdown::Uri),
     /// A call failed; the text goes into the banner.
     Failed(String),
     DismissBanner,
@@ -244,6 +246,50 @@ struct TaskDraft {
     body: text_editor::Content,
 }
 
+/// Markdown parsed from `src`; parsed again only when the text changes.
+#[derive(Debug, Default)]
+struct ParsedMarkdown {
+    src: String,
+    content: markdown::Content,
+}
+
+impl ParsedMarkdown {
+    fn sync(&mut self, src: &str) {
+        if src != self.src {
+            self.src = src.to_owned();
+            self.content = markdown::Content::parse(&self.src);
+        }
+    }
+
+    fn items(&self) -> &[markdown::Item] {
+        self.content.items()
+    }
+}
+
+/// The open task's details, plan and notes (in note order) as Markdown.
+#[derive(Debug, Default)]
+struct OpenMarkdown {
+    body: ParsedMarkdown,
+    plan: ParsedMarkdown,
+    notes: Vec<ParsedMarkdown>,
+}
+
+impl OpenMarkdown {
+    /// Follows `task`; no open task leaves everything empty.
+    fn sync(&mut self, task: Option<&RoomTask>) {
+        let (body, plan, notes) = task.map_or(("", "", &[][..]), |t| {
+            (t.body.as_str(), t.plan.as_str(), t.notes.as_slice())
+        });
+        self.body.sync(body);
+        self.plan.sync(plan);
+        self.notes.truncate(notes.len());
+        self.notes.resize_with(notes.len(), ParsedMarkdown::default);
+        for (md, note) in self.notes.iter_mut().zip(notes) {
+            md.sync(&note.text);
+        }
+    }
+}
+
 /// The element to focus or reveal once the restored page shows it.
 struct PendingFocus {
     focus: Option<&'static str>,
@@ -289,9 +335,8 @@ pub struct App {
     forms: Forms,
     task_draft: Option<TaskDraft>,
     plan_draft: Option<text_editor::Content>,
-    /// The plan of the open task as rendered, and the text it was parsed from.
-    plan_md: markdown::Content,
-    plan_src: String,
+    /// Details, plan and notes of the open task, parsed as Markdown.
+    open_md: OpenMarkdown,
     banner: Option<String>,
     notice: Option<Notice>,
     local_sessions: Vec<LocalSession>,
@@ -401,8 +446,7 @@ impl App {
             folder_dialog: false,
             task_draft: None,
             plan_draft: None,
-            plan_md: markdown::Content::new(),
-            plan_src: String::new(),
+            open_md: OpenMarkdown::default(),
             banner: (!notices.is_empty()).then(|| notices.join("\n")),
             notice: None,
             local_sessions: Vec::new(),
@@ -665,7 +709,7 @@ impl App {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
-        self.refresh_plan();
+        self.refresh_markdown();
         task
     }
 
@@ -710,6 +754,10 @@ impl App {
                 Task::none()
             }
             Message::Noop => Task::none(),
+            Message::OpenLink(url) => {
+                self.open_link(&url);
+                Task::none()
+            }
             Message::Failed(e) => {
                 self.banner = Some(e);
                 Task::none()
@@ -2215,6 +2263,24 @@ impl App {
         Task::batch(tasks)
     }
 
+    /// Opens a web link from task text in the default browser. Other links are refused:
+    /// the text comes from other members and their agents. A headless instance opens none.
+    fn open_link(&mut self, url: &str) {
+        if !logic::is_web_link(url) {
+            self.notify("Only http and https links open.");
+            return;
+        }
+        #[cfg(feature = "remote")]
+        if iced_impeccable::is_headless() {
+            tracing::info!("headless: link not opened: {url}");
+            self.notify("Link not opened (headless).");
+            return;
+        }
+        if let Err(e) = open::that_detached(url) {
+            self.notify(&format!("Cannot open link: {e}"));
+        }
+    }
+
     fn notify(&mut self, text: &str) {
         self.notice = Some(Notice {
             text: text.to_owned(),
@@ -2238,13 +2304,11 @@ impl App {
         }
     }
 
-    /// Re-parses the plan of the open task when its text changed.
-    fn refresh_plan(&mut self) {
-        let plan = self.open().map_or("", |(_, task)| task.plan.as_str());
-        if plan != self.plan_src {
-            self.plan_src = plan.to_owned();
-            self.plan_md = markdown::Content::parse(&self.plan_src);
-        }
+    /// Re-parses the open task's details, plan and notes where their text changed.
+    fn refresh_markdown(&mut self) {
+        let mut md = std::mem::take(&mut self.open_md);
+        md.sync(self.open().map(|(_, task)| task));
+        self.open_md = md;
     }
 
     // ---- publishing -----------------------------------------------------------------------

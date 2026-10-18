@@ -751,8 +751,8 @@ pub fn scroll(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
     style
 }
 
-/// Plans in the open task: body size, the UI face, headings one step above the body.
-pub fn plan_markdown(theme: &Theme) -> markdown::Settings {
+/// Markdown in the open task (details, plan, notes): body size, the UI face, headings one step above the body.
+pub fn task_markdown(theme: &Theme) -> markdown::Settings {
     let t = tokens(theme);
     let mut style = markdown::Style::from_palette(theme.palette());
     style.font = REGULAR;

@@ -261,6 +261,15 @@ pub fn truncate(text: &str, max: usize) -> String {
     text[..end].to_owned()
 }
 
+/// Whether `url` is an http or https link with something after the scheme: the only
+/// links a click in task text opens.
+pub fn is_web_link(url: &str) -> bool {
+    url.split_once("://").is_some_and(|(scheme, rest)| {
+        (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+            && !rest.is_empty()
+    })
+}
+
 /// The break opportunity [`breakable_path`] puts after a separator: a zero-width space, which
 /// allows a line break after it and none before it.
 const PATH_BREAK: char = '\u{200B}';
@@ -324,6 +333,22 @@ mod tests {
 
     fn member(byte: u8) -> MemberId {
         MemberId([byte; 32])
+    }
+
+    #[test]
+    fn only_web_links_open() {
+        assert!(is_web_link("https://example.org/a"));
+        assert!(is_web_link("HTTP://example.org"));
+        for url in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "mailto:a@b.c",
+            "https://",
+            "docs/plan.md",
+            "",
+        ] {
+            assert!(!is_web_link(url), "{url}");
+        }
     }
 
     fn task(number: u64, stage: Stage, claim: Option<Claim>) -> Task {

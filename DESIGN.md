@@ -359,7 +359,7 @@ Six hues, picked per member by a fixed hash, the same on every machine. Day: lig
 **Character:** Figtree is a friendly geometric sans with slightly rounded terminals, the right register for a tool that sits beside the editor all day. Hierarchy comes from weight and from three sizes, not from many faces or tracking (iced has no letter spacing; all tracking is normal).
 
 ### Hierarchy
-- **Title** (600, 20px, 1.3): page titles ("Settings"); markdown `h1` in plans.
+- **Title** (600, 20px, 1.3): page titles ("Settings"); markdown `h1` in task details, plans and notes.
 - **Heading** (600, 14px, 1.3): a block heading inside a page section or the open task ("Plan", "Priority", "Notes", "Your name"); the room switcher.
 - **Body** (400, 14px, 1.3): task details, inputs, session titles, plan text.
 - **Body Medium** (500, 14px, 1.3): task titles on slabs and in the head of the open task, button labels.
@@ -370,7 +370,7 @@ Six hues, picked per member by a fixed hash, the same on every machine. Day: lig
 Line height is iced's default relative 1.3 everywhere; no override.
 
 ### Named Rules
-**The Three Sizes Rule.** 12 for captions, tags and counters; 14 for anything read as content; 20 for titles. Plan markdown steps `h2` 17 and `h3` 15 between them; nothing else invents a size.
+**The Three Sizes Rule.** 12 for captions, tags and counters; 14 for anything read as content; 20 for titles. Task markdown steps `h2` 17 and `h3` 15 between them; nothing else invents a size.
 
 **The Weight Does the Work Rule.** Emphasis is a weight step (400, 500, 600, 700), never a size jump, an underline or tracking.
 

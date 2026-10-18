@@ -205,7 +205,12 @@ fn details<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
             .into(),
         );
     }
-    (!task.body.is_empty()).then(|| text(&task.body).size(TS_14).into())
+    (!task.body.is_empty()).then(|| rich(app, &app.open_md.body))
+}
+
+/// Task text as Markdown; a click on a link opens it.
+fn rich<'a>(app: &'a App, md: &'a super::ParsedMarkdown) -> Element<'a, Message> {
+    markdown::view(md.items(), theme::task_markdown(&app.theme)).map(Message::OpenLink)
 }
 
 /// Who proposed it and who works on it.
@@ -371,11 +376,7 @@ fn plan<'a>(app: &'a App, task: &'a Task, editable: bool) -> Element<'a, Message
             .into();
     }
     if ready {
-        // Links in a plan are not followed.
-        col = col.push(
-            markdown::view(app.plan_md.items(), theme::plan_markdown(&app.theme))
-                .map(|_: markdown::Uri| Message::Noop),
-        );
+        col = col.push(rich(app, &app.open_md.plan));
     } else {
         col = col.push(muted(
             "No plan yet. Once the task is accepted, an agent claims it and writes one.",
@@ -445,7 +446,7 @@ fn notes<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, 
             "No notes yet. Agents leave one when they finish or stop.",
         ));
     }
-    for note in &task.notes {
+    for (i, note) in task.notes.iter().enumerate() {
         let mut who = row![member_tag(
             logic::member_name(&state.members, &note.author),
             logic::member_hue(&note.author)
@@ -463,7 +464,11 @@ fn notes<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, 
                 "{} ago",
                 logic::ago(app.now_ms.saturating_sub(note.at_ms))
             )));
-        col = col.push(column![who, text(&note.text).size(TS_14)].spacing(SP_1));
+        let body = match app.open_md.notes.get(i) {
+            Some(md) => rich(app, md),
+            None => text(&note.text).size(TS_14).into(),
+        };
+        col = col.push(column![who, body].spacing(SP_1));
     }
     let entered = !app.forms.note.trim().is_empty();
     col.push(
