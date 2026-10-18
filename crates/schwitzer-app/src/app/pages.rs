@@ -1,4 +1,4 @@
-//! Full-window pages with a back button: Settings.
+//! Full-window pages with a back button: Settings, Licenses.
 
 use iced::widget::{column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
@@ -10,6 +10,10 @@ use crate::theme::{self, SEMIBOLD, SP_1, SP_2, SP_3, TS_20};
 
 /// The widest the body of a page grows in a wide window.
 const MAX_WIDTH: f32 = 560.0;
+
+/// The widget id of a page's scrolling body. The pages share one, and iced keeps its offset
+/// from page to page, so a page that should not open where the last one was scrolled snaps it.
+pub const BODY_ID: &str = "page-body";
 
 /// A page: header bar with back button and title, scrolling body, optional footer bar.
 pub fn frame<'a>(
@@ -46,7 +50,8 @@ pub fn frame<'a>(
         )
         .height(Length::Fill)
         .spacing(SP_1)
-        .style(theme::scroll),
+        .style(theme::scroll)
+        .id(BODY_ID),
     ];
     if let Some(footer) = footer {
         col = col.push(hrule()).push(

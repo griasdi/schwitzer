@@ -7,6 +7,7 @@
     windows_subsystem = "windows"
 )]
 
+mod about;
 mod app;
 mod brand;
 mod bridge;

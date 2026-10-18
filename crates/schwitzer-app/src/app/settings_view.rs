@@ -1,6 +1,6 @@
 //! The settings page: your name, the projects folders, the selected room and its projects, the
-//! selected project and its linked repos, all rooms (switch, create, join), the omp connection
-//! and, in release builds, the updates, each on its own slab.
+//! selected project and its linked repos, all rooms (switch, create, join), the omp connection,
+//! in release builds the updates, and the about block with the licenses, each on its own slab.
 
 use iced::widget::{Space, column, container, row, text};
 use iced::{Alignment, Element, Length};
@@ -13,6 +13,7 @@ use super::widgets::{
     dot, heading, icon_button, icon_text_button, id_button, input, muted, path_text, text_button,
 };
 use super::{App, FolderFor, Message, tilde};
+use crate::about;
 use crate::mcp::McpStatus;
 use crate::omp_plugin::PluginState;
 use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
@@ -31,6 +32,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if update::ENABLED {
         body = body.push(section(updates(app)));
     }
+    body = body.push(section(about_block()));
     frame("settings-page", "Settings", body.into(), None)
 }
 
@@ -616,11 +618,7 @@ fn updates(app: &App) -> Element<'_, Message> {
         ),
     };
     column![
-        row![
-            heading("Updates").width(Length::Fill),
-            muted(format!("Schwitzer {}", update::CURRENT)),
-        ]
-        .align_y(Alignment::Center),
+        heading("Updates"),
         row![text(status).size(TS_14).width(Length::Fill), button]
             .spacing(SP_2)
             .align_y(Alignment::Center),
@@ -642,6 +640,31 @@ fn updates(app: &App) -> Element<'_, Message> {
             "Installs the newest release your servers announce, or GitHub's latest one when no \
              server is reachable, and looks again every 5 minutes. After a restart you are back \
              where you were, unsaved text included."
+        ),
+    ]
+    .spacing(SP_3)
+    .into()
+}
+
+fn about_block<'a>() -> Element<'a, Message> {
+    column![
+        row![
+            heading("About").width(Length::Fill),
+            muted(format!("Schwitzer {}", update::CURRENT)),
+        ]
+        .align_y(Alignment::Center),
+        text("Free software under the MIT License or the Apache License 2.0, at your option.")
+            .size(TS_14),
+        muted(format!(
+            "{}. Built on {} open source components, each under its own license.",
+            about::COPYRIGHT,
+            about::component_count()
+        )),
+        text_button(
+            "licenses-open",
+            "Licenses",
+            Some(Message::OpenLicenses),
+            theme::button_secondary,
         ),
     ]
     .spacing(SP_3)

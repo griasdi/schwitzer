@@ -2,6 +2,7 @@
 
 mod chrome;
 mod icons;
+mod licenses_view;
 mod list;
 mod live;
 pub mod logic;
@@ -78,6 +79,10 @@ pub enum Message {
         idea: bool,
     },
     OpenSettings,
+    /// Opens the Licenses page from the About section of the settings.
+    OpenLicenses,
+    /// Unfolds license `i` of `about::entries()` on the Licenses page, or folds it.
+    ToggleLicense(usize),
     /// Opens task `n` in place in the list and scrolls it into view (the `#n` links in
     /// sessions).
     OpenTask(u64),
@@ -199,6 +204,8 @@ struct ServerStatus {
 enum Page {
     Main,
     Settings,
+    /// Schwitzer's license and the open source licenses, opened from Settings.
+    Licenses,
 }
 
 /// The one element open in place in the task list.
@@ -323,6 +330,8 @@ pub struct App {
     /// The subfolders of the projects folder, for suggestions; read outside `view`.
     project_dirs: Vec<PathBuf>,
     page: Page,
+    /// The unfolded entry of the Licenses page.
+    license_open: Option<usize>,
     /// The task or draft open in place in the list.
     expanded: Option<Expanded>,
     /// Folded groups of the list.
@@ -443,6 +452,7 @@ impl App {
             selected,
             chosen_projects: HashMap::new(),
             page: Page::Main,
+            license_open: None,
             expanded: None,
             collapsed: HashSet::from([Group::Closed]),
             sessions_open: true,
@@ -533,6 +543,7 @@ impl App {
                 main.push(self.main()).into()
             }
             Page::Settings => settings_view::view(self),
+            Page::Licenses => licenses_view::view(self),
         };
         container(
             page.push(container(body).height(Length::Fill))
@@ -870,6 +881,15 @@ impl App {
                 self.sync_project_form();
                 Task::none()
             }
+            Message::OpenLicenses => {
+                self.page = Page::Licenses;
+                self.license_open = None;
+                operation::snap_to(pages::BODY_ID, operation::RelativeOffset::START)
+            }
+            Message::ToggleLicense(i) => {
+                self.license_open = (self.license_open != Some(i)).then_some(i);
+                Task::none()
+            }
             Message::OpenTask(number) => {
                 let Some((room, project, group)) = self.selected_state().and_then(|s| {
                     let task = s.tasks.iter().find(|t| t.number == number)?;
@@ -901,6 +921,10 @@ impl App {
             Message::Back => {
                 if self.expanded.take().is_some() {
                     self.reset_drafts();
+                } else if self.page == Page::Licenses {
+                    // Back to the About block, the last one on Settings.
+                    self.page = Page::Settings;
+                    return operation::snap_to_end(pages::BODY_ID);
                 } else if self.page != Page::Main {
                     self.page = Page::Main;
                     self.reset_drafts();

@@ -9,6 +9,11 @@ license.workspace = true
 name = "schwitzer"
 path = "src/main.rs"
 
+# The licenses example carries the test that the committed listing matches Cargo.lock.
+[[example]]
+name = "licenses"
+test = true
+
 [features]
 # Headless remote control (iced_impeccable): `schwitzer --headless --control <sock>`.
 remote = ["dep:iced_impeccable"]
