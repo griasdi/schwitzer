@@ -34,10 +34,11 @@ pub struct Settings {
     /// omp sessions in them are shared with the project's room.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub repos: BTreeMap<String, Vec<PathBuf>>,
-    /// Where the member keeps repos; subfolders whose name matches a project are suggested for
-    /// linking.
+    /// The folders whose subfolders are matched against project names when a repo is linked.
+    /// `None` until the app first starts with this setting; it then enters the default folders
+    /// that exist (see [`default_projects_dirs`]). `Some(vec![])` means the member removed them all.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub projects_dir: Option<PathBuf>,
+    pub projects_dirs: Option<Vec<PathBuf>>,
 }
 
 impl Default for Settings {
@@ -50,9 +51,18 @@ impl Default for Settings {
             rooms: Vec::new(),
             auto_update_plugins: true,
             repos: BTreeMap::new(),
-            projects_dir: None,
+            projects_dirs: None,
         }
     }
+}
+
+/// The folders `code`, `projects` and `work` under `home` that exist, in that order.
+pub fn default_projects_dirs(home: &Path) -> Vec<PathBuf> {
+    ["code", "projects", "work"]
+        .into_iter()
+        .map(|name| home.join(name))
+        .filter(|dir| dir.is_dir())
+        .collect()
 }
 
 impl Settings {
@@ -230,11 +240,23 @@ mod tests {
                 format!("{}/1", "ab".repeat(32)),
                 vec![PathBuf::from("/code/x")],
             )]),
-            projects_dir: Some(PathBuf::from("/code")),
+            projects_dirs: Some(vec![PathBuf::from("/code"), PathBuf::from("/work")]),
         };
         settings.save(dir.path()).unwrap();
         assert!(!dir.path().join("settings.toml.tmp").exists());
         assert_eq!(Settings::load(dir.path()), (settings, None));
+    }
+
+    #[test]
+    fn default_projects_dirs_are_the_existing_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("code")).unwrap();
+        std::fs::create_dir(dir.path().join("work")).unwrap();
+        std::fs::write(dir.path().join("projects"), "").unwrap();
+        assert_eq!(
+            default_projects_dirs(dir.path()),
+            [dir.path().join("code"), dir.path().join("work")]
+        );
     }
 
     #[test]

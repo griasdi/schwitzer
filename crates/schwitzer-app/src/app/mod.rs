@@ -108,7 +108,11 @@ pub enum Message {
     MoveTask(u64),
     TaskMoved(Result<Response, String>),
     ProjectsDirInput(String),
-    SaveProjectsDir,
+    AddProjectsDir,
+    /// Index into the projects folders.
+    RemoveProjectsDir(usize),
+    /// Opens Settings with the focus on the projects folder input.
+    OpenProjectsDirs,
     RepoInput(String),
     AddRepo,
     /// Links a suggested folder to the selected project.
@@ -191,7 +195,7 @@ struct Forms {
     new_project: String,
     /// The rename input of the selected project.
     project_name: String,
-    projects_dir: String,
+    new_projects_dir: String,
     proposal_title: String,
     proposal_body: text_editor::Content,
     note: String,
@@ -256,7 +260,16 @@ impl App {
         if let Err(e) = std::fs::create_dir_all(&data_dir) {
             fatal(&format!("cannot create {}: {e}", data_dir.display()));
         }
-        let (settings, problem) = Settings::load(&data_dir);
+        let (mut settings, problem) = Settings::load(&data_dir);
+        let unreadable = problem.is_some();
+        let saved_before = settings.clone();
+        if settings.projects_dirs.is_none() {
+            settings.projects_dirs = Some(
+                directories::BaseDirs::new()
+                    .map(|dirs| settings::default_projects_dirs(dirs.home_dir()))
+                    .unwrap_or_default(),
+            );
+        }
         let client = Client::start(&settings::identity_dir(&data_dir), settings.name.clone())
             .unwrap_or_else(|e| fatal(&format!("cannot start the network client: {e}")));
 
@@ -289,21 +302,19 @@ impl App {
                 repo: String::new(),
                 new_project: String::new(),
                 project_name: String::new(),
-                projects_dir: settings
-                    .projects_dir
-                    .as_ref()
-                    .map(|dir| dir.display().to_string())
-                    .unwrap_or_default(),
+                new_projects_dir: String::new(),
                 proposal_title: String::new(),
                 proposal_body: text_editor::Content::new(),
                 note: String::new(),
             },
-            project_dirs: settings
-                .projects_dir
-                .as_deref()
-                .map(subdirs)
-                .unwrap_or_default(),
-            saved: settings.clone(),
+            project_dirs: Vec::new(),
+            // An unreadable file is never overwritten at start; otherwise the first-start
+            // projects folders are saved below.
+            saved: if unreadable {
+                settings.clone()
+            } else {
+                saved_before
+            },
             settings,
             theme: theme::for_mode(iced::theme::Mode::Dark),
             client,
@@ -332,9 +343,11 @@ impl App {
             plugins_checked_ms: 0,
             now_ms: now_ms(),
         };
+        app.read_project_dirs();
         // Finds out-of-date plugins; with auto-update on, this refreshes them after an app
         // update or a new MCP port.
         app.check_plugins();
+        app.save_settings();
         (app, iced::system::theme().map(Message::SystemMode))
     }
 
@@ -459,7 +472,7 @@ impl App {
     }
 
     /// The selected project has no repo on this machine yet: link one, from the suggestions
-    /// out of the projects folder or by path.
+    /// out of the projects folders or by path.
     fn link_view<'a>(&'a self, project: &'a Project) -> Element<'a, Message> {
         let suggested =
             logic::suggested_repos(&project.name, &self.project_dirs, self.project_repos());
@@ -506,11 +519,26 @@ impl App {
             .spacing(SP_2)
             .align_y(iced::Alignment::Center),
         );
-        if self.settings.projects_dir.is_none() {
-            col = col.push(widgets::muted(
-                "Set a projects folder in Settings to get matching repos suggested.",
-            ));
-        }
+        let searched = self.settings.projects_dirs.as_deref().unwrap_or_default();
+        let hint = if searched.is_empty() {
+            "No projects folder yet. Add one to get matching repos suggested.".to_owned()
+        } else {
+            let names: Vec<String> = searched.iter().map(|dir| tilde(dir)).collect();
+            format!("Searched in {}.", names.join(", "))
+        };
+        col = col.push(
+            iced::widget::row![
+                widgets::muted(hint).width(Length::Fill),
+                widgets::text_button(
+                    "change-projects-dirs",
+                    "Change",
+                    Some(Message::OpenProjectsDirs),
+                    theme::button_ghost,
+                ),
+            ]
+            .spacing(SP_2)
+            .align_y(iced::Alignment::Center),
+        );
         list::empty(
             Icon::FolderPlus,
             format!("Link a repo to {}", project.name),
@@ -762,16 +790,17 @@ impl App {
                 self.expanded = None;
                 self.reset_drafts();
                 self.sync_project_form();
+                // A repo cloned a moment ago shows as soon as its project is opened.
+                self.read_project_dirs();
                 Task::none()
             }
             Message::OpenNewProject => {
-                if self.page != Page::Settings {
-                    self.reset_drafts();
-                }
-                self.expanded = None;
-                self.page = Page::Settings;
-                self.sync_project_form();
+                self.open_settings();
                 operation::focus("new-project-name")
+            }
+            Message::OpenProjectsDirs => {
+                self.open_settings();
+                operation::focus("projects-dir-input")
             }
             Message::NewProjectName(s) => {
                 self.forms.new_project = s;
@@ -798,6 +827,7 @@ impl App {
                             self.reset_drafts();
                         }
                         self.sync_project_form();
+                        self.read_project_dirs();
                         self.notify("Project created");
                     }
                     Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
@@ -870,26 +900,44 @@ impl App {
                 Task::none()
             }
             Message::ProjectsDirInput(s) => {
-                self.forms.projects_dir = s;
+                self.forms.new_projects_dir = s;
                 Task::none()
             }
-            Message::SaveProjectsDir => {
-                let input = self.forms.projects_dir.trim();
+            Message::AddProjectsDir => {
+                let input = self.forms.new_projects_dir.trim();
                 if input.is_empty() {
-                    self.settings.projects_dir = None;
-                } else {
-                    let path = expand_home(input);
-                    if !path.is_absolute() || !path.is_dir() {
-                        self.banner =
-                            Some(format!("Not a folder on this machine: {}", path.display()));
-                        return Task::none();
-                    }
-                    self.forms.projects_dir = path.display().to_string();
-                    self.settings.projects_dir = Some(path);
+                    return Task::none();
                 }
+                let path = expand_home(input);
+                if !path.is_absolute() || !path.is_dir() {
+                    self.banner = Some(format!("Not a folder on this machine: {}", path.display()));
+                    return Task::none();
+                }
+                self.forms.new_projects_dir.clear();
+                let dirs = self.settings.projects_dirs.get_or_insert_with(Vec::new);
+                if dirs.contains(&path) {
+                    return Task::none();
+                }
+                dirs.push(path);
                 self.save_settings();
                 self.read_project_dirs();
-                self.notify("Projects folder saved");
+                self.notify("Projects folder added");
+                Task::none()
+            }
+            Message::RemoveProjectsDir(index) => {
+                // An emptied list stays `Some`, so the defaults are not entered again.
+                let Some(dirs) = self
+                    .settings
+                    .projects_dirs
+                    .as_mut()
+                    .filter(|dirs| index < dirs.len())
+                else {
+                    return Task::none();
+                };
+                dirs.remove(index);
+                self.save_settings();
+                self.read_project_dirs();
+                self.notify("Projects folder removed");
                 Task::none()
             }
 
@@ -1126,14 +1174,28 @@ impl App {
             .unwrap_or_default();
     }
 
-    /// Reads the subfolders of the projects folder.
+    /// Opens Settings, keeping drafts when it is open already.
+    fn open_settings(&mut self) {
+        if self.page != Page::Settings {
+            self.reset_drafts();
+        }
+        self.expanded = None;
+        self.page = Page::Settings;
+        self.sync_project_form();
+    }
+
+    /// Reads the subfolders of the projects folders.
     fn read_project_dirs(&mut self) {
-        self.project_dirs = self
+        let mut dirs: Vec<PathBuf> = self
             .settings
-            .projects_dir
-            .as_deref()
-            .map(subdirs)
-            .unwrap_or_default();
+            .projects_dirs
+            .iter()
+            .flatten()
+            .flat_map(|root| subdirs(root))
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        self.project_dirs = dirs;
     }
 
     /// The selected room and the open task.
@@ -1787,6 +1849,20 @@ fn expand_home(path: &str) -> PathBuf {
         Some(rest) => directories::BaseDirs::new()
             .map_or_else(|| PathBuf::from(path), |dirs| dirs.home_dir().join(rest)),
         None => Path::new(path).to_path_buf(),
+    }
+}
+
+/// `path` with the home directory shown as `~`.
+fn tilde(path: &Path) -> String {
+    let rest = directories::BaseDirs::new().and_then(|dirs| {
+        path.strip_prefix(dirs.home_dir())
+            .ok()
+            .map(Path::to_path_buf)
+    });
+    match rest {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
     }
 }
 

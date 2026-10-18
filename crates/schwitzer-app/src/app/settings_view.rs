@@ -1,4 +1,4 @@
-//! The settings page: your name, the projects folder, the selected room and its projects, the
+//! The settings page: your name, the projects folders, the selected room and its projects, the
 //! selected project and its linked repos, all rooms (switch, create, join) and the omp
 //! connection, each on its own slab.
 
@@ -12,13 +12,13 @@ use super::pages::{frame, section};
 use super::widgets::{
     dot, heading, icon_button, icon_text_button, id_button, input, muted, text_button,
 };
-use super::{App, Message};
+use super::{App, Message, tilde};
 use crate::mcp::McpStatus;
 use crate::omp_plugin::PluginState;
 use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let mut body = column![section(you(app)), section(projects_folder(app))].spacing(SP_4);
+    let mut body = column![section(you(app)), section(projects_folders(app))].spacing(SP_4);
     if app.selected_state().is_some() {
         body = body.push(section(this_room(app)));
     }
@@ -56,34 +56,55 @@ fn you(app: &App) -> Element<'_, Message> {
     .into()
 }
 
-fn projects_folder(app: &App) -> Element<'_, Message> {
-    let saved = app
-        .settings
-        .projects_dir
-        .as_ref()
-        .map(|dir| dir.display().to_string())
-        .unwrap_or_default();
-    let changed = app.forms.projects_dir.trim() != saved;
+fn projects_folders(app: &App) -> Element<'_, Message> {
+    let folders = app.settings.projects_dirs.as_deref().unwrap_or_default();
+    let mut rows = column![].spacing(2);
+    for (index, path) in folders.iter().enumerate() {
+        rows = rows.push(
+            row![
+                icon(Icon::Folder, 16.0, Tone::Muted),
+                text(tilde(path)).size(TS_14).width(Length::Fill),
+                icon_button(
+                    format!("projects-dir-remove-{index}"),
+                    Icon::Trash,
+                    Tone::Muted,
+                    "Stop searching this folder",
+                    Some(Message::RemoveProjectsDir(index)),
+                    theme::button_ghost,
+                ),
+            ]
+            .spacing(SP_2)
+            .align_y(Alignment::Center),
+        );
+    }
+    if folders.is_empty() {
+        rows = rows.push(muted("No projects folder."));
+    }
+    let filled = !app.forms.new_projects_dir.trim().is_empty();
     column![
-        heading("Projects folder"),
+        heading("Projects folders"),
+        rows,
         row![
             input(
                 "projects-dir-input",
                 "~/code",
-                &app.forms.projects_dir,
+                &app.forms.new_projects_dir,
                 Message::ProjectsDirInput,
-                Message::SaveProjectsDir
+                Message::AddProjectsDir
             ),
             text_button(
-                "save-projects-dir",
-                "Save",
-                changed.then_some(Message::SaveProjectsDir),
+                "projects-dir-add",
+                "Add",
+                filled.then_some(Message::AddProjectsDir),
                 theme::button_secondary
             ),
         ]
         .spacing(SP_2)
         .align_y(Alignment::Center),
-        muted("Folders in it whose name matches a project are suggested when you link a repo."),
+        muted(
+            "Repos in these folders whose name matches a project, or contains it, are suggested \
+             when you link a repo."
+        ),
     ]
     .spacing(SP_2)
     .into()

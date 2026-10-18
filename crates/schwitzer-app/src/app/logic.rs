@@ -88,8 +88,14 @@ pub fn tasks_in(state: &RoomState, project: u64, group: Group) -> Vec<&Task> {
     tasks
 }
 
-/// The folders of `dirs` whose name matches `project` loosely (letters and digits only,
-/// ignoring case), without those already `linked`.
+/// At most this many folders are suggested for one project.
+pub const MAX_SUGGESTIONS: usize = 8;
+/// A name shorter than this (letters and digits) never matches as part of another.
+const MIN_PART: usize = 3;
+
+/// The folders of `dirs` whose name matches `project` (letters and digits only, ignoring case):
+/// equal names first, then names that contain the other, without those already `linked`; at
+/// most [`MAX_SUGGESTIONS`].
 pub fn suggested_repos<'a>(
     project: &str,
     dirs: &'a [PathBuf],
@@ -99,13 +105,26 @@ pub fn suggested_repos<'a>(
     if key.is_empty() {
         return Vec::new();
     }
-    dirs.iter()
-        .filter(|dir| {
-            dir.file_name()
-                .is_some_and(|name| name_key(&name.to_string_lossy()) == key)
-        })
+    let part =
+        |whole: &str, piece: &str| whole.contains(piece) && piece.chars().count() >= MIN_PART;
+    let mut matches: Vec<(u8, &PathBuf)> = dirs
+        .iter()
         .filter(|dir| !linked.contains(dir))
-        .collect()
+        .filter_map(|dir| {
+            let d = name_key(&dir.file_name()?.to_string_lossy());
+            let rank = if d == key {
+                0
+            } else if part(&d, &key) || part(&key, &d) {
+                1
+            } else {
+                return None;
+            };
+            Some((rank, dir))
+        })
+        .collect();
+    matches.sort_by_key(|(rank, _)| *rank);
+    matches.truncate(MAX_SUGGESTIONS);
+    matches.into_iter().map(|(_, dir)| dir).collect()
 }
 
 /// A name reduced to its letters and digits, lowercased: "Schwitzer App" and `schwitzer-app`
@@ -377,23 +396,33 @@ mod tests {
     }
 
     #[test]
-    fn suggestions_match_names_loosely_and_skip_linked_repos() {
+    fn suggestions_rank_equal_names_before_parts_and_skip_linked_repos() {
         let dirs: Vec<PathBuf> = [
-            "/code/schwitzer-app",
-            "/code/SchwitzerApp",
-            "/code/schwitzer-app-old",
+            "/code/app",
+            "/code/ap",
             "/code/other",
+            "/code/schwitzer-app",
+            "/code/schwitzer-app-old",
+            "/code/SchwitzerApp",
         ]
         .into_iter()
         .map(PathBuf::from)
         .collect();
-        let linked = [PathBuf::from("/code/SchwitzerApp")];
         assert_eq!(
             suggested_repos("Schwitzer App", &dirs, &[]),
-            [&dirs[0], &dirs[1]]
+            [&dirs[3], &dirs[5], &dirs[0], &dirs[4]]
         );
-        assert_eq!(suggested_repos("Schwitzer App", &dirs, &linked), [&dirs[0]]);
+        let linked = [PathBuf::from("/code/SchwitzerApp")];
+        assert_eq!(
+            suggested_repos("Schwitzer App", &dirs, &linked),
+            [&dirs[3], &dirs[0], &dirs[4]]
+        );
+        assert!(suggested_repos("ab", &[PathBuf::from("/code/abc")], &[]).is_empty());
         assert!(suggested_repos("--", &dirs, &[]).is_empty());
+        let many: Vec<PathBuf> = (0..10)
+            .map(|i| PathBuf::from(format!("/code/x-demo-{i}")))
+            .collect();
+        assert_eq!(suggested_repos("demo", &many, &[]).len(), MAX_SUGGESTIONS);
     }
 
     #[test]
