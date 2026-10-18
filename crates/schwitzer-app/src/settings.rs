@@ -43,6 +43,11 @@ pub struct Settings {
     /// that exist (see [`default_projects_dirs`]). `Some(vec![])` means the member removed them all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projects_dirs: Option<Vec<PathBuf>>,
+    /// The WSL distros whose default projects folders (see [`default_projects_dirs`]) were
+    /// entered into `projects_dirs`. Each distro is entered once, so a folder the member
+    /// removes stays removed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub wsl_distros: Vec<String>,
 }
 
 impl Default for Settings {
@@ -58,6 +63,7 @@ impl Default for Settings {
             auto_restart_updates: true,
             repos: BTreeMap::new(),
             projects_dirs: None,
+            wsl_distros: Vec::new(),
         }
     }
 }
@@ -126,6 +132,28 @@ impl Settings {
                 }
             }
         }
+    }
+
+    /// Enters `dirs`, the default projects folders of the WSL distro `distro`, into the
+    /// projects folders, unless that distro was entered before (names compared ASCII
+    /// case-insensitively). A folder already listed is not listed twice. `true` when the
+    /// settings changed.
+    pub fn enter_wsl_distro(&mut self, distro: &str, dirs: &[PathBuf]) -> bool {
+        if self
+            .wsl_distros
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(distro))
+        {
+            return false;
+        }
+        self.wsl_distros.push(distro.to_owned());
+        let list = self.projects_dirs.get_or_insert_with(Vec::new);
+        for dir in dirs {
+            if !list.contains(dir) {
+                list.push(dir.clone());
+            }
+        }
+        true
     }
 
     /// The repos linked to `project` of `room`.
@@ -267,6 +295,7 @@ mod tests {
                 vec![PathBuf::from("/code/x")],
             )]),
             projects_dirs: Some(vec![PathBuf::from("/code"), PathBuf::from("/work")]),
+            wsl_distros: vec!["Ubuntu".to_owned()],
         };
         settings.save(dir.path()).unwrap();
         assert!(!dir.path().join("settings.toml.tmp").exists());
@@ -283,6 +312,37 @@ mod tests {
             default_projects_dirs(dir.path()),
             [dir.path().join("code"), dir.path().join("work")]
         );
+    }
+
+    #[test]
+    fn wsl_distro_is_entered_once() {
+        let code = PathBuf::from("/code");
+        let ubuntu_code = PathBuf::from(r"\\wsl.localhost\Ubuntu\home\felix\code");
+        let ubuntu_work = PathBuf::from(r"\\wsl.localhost\Ubuntu\home\felix\work");
+        let mut settings = Settings {
+            projects_dirs: Some(vec![code.clone()]),
+            ..Settings::default()
+        };
+        let both = [ubuntu_code.clone(), ubuntu_work.clone()];
+        assert!(settings.enter_wsl_distro("Ubuntu", &both));
+        assert_eq!(
+            settings.projects_dirs.as_deref(),
+            Some(&[code.clone(), ubuntu_code.clone(), ubuntu_work.clone()][..])
+        );
+        if let Some(list) = settings.projects_dirs.as_mut() {
+            list.retain(|dir| *dir != ubuntu_code);
+        }
+        assert!(!settings.enter_wsl_distro("ubuntu", &both));
+        assert_eq!(
+            settings.projects_dirs.as_deref(),
+            Some(&[code.clone(), ubuntu_work.clone()][..])
+        );
+        assert!(settings.enter_wsl_distro("Debian", std::slice::from_ref(&ubuntu_work)));
+        assert_eq!(
+            settings.projects_dirs.as_deref(),
+            Some(&[code, ubuntu_work][..])
+        );
+        assert_eq!(settings.wsl_distros, ["Ubuntu", "Debian"]);
     }
 
     #[test]

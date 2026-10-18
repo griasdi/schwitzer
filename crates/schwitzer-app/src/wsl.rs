@@ -18,17 +18,16 @@ const OLD_UNC: &str = r"\\wsl$\";
 #[cfg(windows)]
 const CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// A running WSL distro: its home folders and where repos may be found in it.
+/// A running WSL distro: its home folders and its default projects folders.
 #[cfg_attr(not(windows), allow(dead_code))] // built only on Windows
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Distro {
     pub name: String,
     /// `\\wsl.localhost\<name>\home\<user>`, sorted.
     pub homes: Vec<PathBuf>,
-    /// `code`, `projects` and `work` under the homes that exist.
+    /// `code`, `projects` and `work` under the homes that exist: entered into the projects
+    /// folders the first time the distro is seen.
     pub projects_dirs: Vec<PathBuf>,
-    /// The visible subfolders of `projects_dirs`, sorted: candidates for repo suggestions.
-    pub candidates: Vec<PathBuf>,
 }
 
 /// `s` without `prefix`, compared ASCII case-insensitively.
@@ -48,6 +47,19 @@ pub fn distro_of(path: &Path) -> Option<&str> {
     let rest = strip_unc(path.to_str()?)?;
     let name = rest.split('\\').next().unwrap_or_default();
     (!name.is_empty()).then_some(name)
+}
+
+/// The distro and the Linux path of a `\\wsl.localhost\<distro>\…` (or `\\wsl$\…`) path:
+/// `\\wsl.localhost\Ubuntu\home\felix` is `("Ubuntu", "/home/felix")`. `None` for any
+/// other path.
+pub fn to_linux(path: &Path) -> Option<(&str, String)> {
+    let rest = strip_unc(path.to_str()?)?;
+    let (name, tail) = rest.split_once('\\').unwrap_or((rest, ""));
+    if name.is_empty() {
+        return None;
+    }
+    let linux = format!("/{}", tail.trim_end_matches('\\').replace('\\', "/"));
+    Some((name, linux))
 }
 
 /// `path` with a WSL prefix in its one spelling, `\\wsl.localhost\`, so the same folder is
@@ -101,11 +113,10 @@ pub fn data_dir_for(repo: &Path, data_dir: &Path) -> PathBuf {
             PathBuf::from(format!("/mnt/{letter}/{rest}"))
         };
     }
-    if let Some(rest) = strip_unc(dir) {
-        let (name, tail) = rest.split_once('\\').unwrap_or((rest, ""));
-        if name.eq_ignore_ascii_case(distro) {
-            return PathBuf::from(format!("/{}", tail.replace('\\', "/")));
-        }
+    if let Some((name, linux)) = to_linux(data_dir)
+        && name.eq_ignore_ascii_case(distro)
+    {
+        return PathBuf::from(linux);
     }
     data_dir.to_owned()
 }
@@ -149,7 +160,7 @@ pub fn running_distros() -> Vec<String> {
     }
 }
 
-/// The running distros with their homes and repo candidates.
+/// The running distros with their homes and default projects folders.
 #[cfg(windows)]
 fn distros() -> Vec<Distro> {
     use crate::settings;
@@ -162,17 +173,10 @@ fn distros() -> Vec<Distro> {
                 .iter()
                 .flat_map(|home| settings::default_projects_dirs(home))
                 .collect();
-            let mut candidates: Vec<PathBuf> = projects_dirs
-                .iter()
-                .flat_map(|dir| settings::subdirs(dir))
-                .collect();
-            candidates.sort();
-            candidates.dedup();
             Distro {
                 name,
                 homes,
                 projects_dirs,
-                candidates,
             }
         })
         .collect()
@@ -267,6 +271,25 @@ mod tests {
         assert_eq!(distro_of(Path::new(r"\\WSL$\Debian")), Some("Debian"));
         assert_eq!(distro_of(Path::new(r"C:\x")), None);
         assert_eq!(distro_of(Path::new(r"\\wsl.localhost\")), None);
+    }
+
+    #[test]
+    fn wsl_paths_as_linux() {
+        let linux = |p: &str| to_linux(Path::new(p)).map(|(d, l)| (d.to_owned(), l));
+        assert_eq!(
+            linux(r"\\wsl.localhost\Ubuntu\home\felix\code"),
+            Some(("Ubuntu".to_owned(), "/home/felix/code".to_owned()))
+        );
+        assert_eq!(
+            linux(r"\\WSL$\Debian\tmp\"),
+            Some(("Debian".to_owned(), "/tmp".to_owned()))
+        );
+        assert_eq!(
+            linux(r"\\wsl.localhost\Ubuntu"),
+            Some(("Ubuntu".to_owned(), "/".to_owned()))
+        );
+        assert_eq!(linux(r"\\wsl.localhost\"), None);
+        assert_eq!(linux(r"C:\code"), None);
     }
 
     #[test]

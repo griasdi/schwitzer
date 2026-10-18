@@ -628,7 +628,7 @@ impl App {
         } else {
             let names: Vec<String> = searched
                 .iter()
-                .map(|dir| logic::breakable_path(&tilde(dir)))
+                .map(|dir| logic::breakable_path(&folder_label(dir)))
                 .collect();
             format!("Searched in {}.", names.join(", "))
         };
@@ -694,6 +694,7 @@ impl App {
             }
             Message::Wsl(distros) => {
                 self.wsl = distros;
+                self.enter_wsl_projects_dirs();
                 self.read_project_dirs();
                 Task::none()
             }
@@ -1384,19 +1385,31 @@ impl App {
         self.sync_project_form();
     }
 
-    /// Reads the subfolders of the projects folders.
+    /// Reads the subfolders of the searched folders.
     fn read_project_dirs(&mut self) {
         let mut dirs: Vec<PathBuf> = self
-            .settings
-            .projects_dirs
-            .iter()
-            .flatten()
-            .flat_map(|root| settings::subdirs(root))
-            .chain(self.wsl.iter().flat_map(|d| d.candidates.iter().cloned()))
+            .searched_dirs()
+            .into_iter()
+            .flat_map(settings::subdirs)
             .collect();
         dirs.sort();
         dirs.dedup();
         self.project_dirs = dirs;
+    }
+
+    /// Enters the default projects folders of every running distro seen for the first time.
+    /// A distro whose homes could not be read yet (it may still be starting) is left for a
+    /// later round.
+    fn enter_wsl_projects_dirs(&mut self) {
+        let mut changed = false;
+        for distro in self.wsl.iter().filter(|d| !d.homes.is_empty()) {
+            changed |= self
+                .settings
+                .enter_wsl_distro(&distro.name, &distro.projects_dirs);
+        }
+        if changed {
+            self.save_settings();
+        }
     }
 
     /// The directories omp sessions are read from: the configured one, then the one under
@@ -1415,16 +1428,23 @@ impl App {
         std::iter::once(configured).chain(in_wsl).collect()
     }
 
-    /// The folders whose subfolders are suggested as repos: the configured projects folders,
-    /// then those of the running WSL distros.
+    /// The folders whose subfolders are suggested as repos: the projects folders, without
+    /// those in a WSL distro that is not running.
     fn searched_dirs(&self) -> Vec<&Path> {
         self.settings
             .projects_dirs
             .iter()
             .flatten()
-            .chain(self.wsl.iter().flat_map(|d| &d.projects_dirs))
+            .filter(|dir| !self.in_stopped_distro(dir))
             .map(PathBuf::as_path)
             .collect()
+    }
+
+    /// Whether `path` lies in a WSL distro that is not running: such a path is not read, as
+    /// that would start the distro.
+    fn in_stopped_distro(&self, path: &Path) -> bool {
+        wsl::distro_of(path)
+            .is_some_and(|name| !self.wsl.iter().any(|d| d.name.eq_ignore_ascii_case(name)))
     }
 
     /// The selected room and the open task.
@@ -1673,9 +1693,7 @@ impl App {
         let shared: BTreeSet<PathBuf> = self.settings.repos.values().flatten().cloned().collect();
         for repo in &shared {
             // A repo in a stopped distro is not read: that would start the distro.
-            if wsl::distro_of(repo)
-                .is_some_and(|name| !self.wsl.iter().any(|d| d.name.eq_ignore_ascii_case(name)))
-            {
+            if self.in_stopped_distro(repo) {
                 continue;
             }
             let projects = omp_plugin::projects_of(&self.settings.repos, repo);
@@ -2288,6 +2306,15 @@ fn tilde(path: &Path) -> String {
         Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
         Some(rest) => format!("~/{}", rest.display()),
         None => path.display().to_string(),
+    }
+}
+
+/// `path` as the member knows it: a folder in a WSL distro as its Linux path with the
+/// distro, `/home/felix/code (Ubuntu)`; anything else with the home directory as `~`.
+fn folder_label(path: &Path) -> String {
+    match wsl::to_linux(path) {
+        Some((distro, linux)) => format!("{linux} ({distro})"),
+        None => tilde(path),
     }
 }
 

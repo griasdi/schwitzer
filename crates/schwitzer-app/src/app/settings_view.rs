@@ -17,6 +17,7 @@ use crate::mcp::McpStatus;
 use crate::omp_plugin::PluginState;
 use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
 use crate::update::{self, UpdateState};
+use crate::wsl;
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let mut body = column![section(you(app)), section(projects_folders(app))].spacing(SP_4);
@@ -64,22 +65,20 @@ fn projects_folders(app: &App) -> Element<'_, Message> {
     let folders = app.settings.projects_dirs.as_deref().unwrap_or_default();
     let mut rows = column![].spacing(2);
     for (index, path) in folders.iter().enumerate() {
-        rows = rows.push(
-            row![
-                icon(Icon::Folder, 16.0, Tone::Muted),
-                path_text(&tilde(path)),
-                icon_button(
-                    format!("projects-dir-remove-{index}"),
-                    Icon::Trash,
-                    Tone::Muted,
-                    "Stop searching this folder",
-                    Some(Message::RemoveProjectsDir(index)),
-                    theme::button_ghost,
-                ),
-            ]
-            .spacing(SP_2)
-            .align_y(Alignment::Center),
+        let remove = icon_button(
+            format!("projects-dir-remove-{index}"),
+            Icon::Trash,
+            Tone::Muted,
+            "Stop searching this folder",
+            Some(Message::RemoveProjectsDir(index)),
+            theme::button_ghost,
         );
+        let folder = icon(Icon::Folder, 16.0, Tone::Muted);
+        let line = match wsl::to_linux(path) {
+            Some((distro, linux)) => row![folder, path_text(&linux), muted(distro), remove],
+            None => row![folder, path_text(&tilde(path)), remove],
+        };
+        rows = rows.push(line.spacing(SP_2).align_y(Alignment::Center));
     }
     if folders.is_empty() {
         rows = rows.push(muted("No projects folder."));
