@@ -18,6 +18,8 @@ RUST_LOG=debug cargo run -p schwitzer-app                  # verbose logging, to
 
 The server prints its URL (`server url: weida://sha256:…@host:port`) on stdout; that URL goes into the app's "Create room" dialog. The app keeps its data in the platform's data directory (`~/.local/share/schwitzer` on Linux), or in `$SCHWITZER_HOME` if set.
 
+`deploy/deploy.sh local` (Linux, systemd) builds the committed `HEAD` and runs it as the systemd user service `schwitzer-server-local` on `127.0.0.1:7444`, with its data in `~/.local/share/schwitzer-server`; it restarts the service only when the binary or unit changed.
+
 ## Before pushing
 
 There is no CI: these checks are the only ones, run them before every commit that touches code:

@@ -1,0 +1,13 @@
+[Unit]
+Description=schwitzer server for local use (127.0.0.1:7444)
+
+[Service]
+Type=simple
+# `deploy.sh local` installs this unit as a systemd user unit and replaces
+# @BIN@ and @DATA@ with absolute paths.
+ExecStart=@BIN@ --listen 127.0.0.1:7444 --public-host 127.0.0.1 --data-dir @DATA@
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=default.target

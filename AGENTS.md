@@ -6,10 +6,11 @@ Schwitzer is a task room for coding agents and their humans: a desktop app in Ru
 
 ```sh
 cargo build --workspace --features schwitzer-app/remote   # server + app with headless remote control
-target/debug/schwitzer-server --listen 127.0.0.1:7444 --data-dir /tmp/sw/server   # prints `server url: weida://sha256:…@host:port` on stdout; also --public-host
+target/debug/schwitzer-server --listen 127.0.0.1:7454 --data-dir /tmp/sw/server   # prints `server url: weida://sha256:…@host:port` on stdout; also --public-host
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+deploy/deploy.sh local   # build HEAD, run it as the systemd user service schwitzer-server-local on 127.0.0.1:7444
 ```
 
 Never `cargo run -p schwitzer-app` or start `schwitzer` without `--headless`: see "Running headless". There is no CI and no xtask, so the gate below is the only check before a push.
@@ -25,24 +26,29 @@ cargo clippy --workspace --all-targets --features schwitzer-app/remote -- -D war
 cargo test --workspace
 ```
 
+After the push, every change that touches code ends with `deploy/deploy.sh local` (see "Finishing a change"): the local server always runs the latest `main`.
+
 A change to doc comments also runs `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`. A UI change is checked the way a user meets it: clicked through headless and screenshotted, not only compiled. `crates/schwitzer-client/tests/flow.rs` starts a real server on loopback UDP and restarts it on the same data dir; it needs no network beyond `127.0.0.1`.
 
 ## Finishing a change
 
-A change is finished when its gate passed and it is committed and pushed to `origin main`. A change without code, such as documentation only, skips the gate but is still committed and pushed. There is no deployment.
+A change is finished when its gate passed, it is committed and pushed to `origin main`, and `deploy/deploy.sh local` ran successfully afterwards. A change without code, such as documentation only, skips the gate but is still committed and pushed. `deploy/deploy.sh local` builds the committed `HEAD` (uncommitted work in the checkout is ignored), installs it and restarts the systemd user service `schwitzer-server-local` only when the binary or unit changed, so running it after every code push is cheap. Run it from this checkout on `main` after the push. If it fails, the change is not finished: fix the cause; if `127.0.0.1:7444` is taken by a process the agent did not start, leave it alone and tell the user.
 
 - Stage paths explicitly, never `git add -A` or `git add .`: the checkout may hold the user's uncommitted work, which is left alone. `SCHWITZER_PLAN.md` and other local planning files are never committed; `.omp/mcp.json` holds a token and stays untracked.
 - Commit messages follow CONTRIBUTING.md: no prefix, a `Changelog:` trailer for user-visible changes.
 - Before pushing, `git pull --rebase origin main`; if that brought new commits, run the gate again. Push only to `origin`.
+- A change without code skips `deploy.sh` as well.
 
 ## Running headless
 
 The user runs their own `schwitzer`, with its data in `~/.local/share/schwitzer` (`identity`, `mcp-token`, `settings.toml`) and its MCP server on `127.0.0.1:13339`. An agent never starts a windowed `schwitzer` and never runs it without `--headless` and a `SCHWITZER_HOME` under `/tmp`. That includes `--version`: without these it opens the GUI on the user's identity and rooms. Every headless instance gets its own `SCHWITZER_HOME` with a `settings.toml` that sets its own `mcp_port` (never 13339) and an `omp_sessions_dir` under `/tmp`; otherwise it shares the agent's own omp sessions. A server for a test runs from `target/` with `--data-dir` under `/tmp`.
 
+The user's local server is the systemd user service `schwitzer-server-local` on `127.0.0.1:7444` (data in `~/.local/share/schwitzer-server`, binary in `~/.local/state/schwitzer-server-local/bin`, logs via `journalctl --user -u schwitzer-server-local`). Tests never use it and never stop, restart or replace it other than through `deploy/deploy.sh local`; a test server listens on another port (the examples use 7454).
+
 ```sh
 cargo build --workspace --features schwitzer-app/remote
 mkdir -p /tmp/sw/a /tmp/sw/omp
-setsid target/debug/schwitzer-server --listen 127.0.0.1:7444 --data-dir /tmp/sw/server >/tmp/sw/server.out 2>/tmp/sw/server.log &   # server.out: `server url: …`
+setsid target/debug/schwitzer-server --listen 127.0.0.1:7454 --data-dir /tmp/sw/server >/tmp/sw/server.out 2>/tmp/sw/server.log &   # server.out: `server url: …`
 printf 'name = "alice"\nmcp_port = 13401\nomp_sessions_dir = "/tmp/sw/omp"\n' >/tmp/sw/a/settings.toml
 SCHWITZER_HOME=/tmp/sw/a setsid target/debug/schwitzer --headless --control /tmp/sw/a.sock --size 400x780 --backend tiny-skia 2>/tmp/sw/a.log &
 iced-impeccable ctl /tmp/sw/a.sock tree                     # or target/debug/schwitzer ctl …; also tap #id / tap ~text, type, wait-for, wait-gone, clip, quit
