@@ -7,7 +7,7 @@ use iced::{Alignment, Element, Length};
 use schwitzer_proto::RoomId;
 
 use super::icons::{Icon, Tone};
-use super::widgets::{dot, icon_button, muted, with_tip};
+use super::widgets::{bar_icon_button, dot, muted, with_tip};
 use super::{App, Message};
 use crate::mcp::McpStatus;
 use crate::theme::{self, SEMIBOLD, SP_1, SP_2, TS_12, TS_14};
@@ -54,7 +54,7 @@ pub fn header(app: &App) -> Element<'_, Message> {
         row![
             rooms,
             Space::new().width(Length::Fill),
-            icon_button(
+            bar_icon_button(
                 "copy-key",
                 Icon::UserPlus,
                 Tone::Text,
@@ -62,7 +62,7 @@ pub fn header(app: &App) -> Element<'_, Message> {
                 in_room.then_some(Message::CopyKey),
                 theme::button_ghost,
             ),
-            icon_button(
+            bar_icon_button(
                 "settings",
                 Icon::Settings,
                 Tone::Text,

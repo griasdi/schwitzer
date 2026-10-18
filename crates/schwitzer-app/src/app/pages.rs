@@ -5,7 +5,7 @@ use iced::{Alignment, Element, Length};
 
 use super::Message;
 use super::icons::{Icon, Tone};
-use super::widgets::{hrule, icon_button};
+use super::widgets::{bar_icon_button, hrule};
 use crate::theme::{self, SEMIBOLD, SP_1, SP_2, SP_3, TS_20};
 
 /// The widest the body of a page grows in a wide window.
@@ -20,7 +20,7 @@ pub fn frame<'a>(
 ) -> Element<'a, Message> {
     let header = container(
         row![
-            icon_button(
+            bar_icon_button(
                 "back",
                 Icon::Back,
                 Tone::Text,

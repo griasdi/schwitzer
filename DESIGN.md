@@ -399,7 +399,7 @@ Tactile by tone and edge. The well sits below, slabs and bars sit above it as `r
 - **Slab / button, hovered** (`offset 0 2px, blur 4px, colour edge`): the plate lifts a little more, together with the `hover` fill and the `line-strong` border on slabs.
 - **Pressed and disabled**: no shadow. The active segment of a segmented control is also shadowless: it reads as pressed in.
 - **Menu** (`offset 0 4px, blur 16px, colour shadow`): the room-switcher menu.
-- **Tooltip** (`offset 0 2px, blur 8px, colour shadow`): hover tips above the control, 4px gap.
+- **Tooltip** (`offset 0 2px, blur 8px, colour shadow`): hover tips above the control, 4px gap; below it for the icon buttons of the header and page bars, which sit at the window's top edge.
 
 Flat on purpose: bars (header, page, status; separated by 1px hairlines), ghost buttons, group headers, flat rows inside a slab (the room list in Settings), name tags, pills, lamps, inputs.
 
@@ -420,7 +420,7 @@ Four kinds plus a segmented control; every button is wrapped in an id container 
 - **Primary:** Action Green fill, Deep Green Ink text. Hovered: `primary-hover`. Pressed: Leaf Ink fill. Disabled: Hairline fill, Moss Grey text. One per view for the main call to action (Propose, Save, Approve, "Pick and copy prompt"); on a slab it is the next step: **Pick** (hand-grab icon) on finished plans, **Accept** (check icon) on proposals. Pick is disabled (muted icon) while a pick runs.
 - **Secondary:** raised fill, Mint Hairline border; hovered Mint Breath with Sage Edge border; pressed Mint Pressed. Cancel, Replan, Reopen, Add, Save name; **Release** (leave icon) on a slab whose claim is yours.
 - **Danger:** red text and 1px red border on no fill; hovered Alarm Wash; pressed solid red with on-danger text. Reject (open task only).
-- **Ghost:** no border, no fill, no shadow; hover Mint Breath, pressed Mint Pressed. Icon buttons (32x32, 16px glyph, tooltip above) in the bars (invite, settings, back), group headers (`+`) and the head of the open task (edit, close), text links ("Share mine"), the `#n` session task link.
+- **Ghost:** no border, no fill, no shadow; hover Mint Breath, pressed Mint Pressed. Icon buttons (32x32, 16px glyph, tooltip above, below in the header and page bars) in the bars (invite, settings, back), group headers (`+`) and the head of the open task (edit, close), text links ("Share mine"), the `#n` session task link.
 - **Segment:** 1px border; the active segment is Mint Pressed with Leaf Ink border and text, shadowless (priority High / Normal / Low).
 
 ### Slabs and group headers

@@ -84,19 +84,47 @@ pub fn icon_button<'a>(
     on_press: Option<Message>,
     style: impl Fn(&Theme, button::Status) -> button::Style + 'a,
 ) -> Element<'a, Message> {
+    with_tip(icon_only(id, glyph, tone, on_press, style), tip)
+}
+
+/// An icon button in a bar at the top of the window: like [`icon_button`], but its
+/// tooltip opens below it, because above it there is no room and iced would push the
+/// tip over the button.
+pub fn bar_icon_button<'a>(
+    id: impl Into<String>,
+    glyph: Icon,
+    tone: Tone,
+    tip: &'a str,
+    on_press: Option<Message>,
+    style: impl Fn(&Theme, button::Status) -> button::Style + 'a,
+) -> Element<'a, Message> {
+    tip_at(
+        icon_only(id, glyph, tone, on_press, style),
+        tip,
+        tooltip::Position::Bottom,
+    )
+}
+
+/// The 32x32 icon button without a tooltip; its glyph is muted while it is disabled.
+fn icon_only<'a>(
+    id: impl Into<String>,
+    glyph: Icon,
+    tone: Tone,
+    on_press: Option<Message>,
+    style: impl Fn(&Theme, button::Status) -> button::Style + 'a,
+) -> Element<'a, Message> {
     let tone = if on_press.is_some() {
         tone
     } else {
         Tone::Muted
     };
-    let button = id_button(
+    id_button(
         id,
         container(icon(glyph, 16.0, tone)).padding(SP_2),
         on_press,
         style,
         Length::Shrink,
-    );
-    with_tip(button, tip)
+    )
 }
 
 /// `content` with a tooltip above it.
@@ -104,10 +132,19 @@ pub fn with_tip<'a>(
     content: impl Into<Element<'a, Message>>,
     tip: impl text::IntoFragment<'a>,
 ) -> Element<'a, Message> {
+    tip_at(content, tip, tooltip::Position::Top)
+}
+
+/// `content` with a tooltip at `position`, 4 px away from it.
+fn tip_at<'a>(
+    content: impl Into<Element<'a, Message>>,
+    tip: impl text::IntoFragment<'a>,
+    position: tooltip::Position,
+) -> Element<'a, Message> {
     tooltip(
         content,
         container(text(tip).size(TS_12)).padding([SP_1, SP_2]),
-        tooltip::Position::Top,
+        position,
     )
     .gap(SP_1)
     .style(theme::tooltip)
