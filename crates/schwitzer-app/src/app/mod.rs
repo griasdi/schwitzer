@@ -850,7 +850,7 @@ impl App {
             return Task::none();
         };
         let config = self.plugin_config(omp_plugin::rooms_of(&self.settings.repos, &repo));
-        match omp_plugin::install(&repo, &config) {
+        match omp_plugin::install(&repo, &config, self.mcp_token.as_deref()) {
             Ok(()) => {
                 self.plugin_repos.insert(repo);
                 self.notify("omp plugin installed");
@@ -902,7 +902,7 @@ impl App {
                     self.plugin_repos.remove(&repo);
                 })
             } else {
-                omp_plugin::install(&repo, &self.plugin_config(rooms))
+                omp_plugin::install(&repo, &self.plugin_config(rooms), self.mcp_token.as_deref())
             };
             if let Err(e) = result {
                 self.banner = Some(format!("omp plugin in {}: {e}", repo.display()));

@@ -144,16 +144,18 @@ pub fn url(port: u16) -> String {
 
 /// The configuration snippet for an MCP client.
 pub fn client_config(port: u16, token: &str) -> String {
-    let config = serde_json::json!({
-        "mcpServers": {
-            "schwitzer": {
-                "type": "http",
-                "url": url(port),
-                "headers": { "Authorization": format!("Bearer {token}") },
-            }
-        }
-    });
+    let config =
+        serde_json::json!({ "mcpServers": { "schwitzer": server_entry(&url(port), token) } });
     serde_json::to_string_pretty(&config).unwrap_or_default()
+}
+
+/// One MCP client's entry for this server at `url`, with the bearer `token`.
+pub fn server_entry(url: &str, token: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "http",
+        "url": url,
+        "headers": { "Authorization": format!("Bearer {token}") },
+    })
 }
 
 #[cfg(test)]

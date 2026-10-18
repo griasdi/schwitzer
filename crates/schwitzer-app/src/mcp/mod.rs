@@ -10,8 +10,8 @@ mod serve;
 mod token;
 mod tools;
 
-pub use serve::{client_config, subscription, url};
-pub use token::{TOKEN_FILE, load_or_create_token};
+pub use serve::{client_config, server_entry, subscription, url};
+pub use token::load_or_create_token;
 
 /// Whether the server listens.
 #[derive(Debug, Clone, PartialEq, Eq)]

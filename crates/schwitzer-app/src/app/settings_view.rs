@@ -159,8 +159,8 @@ fn this_room(app: &App) -> Element<'_, Message> {
             ),
             muted(
                 "The plug sets up omp in a repo: /schwitzer there plans tasks waiting for a \
-                 plan, and agents there reach this app's MCP server. The access token stays in \
-                 this app's data folder."
+                 plan, and agents there reach this app's MCP server. Its access token goes \
+                 into the repo's .omp/mcp.json: keep that file out of git."
             ),
         ]
         .spacing(SP_1),
