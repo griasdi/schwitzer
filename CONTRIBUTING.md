@@ -38,7 +38,7 @@ For UI changes, also click through the affected flow in Daylight and Night (DESI
 | `crates/schwitzer-proto` | Wire types, ids, framing, room keys |
 | `crates/schwitzer-server` | Binary `schwitzer-server`: rooms in SQLite, RPC and event stream over weida (QUIC) |
 | `crates/schwitzer-client` | Client library: connection, reconnect, room state |
-| `crates/schwitzer-app` | Binary `schwitzer`: iced desktop app, MCP server for agents, omp session sharing |
+| `crates/schwitzer-app` | Binary `schwitzer`: iced desktop app, MCP server for the omp plugin, omp session sharing |
 
 Conventions:
 - Errors: `thiserror` in the libraries (`schwitzer-proto`, `schwitzer-client`), `anyhow` in `schwitzer-server`.

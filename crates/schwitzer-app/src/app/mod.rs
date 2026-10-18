@@ -79,7 +79,6 @@ pub enum Message {
     Left(Result<(), String>),
     NameInput(String),
     SubmitName,
-    CopyMcpConfig,
     RepoInput(String),
     AddRepo,
     RemoveRepo(usize),
@@ -497,14 +496,6 @@ impl App {
                 Task::none()
             }
             Message::SubmitName => self.submit_name(),
-            Message::CopyMcpConfig => match &self.mcp_token {
-                Some(token) => {
-                    let config = mcp::client_config(self.settings.mcp_port, token);
-                    self.notify("MCP config copied");
-                    iced::clipboard::write(config)
-                }
-                None => Task::none(),
-            },
             Message::RepoInput(s) => {
                 self.forms.repo = s;
                 Task::none()
@@ -937,7 +928,7 @@ impl App {
     /// Writes the plugin into `repo` for the rooms that share it and marks it current.
     fn update_plugin(&mut self, repo: &Path) -> std::io::Result<()> {
         let rooms = omp_plugin::rooms_of(&self.settings.repos, repo);
-        omp_plugin::install(repo, &self.plugin_config(rooms), self.mcp_token.as_deref())?;
+        omp_plugin::install(repo, &self.plugin_config(rooms))?;
         self.plugins.insert(repo.to_owned(), PluginState::Current);
         self.auto_failed.remove(repo);
         Ok(())
@@ -978,7 +969,7 @@ impl App {
         let shared: BTreeSet<PathBuf> = self.settings.repos.values().flatten().cloned().collect();
         for repo in &shared {
             let rooms = omp_plugin::rooms_of(&self.settings.repos, repo);
-            match omp_plugin::state(repo, &self.plugin_config(rooms), self.mcp_token.as_deref()) {
+            match omp_plugin::state(repo, &self.plugin_config(rooms)) {
                 Some(state) => {
                     self.plugins.insert(repo.clone(), state);
                 }

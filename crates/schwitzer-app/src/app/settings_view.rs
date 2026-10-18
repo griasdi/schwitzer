@@ -1,5 +1,5 @@
 //! The settings dialog: your name, the selected room and its shared repos, all rooms (switch,
-//! create, join) and the MCP connection for agents.
+//! create, join) and the omp connection.
 
 use iced::widget::{Space, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length};
@@ -171,8 +171,7 @@ fn this_room(app: &App) -> Element<'_, Message> {
             ),
             muted(
                 "The plug sets up omp in a repo: /schwitzer there plans, builds and proposes \
-                 this room's tasks, and agents there reach this app's MCP server. Its access \
-                 token goes into the repo's .omp/mcp.json: keep that file out of git."
+                 this room's tasks, and agents there get this room's Schwitzer tools."
             ),
         ]
         .spacing(SP_1),
@@ -286,7 +285,7 @@ fn rooms(app: &App) -> Element<'_, Message> {
 fn agents(app: &App) -> Element<'_, Message> {
     let (state, status) = match &app.mcp {
         None => (None, "Starting…".to_owned()),
-        Some(McpStatus::Listening { url }) => (Some(true), url.clone()),
+        Some(McpStatus::Listening { url }) => (Some(true), format!("Connection on {url}")),
         Some(McpStatus::PortInUse) => (
             Some(false),
             format!("Port {} is in use", app.settings.mcp_port),
@@ -294,7 +293,7 @@ fn agents(app: &App) -> Element<'_, Message> {
         Some(McpStatus::Failed(e)) => (Some(false), e.clone()),
     };
     column![
-        heading("Agents"),
+        heading("omp"),
         row![
             icon(Icon::Plug, 16.0, Tone::Muted),
             dot(state),
@@ -303,17 +302,9 @@ fn agents(app: &App) -> Element<'_, Message> {
         .spacing(SP_2)
         .align_y(Alignment::Center),
         muted(
-            "Agents reach this room through the MCP server of this app. Paste the config into \
-             your agent's MCP settings."
+            "omp sessions in the shared repos reach this room through the omp plugin. The port \
+             is mcp_port in settings.toml."
         ),
-        row![icon_text_button(
-            "copy-mcp-config",
-            Icon::Copy,
-            Tone::Text,
-            "Copy MCP config",
-            app.mcp_token.is_some().then_some(Message::CopyMcpConfig),
-            theme::button_secondary,
-        )],
         text(format!(
             "omp sessions are read from {}",
             app.settings.omp_sessions_dir.display()

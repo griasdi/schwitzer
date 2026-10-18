@@ -7,9 +7,10 @@
 //! plan, build and propose tasks of the rooms the repo is shared with and note ideas for them
 //! through the app's MCP server. `omp-plugin/README.md` describes the plugin.
 //!
-//! Install also registers the app's MCP server as `schwitzer` in `<repo>/.omp/mcp.json`, with
-//! the access token in its `Authorization` header. That file is then readable by the user only
-//! on unix and must stay out of version control.
+//! The plugin gives omp's agent the app's tools itself and reaches the app's MCP server with
+//! the URL in `schwitzer.json` and the token in `<data_dir>/mcp-token`. Older versions
+//! registered the server as `schwitzer` in `<repo>/.omp/mcp.json`; install and uninstall
+//! remove that entry, and a repo that still has it counts as out of date.
 //!
 //! The app compares a repo's plugin with what it would write ([`state`]) and rewrites it on
 //! request or automatically.
@@ -27,7 +28,6 @@ const INDEX_TS: &str = include_str!("../omp-plugin/index.ts");
 const CONFIG_FILE: &str = "schwitzer.json";
 const LOCK_FILE: &str = "omp-plugins.lock.json";
 const MCP_FILE: &str = "mcp.json";
-const MCP_SCHEMA: &str = "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json";
 
 /// What the plugin reads from `schwitzer.json`. It holds no token: the plugin reads
 /// `<data_dir>/mcp-token` on every call.
@@ -72,13 +72,13 @@ pub enum PluginState {
     Outdated,
 }
 
-/// The plugin in `repo` compared with what [`install`] would write for `config` and
-/// `mcp_token`; `None` when it is not installed.
-pub fn state(repo: &Path, config: &PluginConfig, mcp_token: Option<&str>) -> Option<PluginState> {
+/// The plugin in `repo` compared with what [`install`] would write for `config`; `None` when
+/// it is not installed.
+pub fn state(repo: &Path, config: &PluginConfig) -> Option<PluginState> {
     if !installed(repo) {
         return None;
     }
-    let current = if matches(repo, config, mcp_token) {
+    let current = if matches(repo, config) {
         PluginState::Current
     } else {
         PluginState::Outdated
@@ -87,7 +87,7 @@ pub fn state(repo: &Path, config: &PluginConfig, mcp_token: Option<&str>) -> Opt
 }
 
 /// Whether everything [`install`] would write into `repo` is already there.
-fn matches(repo: &Path, config: &PluginConfig, mcp_token: Option<&str>) -> bool {
+fn matches(repo: &Path, config: &PluginConfig) -> bool {
     let dir = plugin_dir(repo);
     let holds =
         |name: &str, bytes: &[u8]| std::fs::read(dir.join(name)).is_ok_and(|old| old == bytes);
@@ -109,17 +109,7 @@ fn matches(repo: &Path, config: &PluginConfig, mcp_token: Option<&str>) -> bool 
         }
         _ => false,
     };
-    if !lock_current {
-        return false;
-    }
-    let entry = match read_json(&mcp_path(repo), "mcpServers", "an omp MCP config") {
-        Ok(mcp) => mcp.and_then(|mcp| mcp.get("mcpServers")?.get(NAME).cloned()),
-        Err(_) => return false,
-    };
-    match mcp_token {
-        Some(token) => entry == Some(crate::mcp::server_entry(&config.mcp_url, token)),
-        None => entry.is_none(),
-    }
+    lock_current && !has_mcp_entry(repo)
 }
 
 /// The plugin's `package.json`.
@@ -133,15 +123,12 @@ fn package() -> Value {
     })
 }
 
-/// Writes the plugin into `repo`, enables it in the lock file and registers the app's MCP
-/// server with `mcp_token` as `schwitzer` in `.omp/mcp.json`; without a token (the server
-/// cannot run) the entry is removed. A lock file that is not an omp lock file or an
-/// `mcp.json` that is not an omp MCP config is an error, and then nothing is written.
-pub fn install(repo: &Path, config: &PluginConfig, mcp_token: Option<&str>) -> io::Result<()> {
+/// Writes the plugin into `repo`, enables it in the lock file and removes the app's server
+/// from `.omp/mcp.json` (see [`remove_mcp_entry`]). A lock file that is not an omp lock file is
+/// an error, and then nothing is written.
+pub fn install(repo: &Path, config: &PluginConfig) -> io::Result<()> {
     let lock_path = lock_path(repo);
     let mut lock = read_json(&lock_path, "plugins", "an omp plugin lock file")?.unwrap_or_default();
-    let mcp_path = mcp_path(repo);
-    let mut mcp = read_json(&mcp_path, "mcpServers", "an omp MCP config")?;
     // `read_json` accepts only an object as `plugins`.
     if let Some(plugins) = lock
         .entry("plugins")
@@ -158,29 +145,6 @@ pub fn install(repo: &Path, config: &PluginConfig, mcp_token: Option<&str>) -> i
     }
     lock.entry("settings")
         .or_insert_with(|| Value::Object(Map::new()));
-    // `read_json` accepts only an object as `mcpServers`.
-    match (mcp_token, &mut mcp) {
-        (Some(token), mcp) => {
-            let mcp = mcp
-                .get_or_insert_with(|| Map::from_iter([("$schema".to_owned(), json!(MCP_SCHEMA))]));
-            if let Some(servers) = mcp
-                .entry("mcpServers")
-                .or_insert_with(|| Value::Object(Map::new()))
-                .as_object_mut()
-            {
-                servers.insert(
-                    NAME.to_owned(),
-                    crate::mcp::server_entry(&config.mcp_url, token),
-                );
-            }
-        }
-        (None, Some(mcp)) => {
-            if let Some(Value::Object(servers)) = mcp.get_mut("mcpServers") {
-                servers.remove(NAME);
-            }
-        }
-        (None, None) => {}
-    }
 
     let dir = plugin_dir(repo);
     std::fs::create_dir_all(&dir)?;
@@ -188,9 +152,7 @@ pub fn install(repo: &Path, config: &PluginConfig, mcp_token: Option<&str>) -> i
     write_if_changed(&dir.join("package.json"), pretty(&package())?.as_bytes())?;
     write_if_changed(&dir.join(CONFIG_FILE), pretty(config)?.as_bytes())?;
     write_json(&lock_path, lock, false)?;
-    if let Some(mcp) = mcp {
-        write_json(&mcp_path, mcp, true)?;
-    }
+    remove_mcp_entry(repo)?;
     Ok(())
 }
 
@@ -211,13 +173,7 @@ pub fn uninstall(repo: &Path) -> io::Result<()> {
         }
         write_json(&lock_path, lock, false)?;
     }
-    let mcp_path = mcp_path(repo);
-    if let Ok(Some(mut mcp)) = read_json(&mcp_path, "mcpServers", "an omp MCP config") {
-        if let Some(Value::Object(servers)) = mcp.get_mut("mcpServers") {
-            servers.remove(NAME);
-        }
-        write_json(&mcp_path, mcp, true)?;
-    }
+    remove_mcp_entry(repo)?;
     Ok(())
 }
 
@@ -238,8 +194,34 @@ fn read_json(path: &Path, section: &str, what: &str) -> io::Result<Option<Map<St
     }
 }
 
+/// Whether `.omp/mcp.json` still names the app's server, as versions before the plugin's own
+/// tools wrote it. A file that is not an omp MCP config does not count.
+fn has_mcp_entry(repo: &Path) -> bool {
+    matches!(
+        read_json(&mcp_path(repo), "mcpServers", "an omp MCP config"),
+        Ok(Some(mcp)) if mcp.get("mcpServers").and_then(|servers| servers.get(NAME)).is_some()
+    )
+}
+
+/// Removes the app's server from `.omp/mcp.json`, rewriting the file only when it held one.
+/// A missing file, or one that is not an omp MCP config, is left alone.
+fn remove_mcp_entry(repo: &Path) -> io::Result<()> {
+    let path = mcp_path(repo);
+    let Ok(Some(mut mcp)) = read_json(&path, "mcpServers", "an omp MCP config") else {
+        return Ok(());
+    };
+    let removed = mcp
+        .get_mut("mcpServers")
+        .and_then(Value::as_object_mut)
+        .is_some_and(|servers| servers.remove(NAME).is_some());
+    if removed {
+        write_json(&path, mcp, true)?;
+    }
+    Ok(())
+}
+
 /// Writes the JSON file at `path` through a temporary file and a rename; readable by the user
-/// only on unix when `private`, since `mcp.json` holds the access token.
+/// only on unix when `private`, since `mcp.json` holds other servers' access tokens.
 fn write_json(path: &Path, value: Map<String, Value>, private: bool) -> io::Result<()> {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let tmp = path.with_file_name(format!("{name}.tmp"));
@@ -275,8 +257,6 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<()> {
 mod tests {
     use super::*;
 
-    const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
     fn config() -> PluginConfig {
         PluginConfig {
             data_dir: PathBuf::from("/data"),
@@ -297,6 +277,14 @@ mod tests {
         json!({ "mcpServers": { "griasdi": { "type": "http", "url": "http://127.0.0.1:13337/mcp" } } })
     }
 
+    /// `griasdi()` with the `schwitzer` server older app versions wrote.
+    fn old_mcp() -> Value {
+        let mut mcp = griasdi();
+        mcp["mcpServers"]["schwitzer"] =
+            json!({ "type": "http", "url": "http://127.0.0.1:13401/mcp" });
+        mcp
+    }
+
     fn write(path: &Path, text: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
@@ -305,7 +293,7 @@ mod tests {
     #[test]
     fn install_into_bare_repo() {
         let repo = tempfile::tempdir().unwrap();
-        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        install(repo.path(), &config()).unwrap();
         let dir = plugin_dir(repo.path());
         assert_eq!(
             std::fs::read_to_string(dir.join("index.ts")).unwrap(),
@@ -329,26 +317,7 @@ mod tests {
                 "settings": {},
             })
         );
-        assert_eq!(
-            mcp(repo.path()),
-            json!({
-                "$schema": MCP_SCHEMA,
-                "mcpServers": { "schwitzer": {
-                    "type": "http",
-                    "url": "http://127.0.0.1:13401/mcp",
-                    "headers": { "Authorization": format!("Bearer {TOKEN}") },
-                } },
-            })
-        );
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(mcp_path(repo.path()))
-                .unwrap()
-                .permissions()
-                .mode();
-            assert_eq!(mode & 0o777, 0o600);
-        }
+        assert!(!mcp_path(repo.path()).exists());
         assert!(installed(repo.path()));
     }
 
@@ -367,18 +336,7 @@ mod tests {
             })
             .to_string(),
         );
-        write(&mcp_path(repo.path()), &griasdi().to_string());
-        install(repo.path(), &config(), Some(TOKEN)).unwrap();
-        let mcp = mcp(repo.path());
-        assert_eq!(
-            mcp["mcpServers"]["griasdi"],
-            griasdi()["mcpServers"]["griasdi"]
-        );
-        assert_eq!(
-            mcp["mcpServers"]["schwitzer"]["url"],
-            json!("http://127.0.0.1:13401/mcp")
-        );
-        assert!(mcp.get("$schema").is_none());
+        install(repo.path(), &config()).unwrap();
         let lock = lock(repo.path());
         assert_eq!(lock["plugins"]["other"], other);
         assert_eq!(lock["settings"], json!({ "other": { "k": 1 } }));
@@ -393,7 +351,7 @@ mod tests {
     fn install_refuses_malformed_lock() {
         let repo = tempfile::tempdir().unwrap();
         write(&lock_path(repo.path()), "not json");
-        let e = install(repo.path(), &config(), Some(TOKEN)).unwrap_err();
+        let e = install(repo.path(), &config()).unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::InvalidData);
         assert_eq!(
             std::fs::read_to_string(lock_path(repo.path())).unwrap(),
@@ -403,17 +361,26 @@ mod tests {
     }
 
     #[test]
-    fn install_refuses_malformed_mcp_config() {
+    fn install_leaves_a_malformed_mcp_config_alone() {
         let repo = tempfile::tempdir().unwrap();
         write(&mcp_path(repo.path()), "not json");
-        let e = install(repo.path(), &config(), Some(TOKEN)).unwrap_err();
-        assert_eq!(e.kind(), io::ErrorKind::InvalidData);
+        install(repo.path(), &config()).unwrap();
         assert_eq!(
             std::fs::read_to_string(mcp_path(repo.path())).unwrap(),
             "not json"
         );
-        assert!(!plugin_dir(repo.path()).exists());
-        assert!(!lock_path(repo.path()).exists());
+        assert_eq!(state(repo.path(), &config()), Some(PluginState::Current));
+    }
+
+    #[test]
+    fn install_removes_the_old_mcp_entry() {
+        let repo = tempfile::tempdir().unwrap();
+        install(repo.path(), &config()).unwrap();
+        write(&mcp_path(repo.path()), &old_mcp().to_string());
+        assert_eq!(state(repo.path(), &config()), Some(PluginState::Outdated));
+        install(repo.path(), &config()).unwrap();
+        assert_eq!(mcp(repo.path()), griasdi());
+        assert_eq!(state(repo.path(), &config()), Some(PluginState::Current));
     }
 
     #[test]
@@ -428,8 +395,8 @@ mod tests {
             })
             .to_string(),
         );
-        write(&mcp_path(repo.path()), &griasdi().to_string());
-        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        install(repo.path(), &config()).unwrap();
+        write(&mcp_path(repo.path()), &old_mcp().to_string());
         uninstall(repo.path()).unwrap();
         assert!(!plugin_dir(repo.path()).exists());
         assert!(!installed(repo.path()));
@@ -438,18 +405,6 @@ mod tests {
             json!({ "plugins": { "other": other }, "settings": { "other": {} } })
         );
         assert_eq!(mcp(repo.path()), griasdi());
-    }
-
-    #[test]
-    fn install_without_token_drops_the_entry() {
-        let repo = tempfile::tempdir().unwrap();
-        install(repo.path(), &config(), None).unwrap();
-        assert!(!mcp_path(repo.path()).exists());
-        write(&mcp_path(repo.path()), &griasdi().to_string());
-        install(repo.path(), &config(), Some(TOKEN)).unwrap();
-        install(repo.path(), &config(), None).unwrap();
-        assert_eq!(mcp(repo.path()), griasdi());
-        assert!(installed(repo.path()));
     }
 
     #[test]
@@ -469,81 +424,40 @@ mod tests {
     #[test]
     fn state_follows_install() {
         let repo = tempfile::tempdir().unwrap();
-        assert_eq!(state(repo.path(), &config(), Some(TOKEN)), None);
-        install(repo.path(), &config(), Some(TOKEN)).unwrap();
-        assert_eq!(
-            state(repo.path(), &config(), Some(TOKEN)),
-            Some(PluginState::Current)
-        );
+        assert_eq!(state(repo.path(), &config()), None);
+        install(repo.path(), &config()).unwrap();
+        assert_eq!(state(repo.path(), &config()), Some(PluginState::Current));
     }
 
     #[test]
     fn edited_plugin_is_outdated_until_reinstalled() {
         let repo = tempfile::tempdir().unwrap();
-        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        install(repo.path(), &config()).unwrap();
         let index = plugin_dir(repo.path()).join("index.ts");
         std::fs::write(&index, format!("{INDEX_TS}// edited\n")).unwrap();
-        assert_eq!(
-            state(repo.path(), &config(), Some(TOKEN)),
-            Some(PluginState::Outdated)
-        );
-        install(repo.path(), &config(), Some(TOKEN)).unwrap();
-        assert_eq!(
-            state(repo.path(), &config(), Some(TOKEN)),
-            Some(PluginState::Current)
-        );
+        assert_eq!(state(repo.path(), &config()), Some(PluginState::Outdated));
+        install(repo.path(), &config()).unwrap();
+        assert_eq!(state(repo.path(), &config()), Some(PluginState::Current));
     }
 
     #[test]
     fn other_mcp_port_is_outdated() {
         let repo = tempfile::tempdir().unwrap();
-        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        install(repo.path(), &config()).unwrap();
         let moved = PluginConfig {
             mcp_url: "http://127.0.0.1:13402/mcp".to_owned(),
             ..config()
         };
-        assert_eq!(
-            state(repo.path(), &moved, Some(TOKEN)),
-            Some(PluginState::Outdated)
-        );
+        assert_eq!(state(repo.path(), &moved), Some(PluginState::Outdated));
     }
 
     #[test]
     fn older_lock_version_is_outdated() {
         let repo = tempfile::tempdir().unwrap();
-        install(repo.path(), &config(), Some(TOKEN)).unwrap();
+        install(repo.path(), &config()).unwrap();
         let mut lock = lock(repo.path());
         lock["plugins"]["schwitzer"]["version"] = json!("0.0.1");
         write(&lock_path(repo.path()), &lock.to_string());
-        assert_eq!(
-            state(repo.path(), &config(), Some(TOKEN)),
-            Some(PluginState::Outdated)
-        );
-    }
-
-    #[test]
-    fn mcp_entry_follows_the_token() {
-        let repo = tempfile::tempdir().unwrap();
-        install(repo.path(), &config(), Some(TOKEN)).unwrap();
-        assert_eq!(
-            state(repo.path(), &config(), None),
-            Some(PluginState::Outdated)
-        );
-        install(repo.path(), &config(), None).unwrap();
-        assert_eq!(
-            state(repo.path(), &config(), None),
-            Some(PluginState::Current)
-        );
-    }
-
-    #[test]
-    fn malformed_mcp_config_is_outdated() {
-        let repo = tempfile::tempdir().unwrap();
-        install(repo.path(), &config(), Some(TOKEN)).unwrap();
-        write(&mcp_path(repo.path()), "not json");
-        assert_eq!(
-            state(repo.path(), &config(), Some(TOKEN)),
-            Some(PluginState::Outdated)
-        );
+        assert_eq!(state(repo.path(), &config()), Some(PluginState::Outdated));
     }
 }

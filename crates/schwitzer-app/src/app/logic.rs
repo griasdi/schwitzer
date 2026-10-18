@@ -186,14 +186,14 @@ fn in_repos(cwd: &Path, repos: &[PathBuf]) -> bool {
 }
 
 /// What the picker pastes into their agent: the task, the claim marker that links the agent's
-/// session to the task, and the MCP calls that finish it.
+/// session to the task, and the tool calls that finish it.
 pub fn pick_prompt(room: &str, task: &Task, token: &ClaimToken) -> String {
     format!(
         "Work on schwitzer task #{number} in room \"{room}\": {title}\n\
          schwitzer-claim: {token}\n\
-         The build is claimed for you. Read the task and its approved plan with the schwitzer \
-         MCP tool get_task (room \"{room}\", task {number}), implement the plan, then call \
-         finish with a short note, or release if you stop.",
+         The build is claimed for you. Read the task and its approved plan with the tool \
+         schwitzer_get_task (room \"{room}\", task {number}), implement the plan, then call \
+         schwitzer_finish with a short note, or schwitzer_release if you stop.",
         number = task.number,
         title = task.title,
         token = token.to_hex(),

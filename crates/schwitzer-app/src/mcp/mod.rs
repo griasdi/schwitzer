@@ -1,5 +1,5 @@
-//! The MCP server: lets agents on this computer list, propose, claim and finish tasks of the
-//! joined rooms as this member.
+//! The MCP server: the omp plugin in shared repos lists, proposes, claims and finishes tasks of
+//! the joined rooms through it, as this member.
 //!
 //! Streamable HTTP (rmcp 3.5) on `127.0.0.1` only. Every request needs the bearer token from
 //! `<data dir>/mcp-token`; requests with an `Origin` header (browsers) are refused, and rmcp's
@@ -10,7 +10,7 @@ mod serve;
 mod token;
 mod tools;
 
-pub use serve::{client_config, server_entry, subscription, url};
+pub use serve::{subscription, url};
 pub use token::load_or_create_token;
 
 /// Whether the server listens.

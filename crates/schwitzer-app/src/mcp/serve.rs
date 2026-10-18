@@ -137,25 +137,9 @@ async fn guard(
     next.run(req).await
 }
 
-/// The address MCP clients connect to.
+/// The address the omp plugin connects to.
 pub fn url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/mcp")
-}
-
-/// The configuration snippet for an MCP client.
-pub fn client_config(port: u16, token: &str) -> String {
-    let config =
-        serde_json::json!({ "mcpServers": { "schwitzer": server_entry(&url(port), token) } });
-    serde_json::to_string_pretty(&config).unwrap_or_default()
-}
-
-/// One MCP client's entry for this server at `url`, with the bearer `token`.
-pub fn server_entry(url: &str, token: &str) -> serde_json::Value {
-    serde_json::json!({
-        "type": "http",
-        "url": url,
-        "headers": { "Authorization": format!("Bearer {token}") },
-    })
 }
 
 #[cfg(test)]
@@ -170,13 +154,5 @@ mod tests {
         assert!(
             matches!(bind_failure(&denied, 80), McpStatus::Failed(m) if m.starts_with("port 80: "))
         );
-    }
-
-    #[test]
-    fn the_client_config_names_the_url_and_the_bearer() {
-        let config: serde_json::Value = serde_json::from_str(&client_config(13400, "tok")).unwrap();
-        let server = &config["mcpServers"]["schwitzer"];
-        assert_eq!(server["url"], "http://127.0.0.1:13400/mcp");
-        assert_eq!(server["headers"]["Authorization"], "Bearer tok");
     }
 }

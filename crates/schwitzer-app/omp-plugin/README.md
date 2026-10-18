@@ -1,6 +1,6 @@
 # The omp plugin
 
-The Schwitzer app writes an omp extension into every repository a room shares (Settings, the room's repos), so an omp session started there gets the `/schwitzer` command. With it, the session plans, builds and proposes tasks of the rooms that share the repo and notes ideas for them, by calling the app's own MCP server. The source is `index.ts` in this directory; the copies in repos are written by the app and overwritten, so edit this file, never a copy.
+The Schwitzer app writes an omp extension into every repository a room shares (Settings, the room's repos), so an omp session started there gets the `/schwitzer` command. With it, the session plans, builds and proposes tasks of the rooms that share the repo and notes ideas for them, and gives the agent the app's tools, all through the app's own MCP server. The source is `index.ts` in this directory; the copies in repos are written by the app and overwritten, so edit this file, never a copy.
 
 ## Commands
 
@@ -60,14 +60,14 @@ sequenceDiagram
 - Refused in plan mode: "Leave plan mode, then run /schwitzer build again."
 - The pick and the claim work as for `plan`, with stage `ready` and `work: "build"`. When there is no task: "No approved Schwitzer task waits to be built."
 - No session entry is stored, so the plan review hook never sends a build task's plan.
-- The task message tells the agent to implement the approved plan and then call `finish` with room, task and a note on what was done, or `release` with a note on why if it stops without finishing.
+- The task message tells the agent to implement the approved plan and then call `schwitzer_finish` with room, task and a note on what was done, or `schwitzer_release` with a note on why if it stops without finishing.
 - The editor gets `Build Schwitzer task #<n> "<title>" from room "<room>". schwitzer-claim: <token>`, and the plugin says "Task #<n> is claimed for building. Press Enter to start."
 
 ### /schwitzer propose [text]
 
-- Without text, and with open (unclaimed) ideas in the joined rooms, a picker offers "New proposal" and `#<n> <title>` per idea. Picking an idea sends a user message that asks the agent to read it with `get_task`, draft the proposal, ask, and after agreement call `propose` with `idea: <n>`: the idea becomes the proposal.
+- Without text, and with open (unclaimed) ideas in the joined rooms, a picker offers "New proposal" and `#<n> <title>` per idea. Picking an idea sends a user message that asks the agent to read it with `schwitzer_get_task`, draft the proposal, ask, and after agreement call `schwitzer_propose` with `idea: <n>`: the idea becomes the proposal.
 - Otherwise the plugin asks for the room (not when there is only one) and sends a user message that asks the agent to draft a proposal from the text, or from the conversation so far when there is no text, asking the user what to propose if the conversation holds no idea.
-- In both cases the agent looks into the repository but changes nothing, writes a one-line title and a Markdown body (what should be done and why), asks the user with the ask tool, title and body in the question, whether to send, change or drop the proposal, and calls `propose` only after the user agrees.
+- In both cases the agent looks into the repository but changes nothing, writes a one-line title and a Markdown body (what should be done and why), asks the user with the ask tool, title and body in the question, whether to send, change or drop the proposal, and calls `schwitzer_propose` only after the user agrees.
 - When the app has joined none of the configured rooms: "The Schwitzer app has not joined a room this repo is shared with."
 
 ### /schwitzer idea &lt;text&gt;
@@ -76,6 +76,26 @@ sequenceDiagram
 - The plugin asks for the room (not when there is only one), calls `add_idea` and says `Idea #<n> noted in "<room>".`
 - A text longer than 200 bytes (the server's title cap) becomes the body; the title is the longest prefix that fits in 197 bytes, trimmed, followed by `…`.
 - When the app has joined none of the configured rooms, it says the same as `propose`.
+
+## Tools
+
+|Tool|Does|
+|---|---|
+|`schwitzer_list_rooms`|The joined rooms with members and task counts|
+|`schwitzer_list_tasks`|The tasks of a room, optionally of one stage|
+|`schwitzer_get_task`|One task in full: body, plan, claim, notes|
+|`schwitzer_propose`|Propose a task, or write up an idea into a proposal|
+|`schwitzer_add_idea`|Note an idea|
+|`schwitzer_claim`|Claim a task for planning or building|
+|`schwitzer_submit_plan`|Hand in the plan for a planning claim|
+|`schwitzer_finish`|Finish a build claim with a note|
+|`schwitzer_release`|Give a claim back with a note|
+|`schwitzer_add_note`|Add a note to a task|
+
+- The plugin registers them when omp loads it, whether the app runs or not; each call goes to the app like the commands' calls (below), so without the app it fails with "not reachable".
+- `schwitzer_list_rooms`, `schwitzer_list_tasks` and `schwitzer_get_task` have approval tier `read`, the rest `write`.
+- A restricted subagent does not get extension tools (an omp rule), so it does not get these either.
+- None accepts, rejects or approves: humans decide in the app.
 
 ## How the app installs it
 
@@ -87,19 +107,17 @@ The app writes these files into the repo:
 |`.omp/plugins/node_modules/schwitzer/package.json`|Name `schwitzer`, the app's version, `"omp": { "extensions": ["./index.ts"] }`|
 |`.omp/plugins/node_modules/schwitzer/schwitzer.json`|`data_dir`, `mcp_url`, `rooms` (hex ids of the rooms that share this repo)|
 |`.omp/plugins/omp-plugins.lock.json`|Entry `schwitzer` with the app's version; `enabled` and `enabledFeatures` are kept from an existing entry, `enabled` defaults to true|
-|`.omp/mcp.json`|MCP server `schwitzer` (`type: http`, the app's URL, `Authorization: Bearer <token>`); only when the app has a token, otherwise the entry is removed|
 
 - omp started in the repo loads it as a project-scope plugin. A new version takes effect when omp starts next.
-- Install writes nothing when the lock file or `mcp.json` exists but is not an omp lock file or MCP config. JSON files are written through a temporary file and a rename.
+- Install writes nothing when the lock file exists but is not an omp lock file. JSON files are written through a temporary file and a rename.
+- Older app versions put a `schwitzer` server with the token into `.omp/mcp.json`; install and uninstall remove it, and a repo that still has it counts as out of date.
 - Plugin files whose content has not changed are not rewritten, so they keep their mtime.
-
-> **Warning:** `.omp/mcp.json` holds the app's MCP token. On unix it is readable by the user only (mode 0600). Keep it out of version control.
 
 ## Keeping it current
 
 - Settings, per repo of the room: the status "omp plugin installed", "omp plugin out of date" or "No omp plugin", and buttons to install, remove or update the plugin in that repo.
-- At start and every 5 s the app compares each installed plugin with what it would write: the three plugin files, the version in the lock entry and the entry in `mcp.json`. Any difference marks it out of date, for example after an app update, a new MCP port or a new token.
-- Settings, Agents, "omp plugin": a summary, "Update all", and "Update automatically" On or Off (`auto_update_plugins` in `settings.toml`, on by default). With it on, an out-of-date plugin is rewritten as soon as the app sees it. A repo whose automatic update failed shows the error in the banner and is not retried until its plugin changes state, the user updates it by hand, or auto-update is switched on again.
+- At start and every 5 s the app compares each installed plugin with what it would write: the three plugin files, the version in the lock entry, and that `.omp/mcp.json` holds no `schwitzer` server. Any difference marks it out of date, for example after an app update or a new MCP port.
+- Settings, omp, "omp plugin": a summary, "Update all", and "Update automatically" On or Off (`auto_update_plugins` in `settings.toml`, on by default). With it on, an out-of-date plugin is rewritten as soon as the app sees it. A repo whose automatic update failed shows the error in the banner and is not retried until its plugin changes state, the user updates it by hand, or auto-update is switched on again.
 - When the shared repos change, the app rewrites every installed plugin, so that `schwitzer.json` lists the right rooms, whether auto-update is on or not. From a repo no room shares any more it removes the plugin: the plugin directory, its entries in the lock file (`plugins` and `settings`) and the `schwitzer` server in `mcp.json`. A file omp would not read is left alone.
 
 ## How it talks to the app
@@ -108,8 +126,8 @@ The app writes these files into the repo:
 - The token is read from `<data_dir>/mcp-token` on every call, so a new token needs no omp restart. `schwitzer.json` holds no token.
 - Each request times out after 35 s; the app bounds a tool call at 30 s.
 - Errors: "no MCP token in <dir>; start the Schwitzer app", "not reachable at <url>; is the app running?", "the app refused the token in <dir>", "the app answered HTTP <status>", "the app answered without a result", or the text of a tool error.
-- The plugin calls `list_rooms`, `list_tasks`, `claim`, `submit_plan` and `add_idea`. The agent calls `get_task`, `propose`, `finish` and `release` itself, through the `schwitzer` entry in `.omp/mcp.json`. Neither accepts, rejects or approves anything: humans decide in the app.
+- The plugin calls `list_rooms`, `list_tasks`, `claim`, `submit_plan` and `add_idea` for its commands; the agent calls the `schwitzer_*` tools, which the plugin forwards the same way. Neither accepts, rejects or approves anything: humans decide in the app.
 
 ## Editing the plugin
 
-Edit `index.ts` in this directory. The app compiles it in with `include_str!` (`src/omp_plugin.rs`), so a rebuilt app sees every installed plugin as out of date and rewrites it, automatically or through Update. The `Pi` and `Ctx` interfaces at the top of `index.ts` describe only the parts of omp's extension API the plugin uses; omp ships no type package. Try a change headless as AGENTS.md describes under "Running headless", with its own `SCHWITZER_HOME`, never against the user's app.
+Edit `index.ts` in this directory. The app compiles it in with `include_str!` (`src/omp_plugin.rs`), so a rebuilt app sees every installed plugin as out of date and rewrites it, automatically or through Update. The `Pi` and `Ctx` interfaces at the top of `index.ts` describe only the parts of omp's extension API the plugin uses; omp ships no type package. The `schwitzer_*` tools in `TOOLS` mirror the MCP tools in `src/mcp/tools.rs`: a tool or argument added there is added to `TOOLS` too. Try a change headless as AGENTS.md describes under "Running headless", with its own `SCHWITZER_HOME`, never against the user's app.

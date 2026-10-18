@@ -407,7 +407,7 @@ Four kinds plus a segmented control; every button is wrapped in an id container 
 ### Name tags and pills
 - **Name tag:** fully round, 2px 8px padding, 12px semibold; fill/text from the member's tag hue. Appears on rows with a claim, in sessions, in notes.
 - **Pill:** quiet round label on Mint Chrome with a Hairline border and Moss Grey 12px medium text: "idle" on a session, the stage label in the task dialog.
-- **Dot:** 8px round; running green up, red down, Sage Edge unknown. Server and MCP state in the status bar.
+- **Dot:** 8px round; running green up, red down, Sage Edge unknown. Server and omp connection state in the status bar.
 
 ### Inputs / Fields
 - **Style:** raised fill, 1px Mint Hairline border, 8px radius, 8px padding, 14px text, muted placeholder; text editors the same.
@@ -418,7 +418,7 @@ Four kinds plus a segmented control; every button is wrapped in an id container 
 
 ### Navigation: toolbar, status bar, room switcher
 - **Toolbar (slim button bar):** Mint Chrome, 4px 8px padding. Left: primary "New task" with plus, ghost "invite" icon (copy room key). Right: ghost settings icon with `Ctrl+,` tooltip. Actions that need a room are disabled and muted until one is selected.
-- **Status bar:** 32px, Mint Chrome, padding 4px 8px. Left to right: status flower (14px; green online, red offline, muted connecting), my name (12px semibold), **room switcher**, spacer, server dot + "online/offline/connecting" (or a transient notice in Leaf Ink), MCP dot + "MCP". Both indicators have tooltips with detail.
+- **Status bar:** 32px, Mint Chrome, padding 4px 8px. Left to right: status flower (14px; green online, red offline, muted connecting), my name (12px semibold), **room switcher**, spacer, server dot + "online/offline/connecting" (or a transient notice in Leaf Ink), omp dot + "omp". Both indicators have tooltips with detail.
 - **Room switcher:** a pick list that is flat on the chrome until hovered (Mint Breath, Sage Edge border), opened = Mint Pressed with Leaf Ink border. Its menu is raised, hairline-bordered, 8px radius, selected entry in ICQ Green with on-primary text.
 
 ### Sessions

@@ -102,14 +102,14 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
         None => "connecting",
     };
     let server_tip = app.selected_server_tip();
-    let (mcp_state, mcp_tip) = match &app.mcp {
-        None => (None, "MCP starting".to_owned()),
-        Some(McpStatus::Listening { url }) => (Some(true), format!("MCP for agents: {url}")),
+    let (omp_state, omp_tip) = match &app.mcp {
+        None => (None, "omp connection starting".to_owned()),
+        Some(McpStatus::Listening { url }) => (Some(true), format!("omp connection: {url}")),
         Some(McpStatus::PortInUse) => (
             Some(false),
-            format!("MCP: port {} is in use", app.settings.mcp_port),
+            format!("omp connection: port {} is in use", app.settings.mcp_port),
         ),
-        Some(McpStatus::Failed(e)) => (Some(false), format!("MCP: {e}")),
+        Some(McpStatus::Failed(e)) => (Some(false), format!("omp connection: {e}")),
     };
     let mut bar = row![
         icon(Icon::Flower, 14.0, Tone::Bloom(bloom)),
@@ -130,10 +130,10 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
         ));
     }
     bar = bar.push(with_tip(
-        row![dot(mcp_state), muted("MCP")]
+        row![dot(omp_state), muted("omp")]
             .spacing(SP_1)
             .align_y(Alignment::Center),
-        mcp_tip,
+        omp_tip,
     ));
     container(bar)
         .padding([SP_1, SP_2])
