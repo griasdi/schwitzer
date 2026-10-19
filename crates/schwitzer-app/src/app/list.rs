@@ -1,7 +1,7 @@
 //! The task list: foldable groups of raised slabs, each with its stage lamp, labels, the
 //! worker's name tag and its next-step button; the open task or draft sits in place among them.
 
-use iced::widget::{Space, column, container, row, scrollable, text};
+use iced::widget::{Space, column, container, responsive, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{Decision, Project, RoomState, Stage, Task};
 
@@ -18,49 +18,53 @@ use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14}
 /// The widget id of the task list's scrollable.
 pub const LIST_ID: &str = "tasks";
 
-pub fn view<'a>(app: &'a App, state: &'a RoomState, project: &Project) -> Element<'a, Message> {
-    let mut list = column![].spacing(SP_3).width(Length::Fill);
-    for group in Group::ALL {
-        let tasks = logic::tasks_in(state, project.id, group);
-        // Proposals and ideas stay visible, so their `+` is always reachable.
-        if tasks.is_empty() && !matches!(group, Group::Proposals | Group::Ideas) {
-            continue;
-        }
-        let open = !app.collapsed.contains(&group);
-        let mut slabs = column![group_header(group, tasks.len(), open)].spacing(SP_1);
-        if open {
-            if matches!(group, Group::Proposals | Group::Ideas)
-                && app.expanded
-                    == Some(Expanded::New {
-                        idea: group == Group::Ideas,
-                    })
-            {
-                slabs = slabs.push(task_view::new_task(app, group == Group::Ideas));
+pub fn view<'a>(app: &'a App, state: &'a RoomState, project: &'a Project) -> Element<'a, Message> {
+    responsive(move |size| {
+        let mut list = column![].spacing(SP_3).width(Length::Fill);
+        for group in Group::ALL {
+            let tasks = logic::tasks_in(state, project.id, group);
+            // Proposals and ideas stay visible, so their `+` is always reachable.
+            if tasks.is_empty() && !matches!(group, Group::Proposals | Group::Ideas) {
+                continue;
             }
-            for task in tasks {
-                slabs = slabs.push(if app.expanded == Some(Expanded::Task(task.number)) {
-                    task_view::view(app, state, task)
-                } else {
-                    task_row(app, state, task)
-                });
+            let open = !app.collapsed.contains(&group);
+            let mut slabs = column![group_header(group, tasks.len(), open)].spacing(SP_1);
+            if open {
+                if matches!(group, Group::Proposals | Group::Ideas)
+                    && app.expanded
+                        == Some(Expanded::New {
+                            idea: group == Group::Ideas,
+                        })
+                {
+                    slabs =
+                        slabs.push(task_view::new_task(app, group == Group::Ideas, size.height));
+                }
+                for task in tasks {
+                    slabs = slabs.push(if app.expanded == Some(Expanded::Task(task.number)) {
+                        task_view::view(app, state, task, size.height)
+                    } else {
+                        task_row(app, state, task)
+                    });
+                }
             }
+            list = list.push(slabs);
         }
-        list = list.push(slabs);
-    }
-    if !state.tasks.iter().any(|t| t.project == project.id) {
-        list = list.push(
-            container(muted(
-                "No tasks yet. Add a proposal with +; agents pick it up once it has a plan.",
-            ))
-            .padding([SP_1, SP_2]),
-        );
-    }
-    scrollable(container(list).padding(SP_2))
-        .spacing(SP_1)
-        .id(LIST_ID)
-        .height(Length::Fill)
-        .style(theme::scroll)
-        .into()
+        if !state.tasks.iter().any(|t| t.project == project.id) {
+            list = list.push(
+                container(muted(
+                    "No tasks yet. Add a proposal with +; agents pick it up once it has a plan.",
+                ))
+                .padding([SP_1, SP_2]),
+            );
+        }
+        scrollable(container(list).padding(SP_2))
+            .spacing(SP_1)
+            .id(LIST_ID)
+            .height(Length::Fill)
+            .style(theme::scroll)
+            .into()
+    })
+    .into()
 }
 
 /// A centred empty state with one action.

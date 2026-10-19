@@ -9,6 +9,7 @@ pub mod logic;
 mod pages;
 mod resume;
 mod settings_view;
+mod sticky;
 mod task_view;
 mod widgets;
 
@@ -1313,7 +1314,7 @@ impl App {
                         body: text_editor::Content::with_text(&task.body),
                     });
                 }
-                operation::focus("task-title")
+                Task::batch([operation::focus("task-title"), reveal("open-task")])
             }
             Message::CancelEditTask => {
                 self.task_draft = None;
@@ -1344,17 +1345,24 @@ impl App {
                 if let Some((_, task)) = self.open() {
                     self.plan_draft = Some(text_editor::Content::with_text(&task.plan));
                 }
-                Task::none()
+                reveal_bottom("plan")
             }
             Message::CancelEditPlan => {
                 self.plan_draft = None;
                 Task::none()
             }
             Message::PlanAction(action) => {
-                if let Some(draft) = &mut self.plan_draft {
-                    draft.perform(action);
+                let Some(draft) = &mut self.plan_draft else {
+                    return Task::none();
+                };
+                // A growing plan editor would push its buttons below the list.
+                let edit = action.is_edit();
+                draft.perform(action);
+                if edit {
+                    reveal_bottom("plan")
+                } else {
+                    Task::none()
                 }
-                Task::none()
             }
             Message::SavePlan => self.save_plan(),
             Message::PlanSaved(result) => {
@@ -2494,6 +2502,38 @@ fn reveal(id: &'static str) -> Task<Message> {
                 AbsoluteOffset {
                     x: 0.0,
                     y: (el.y - content_bounds.y - SP_2).max(0.0),
+                },
+            )
+        })
+    })
+}
+
+/// Scrolls the task list so the bottom of element `id` lies inside it, when the element ends
+/// below the list's bottom edge. Runs after the next layout, so it finds what the update opened.
+fn reveal_bottom(id: &'static str) -> Task<Message> {
+    selector::find(selector::id(list::LIST_ID)).then(move |list| {
+        let Some(Target::Scrollable {
+            bounds,
+            content_bounds,
+            translation,
+            ..
+        }) = list
+        else {
+            return Task::none();
+        };
+        selector::find(selector::id(id)).then(move |target| {
+            let Some(target) = target else {
+                return Task::none();
+            };
+            let el = target.bounds();
+            if el.y + el.height - translation.y <= bounds.y + bounds.height {
+                return Task::none();
+            }
+            operation::scroll_to(
+                list::LIST_ID,
+                AbsoluteOffset {
+                    x: 0.0,
+                    y: (el.y + el.height + SP_2 - content_bounds.y - bounds.height).max(0.0),
                 },
             )
         })

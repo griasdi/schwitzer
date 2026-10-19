@@ -316,6 +316,23 @@ pub fn slab_open(theme: &Theme) -> container::Style {
     }
 }
 
+/// The head of the open task while pinned to the top of the list: the open slab's fill and
+/// Sage Edge sides, square because the list's edge cuts it.
+pub fn pinned_head(theme: &Theme) -> container::Style {
+    let t = tokens(theme);
+    container::Style {
+        text_color: Some(t.text),
+        background: Some(t.raised.into()),
+        border: Border {
+            color: t.line_strong,
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        shadow: Shadow::default(),
+        snap: true,
+    }
+}
+
 /// A stage lamp: a small square, hollow while an idea or only proposed.
 pub fn lamp(kind: Lamp) -> impl Fn(&Theme) -> container::Style {
     move |theme| {

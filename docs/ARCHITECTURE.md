@@ -260,6 +260,7 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |`pages.rs`|full-window pages with a back button: Settings, Licenses|
 |`licenses_view.rs`|the licenses page|
 |`widgets.rs`|lamps, pills, buttons and other shared widgets|
+|`sticky.rs`|`Sticky`: the open task's head, pinned to the list's top while its slab is scrolled past|
 |`icons.rs`|Lucide icons from `assets/icons/`|
 |`../theme.rs`|Daylight and Night tokens, Figtree, widget styles|
 

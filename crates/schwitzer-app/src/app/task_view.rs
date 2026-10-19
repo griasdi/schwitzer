@@ -14,12 +14,17 @@ use super::widgets::{
     self, LAMP, heading, hrule, icon_button, icon_text_button, id_button, lamp, member_tag, muted,
     text_button,
 };
-use super::{App, Message};
+use super::{App, Message, sticky};
 use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 
 /// Task `task` open in place: the slab's two lines as a head that closes it again, then
 /// details, people, decisions, plan, priority and notes.
-pub fn view<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
+pub fn view<'a>(
+    app: &'a App,
+    state: &'a RoomState,
+    task: &'a Task,
+    list_height: f32,
+) -> Element<'a, Message> {
     let n = task.number;
     let editable = logic::editable(task);
     let mut icons = row![];
@@ -55,7 +60,7 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
     );
 
     let mut body = column![].spacing(SP_3);
-    if let Some(details) = details(app, task) {
+    if let Some(details) = details(app, task, list_height) {
         body = body.push(details);
     }
     body = body.push(people(app, state, task));
@@ -64,7 +69,7 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
     }
     body = body
         .push(hrule())
-        .push(plan(app, task, editable))
+        .push(plan(app, task, editable, list_height))
         .push(hrule())
         .push(priority(task))
         .push(hrule());
@@ -72,15 +77,32 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
         body = body.push(project(state, task)).push(hrule());
     }
     body = body.push(notes(app, state, task));
-    container(column![head, hrule(), container(body).padding(SP_3)])
-        .id("open-task")
-        .width(Length::Fill)
-        .style(theme::slab_open)
-        .into()
+    container(sticky::sticky(
+        column![head, hrule()],
+        container(body).padding(SP_3),
+        theme::pinned_head,
+    ))
+    .id("open-task")
+    .width(Length::Fill)
+    .style(theme::slab_open)
+    .into()
+}
+
+/// What the open task, its form and their paddings take beside the details editor.
+const DETAILS_RESERVE: f32 = 200.0;
+/// What a draft's group header, title field, buttons and paddings take beside its editor.
+const DRAFT_RESERVE: f32 = 170.0;
+/// What the pinned head, the Plan heading, buttons and paddings take beside the plan editor.
+const PLAN_RESERVE: f32 = 200.0;
+
+/// The tallest an editor may grow in a list `list_height` tall: what `reserve` leaves, never
+/// below `min`.
+fn editor_max(list_height: f32, reserve: f32, min: f32) -> f32 {
+    (list_height - reserve).max(min)
 }
 
 /// The draft of a new proposal, or of an idea, at the top of its group.
-pub fn new_task(app: &App, idea: bool) -> Element<'_, Message> {
+pub fn new_task(app: &App, idea: bool, list_height: f32) -> Element<'_, Message> {
     let filled = !app.forms.proposal_title.trim().is_empty();
     let (title_hint, body_hint, submit) = if idea {
         (
@@ -114,6 +136,7 @@ pub fn new_task(app: &App, idea: bool) -> Element<'_, Message> {
                     .id("proposal-body")
                     .placeholder(body_hint)
                     .min_height(100)
+                    .max_height(editor_max(list_height, DRAFT_RESERVE, 100.0))
                     .padding(SP_2)
                     .size(TS_14)
                     .on_action(Message::ProposalBody)
@@ -150,7 +173,7 @@ pub fn new_task(app: &App, idea: bool) -> Element<'_, Message> {
 }
 
 /// The task's details, or the form that edits its title and details.
-fn details<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
+fn details<'a>(app: &'a App, task: &'a Task, list_height: f32) -> Option<Element<'a, Message>> {
     if let Some(draft) = &app.task_draft {
         let idea = task.stage == Stage::Idea;
         let titled = !draft.title.trim().is_empty();
@@ -195,6 +218,7 @@ fn details<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
                     .id("task-body")
                     .placeholder("Details")
                     .min_height(100)
+                    .max_height(editor_max(list_height, DETAILS_RESERVE, 100.0))
                     .padding(SP_2)
                     .size(TS_14)
                     .on_action(Message::EditBody)
@@ -315,7 +339,12 @@ fn actions<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
     any.then(|| row.wrap().vertical_spacing(SP_2).into())
 }
 
-fn plan<'a>(app: &'a App, task: &'a Task, editable: bool) -> Element<'a, Message> {
+fn plan<'a>(
+    app: &'a App,
+    task: &'a Task,
+    editable: bool,
+    list_height: f32,
+) -> Element<'a, Message> {
     let ready = !task.plan.trim().is_empty();
     let mut head = row![
         icon(
@@ -340,12 +369,13 @@ fn plan<'a>(app: &'a App, task: &'a Task, editable: bool) -> Element<'a, Message
     }
     let mut col = column![head].spacing(SP_2);
     if let Some(draft) = &app.plan_draft {
-        return col
-            .push(
+        return container(
+            col.push(
                 text_editor(draft)
                     .id("plan-editor")
                     .placeholder("Markdown")
                     .min_height(180)
+                    .max_height(editor_max(list_height, PLAN_RESERVE, 180.0))
                     .padding(SP_2)
                     .size(TS_14)
                     .on_action(Message::PlanAction)
@@ -368,8 +398,10 @@ fn plan<'a>(app: &'a App, task: &'a Task, editable: bool) -> Element<'a, Message
                     ),
                 ]
                 .spacing(SP_2),
-            )
-            .into();
+            ),
+        )
+        .id("plan")
+        .into();
     }
     if ready {
         col = col.push(rich(app, &app.open_md.plan));
