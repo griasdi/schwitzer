@@ -3,7 +3,7 @@
 //! window's place.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use iced::advanced::widget::Id;
 use iced::widget::text_editor::{self, Cursor, Position};
@@ -65,6 +65,10 @@ pub struct Resume {
     /// The window's place; `None` in a file from a version without it.
     #[serde(default)]
     pub placement: Option<Placement>,
+    /// On an unconfirmed first-start page: its projects folders and entered WSL distros.
+    /// `None` otherwise and in a file from a version without it.
+    #[serde(default)]
+    pub first_start: Option<(Vec<PathBuf>, Vec<String>)>,
 }
 
 /// Every `Forms` string field by its name, `proposal_body` as [`Text`].
@@ -260,6 +264,12 @@ impl App {
                 .and_then(|id| FOCUSABLE.into_iter().find(|f| *id == Id::new(f)))
                 .map(str::to_owned),
             placement,
+            first_start: self.first_start.then(|| {
+                (
+                    self.settings.projects_dirs.clone().unwrap_or_default(),
+                    self.settings.wsl_distros.clone(),
+                )
+            }),
         }
     }
 
@@ -286,6 +296,13 @@ impl App {
             });
             self.plan_draft = r.plan_draft.as_ref().map(Text::content);
             self.sync_project_form();
+        }
+        if self.first_start
+            && let Some((dirs, distros)) = r.first_start
+        {
+            self.settings.projects_dirs = Some(dirs);
+            self.settings.wsl_distros = distros;
+            self.read_project_dirs();
         }
         let forms = r.forms;
         self.forms.server_url = forms.server_url;
@@ -360,6 +377,7 @@ mod tests {
                 size: (520.0, 700.0),
                 maximized: true,
             }),
+            first_start: Some((vec![PathBuf::from("/code")], vec!["Ubuntu".to_owned()])),
         }
     }
 
@@ -391,11 +409,13 @@ mod tests {
         let fields = old.as_object_mut().unwrap();
         fields.remove("placement");
         fields.remove("members_open");
+        fields.remove("first_start");
         std::fs::write(dir.path().join(FILE), old.to_string()).unwrap();
         assert_eq!(
             take(dir.path(), now + 1_000),
             Some(Resume {
                 placement: None,
+                first_start: None,
                 members_open: false,
                 ..resume(now)
             })

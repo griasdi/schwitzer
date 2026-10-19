@@ -1,6 +1,7 @@
 //! The settings page: your name, the projects folders, the selected room and its projects, the
 //! selected project and its linked repos, all rooms (switch, create, join), the omp connection,
-//! in release builds the updates, and the about block with the licenses, each on its own slab.
+//! in release builds the updates, and the about block with the licenses, each on its own slab;
+//! and the first-start page with the projects folders.
 
 use iced::widget::{Space, column, container, row, text};
 use iced::{Alignment, Element, Length};
@@ -34,6 +35,35 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
     body = body.push(section(about_block()));
     frame("settings-page", "Settings", body.into(), None)
+}
+
+/// The first-start page: the projects folders found, to keep, remove or add to, confirmed
+/// with Continue or Back.
+pub fn first_start(app: &App) -> Element<'_, Message> {
+    let body = column![
+        muted(
+            "Choose the folders that hold your repos. Schwitzer filled in the usual ones it \
+             found; you can change them later in Settings."
+        ),
+        section(projects_folders(app)),
+    ]
+    .spacing(SP_3);
+    let footer = row![
+        Space::new().width(Length::Fill),
+        text_button(
+            "projects-dirs-confirm",
+            "Continue",
+            Some(Message::ConfirmProjectsDirs),
+            theme::button_primary
+        ),
+    ]
+    .spacing(SP_2);
+    frame(
+        "first-start-page",
+        "Your repos",
+        body.into(),
+        Some(footer.into()),
+    )
 }
 
 fn you(app: &App) -> Element<'_, Message> {

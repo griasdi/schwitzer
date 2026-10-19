@@ -14,6 +14,7 @@ mod widgets;
 
 pub use self::resume::Resumed;
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -133,6 +134,8 @@ pub enum Message {
     RemoveProjectsDir(usize),
     /// Opens Settings with the focus on the projects folder input.
     OpenProjectsDirs,
+    /// Ends the first-start page: saves the projects folders shown on it and opens the main page.
+    ConfirmProjectsDirs,
     RepoInput(String),
     AddRepo,
     /// Links a suggested folder to the selected project.
@@ -336,6 +339,10 @@ pub struct App {
     /// The subfolders of the projects folder, for suggestions; read outside `view`.
     project_dirs: Vec<PathBuf>,
     page: Page,
+    /// Whether the first-start page shows: `settings.toml` had no projects folders yet. Until
+    /// the member confirms them, `save_settings` leaves `projects_dirs` and `wsl_distros` on
+    /// disk as they were, so the page comes back on the next start.
+    first_start: bool,
     /// The unfolded entry of the Licenses page.
     license_open: Option<usize>,
     /// The task or draft open in place in the list.
@@ -397,6 +404,7 @@ impl App {
         let (mut settings, problem) = Settings::load(&data_dir);
         let unreadable = problem.is_some();
         let saved_before = settings.clone();
+        let first_start = !unreadable && settings.projects_dirs.is_none();
         if settings.projects_dirs.is_none() {
             settings.projects_dirs = Some(
                 directories::BaseDirs::new()
@@ -442,8 +450,7 @@ impl App {
                 note: String::new(),
             },
             project_dirs: Vec::new(),
-            // An unreadable file is never overwritten at start; otherwise the first-start
-            // projects folders are saved below.
+            // An unreadable file is never overwritten at start.
             saved: if unreadable {
                 settings.clone()
             } else {
@@ -458,6 +465,7 @@ impl App {
             selected,
             chosen_projects: HashMap::new(),
             page: Page::Main,
+            first_start,
             license_open: None,
             expanded: None,
             collapsed: HashSet::from([Group::Closed]),
@@ -540,16 +548,20 @@ impl App {
         if let Some(banner) = &self.banner {
             page = page.push(container(widgets::banner(banner)).padding(SP_2));
         }
-        let body: Element<'_, Message> = match self.page {
-            Page::Main => {
-                let mut main = column![chrome::header(self), widgets::hrule()];
-                if let Some(members) = chrome::members(self) {
-                    main = main.push(members).push(widgets::hrule());
+        let body: Element<'_, Message> = if self.first_start {
+            settings_view::first_start(self)
+        } else {
+            match self.page {
+                Page::Main => {
+                    let mut main = column![chrome::header(self), widgets::hrule()];
+                    if let Some(members) = chrome::members(self) {
+                        main = main.push(members).push(widgets::hrule());
+                    }
+                    main.push(self.main()).into()
                 }
-                main.push(self.main()).into()
+                Page::Settings => settings_view::view(self),
+                Page::Licenses => licenses_view::view(self),
             }
-            Page::Settings => settings_view::view(self),
-            Page::Licenses => licenses_view::view(self),
         };
         container(
             page.push(container(body).height(Length::Fill))
@@ -926,6 +938,10 @@ impl App {
                 reveal("open-task")
             }
             Message::Back => {
+                if self.first_start {
+                    self.confirm_projects_dirs();
+                    return Task::none();
+                }
                 if self.expanded.take().is_some() {
                     self.reset_drafts();
                 } else if self.page == Page::Licenses {
@@ -1119,6 +1135,10 @@ impl App {
             Message::OpenProjectsDirs => {
                 self.open_settings();
                 operation::focus("projects-dir-input")
+            }
+            Message::ConfirmProjectsDirs => {
+                self.confirm_projects_dirs();
+                Task::none()
             }
             Message::NewProjectName(s) => {
                 self.forms.new_project = s;
@@ -1682,6 +1702,14 @@ impl App {
         self.read_project_dirs();
         self.notify("Projects folder added");
         true
+    }
+
+    /// Ends the first-start page: the projects folders and the entered WSL distros are saved
+    /// from now on, starting with the list on the page (`Some(vec![])` when it is empty).
+    fn confirm_projects_dirs(&mut self) {
+        self.first_start = false;
+        self.page = Page::Main;
+        self.save_settings();
     }
 
     /// Links `path` to the selected project; `None` when nothing was linked.
@@ -2359,14 +2387,25 @@ impl App {
     }
 
     /// Writes `settings.toml` when something changed since it was last read or written.
-    /// Changed repos also update the omp plugins.
+    /// Changed repos also update the omp plugins. On the first-start page the projects folders
+    /// and the entered WSL distros are held back.
     fn save_settings(&mut self) {
-        if self.settings == self.saved {
+        // On the first-start page the folders wait for the member's confirmation.
+        let on_disk = if self.first_start {
+            Cow::Owned(Settings {
+                projects_dirs: self.saved.projects_dirs.clone(),
+                wsl_distros: self.saved.wsl_distros.clone(),
+                ..self.settings.clone()
+            })
+        } else {
+            Cow::Borrowed(&self.settings)
+        };
+        if *on_disk == self.saved {
             return;
         }
-        let repos_changed = self.settings.repos != self.saved.repos;
-        match self.settings.save(&self.data_dir) {
-            Ok(()) => self.saved = self.settings.clone(),
+        let repos_changed = on_disk.repos != self.saved.repos;
+        match on_disk.save(&self.data_dir) {
+            Ok(()) => self.saved = on_disk.into_owned(),
             Err(e) => self.banner = Some(format!("Cannot save settings: {e}")),
         }
         if repos_changed {
