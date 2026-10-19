@@ -334,8 +334,6 @@ pub struct App {
     rooms: Vec<(RoomKey, Option<RoomState>)>,
     servers: HashMap<ServerAddr, ServerStatus>,
     selected: Option<RoomId>,
-    /// The project last picked per room; in memory only.
-    chosen_projects: HashMap<RoomId, u64>,
     /// The subfolders of the projects folder, for suggestions; read outside `view`.
     project_dirs: Vec<PathBuf>,
     page: Page,
@@ -463,7 +461,6 @@ impl App {
             rooms,
             servers: HashMap::new(),
             selected,
-            chosen_projects: HashMap::new(),
             page: Page::Main,
             first_start,
             license_open: None,
@@ -916,7 +913,7 @@ impl App {
                 }) else {
                     return Task::none();
                 };
-                if self.chosen_projects.insert(room, project) != Some(project) {
+                if self.choose_project(room, project) {
                     self.sync_project_form();
                 }
                 self.page = Page::Main;
@@ -1119,7 +1116,7 @@ impl App {
 
             Message::SelectProject(id) => {
                 if let Some(room) = self.selected {
-                    self.chosen_projects.insert(room, id);
+                    self.choose_project(room, id);
                 }
                 self.expanded = None;
                 self.reset_drafts();
@@ -1158,7 +1155,7 @@ impl App {
                 match result {
                     Ok(Response::Project(project)) => {
                         self.forms.new_project.clear();
-                        self.chosen_projects.insert(room, project.id);
+                        self.choose_project(room, project.id);
                         if self.selected == Some(room) {
                             self.page = Page::Main;
                             self.expanded = None;
@@ -1473,7 +1470,7 @@ impl App {
     /// member has linked a repo to, else the first one; `None` while the room has none.
     fn selected_project(&self) -> Option<&Project> {
         let state = self.selected_state()?;
-        let chosen = self.chosen_projects.get(&state.id);
+        let chosen = self.settings.chosen_projects.get(&state.id);
         chosen
             .and_then(|id| state.projects.iter().find(|p| p.id == *id))
             .or_else(|| {
@@ -1483,6 +1480,16 @@ impl App {
                     .find(|p| !self.settings.project_repos(&state.id, p.id).is_empty())
             })
             .or_else(|| state.projects.first())
+    }
+
+    /// Remembers `project` as the one shown for `room` and saves the settings; `true` when that
+    /// changed.
+    fn choose_project(&mut self, room: RoomId, project: u64) -> bool {
+        let changed = self.settings.chosen_projects.insert(room, project) != Some(project);
+        if changed {
+            self.save_settings();
+        }
+        changed
     }
 
     /// The repos this member has linked to the selected project.
@@ -2141,6 +2148,10 @@ impl App {
         self.settings.repos.retain(|key, _| {
             settings::parse_repo_key(key).is_some_and(|(room, _)| joined.contains(room))
         });
+        let rooms = &self.rooms;
+        self.settings
+            .chosen_projects
+            .retain(|room, _| rooms.iter().any(|(key, _)| RoomId::of(&key.token) == *room));
         self.save_settings();
     }
 

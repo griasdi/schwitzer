@@ -1,5 +1,5 @@
 //! What the window showed when the app restarted for an update, so the new process opens
-//! there: page, room, project, the open task or draft, unsaved text, the focused input and the
+//! there: page, room, the open task or draft, unsaved text, the focused input and the
 //! window's place.
 
 use std::io;
@@ -50,7 +50,6 @@ pub struct Resume {
     pub written_ms: u64,
     pub page: Page,
     pub selected: Option<RoomId>,
-    pub chosen_projects: Vec<(RoomId, u64)>,
     pub expanded: Option<Expanded>,
     pub collapsed: Vec<Group>,
     pub sessions_open: bool,
@@ -233,11 +232,6 @@ impl App {
             written_ms: now_ms(),
             page: self.page,
             selected: self.selected,
-            chosen_projects: self
-                .chosen_projects
-                .iter()
-                .map(|(room, project)| (*room, *project))
-                .collect(),
             expanded: self.expanded,
             collapsed: self.collapsed.iter().copied().collect(),
             sessions_open: self.sessions_open,
@@ -273,8 +267,8 @@ impl App {
         }
     }
 
-    /// Opens what `r` describes. The room, its project and the open task or draft come back
-    /// only when the room is still joined.
+    /// Opens what `r` describes. The room and the open task or draft come back only when the
+    /// room is still joined.
     pub(super) fn apply_resume(&mut self, r: Resume) {
         self.page = r.page;
         self.sessions_open = r.sessions_open;
@@ -288,7 +282,6 @@ impl App {
         if let Some(room) = joined {
             // Not `select`, which drops the drafts.
             self.selected = Some(room);
-            self.chosen_projects = r.chosen_projects.into_iter().collect();
             self.expanded = r.expanded;
             self.task_draft = r.task_draft.map(|(title, body)| TaskDraft {
                 title,
@@ -351,7 +344,6 @@ mod tests {
             written_ms,
             page: Page::Main,
             selected: Some(room),
-            chosen_projects: vec![(room, 2)],
             expanded: Some(Expanded::New { idea: true }),
             collapsed: vec![Group::Closed],
             sessions_open: false,
@@ -410,6 +402,7 @@ mod tests {
         fields.remove("placement");
         fields.remove("members_open");
         fields.remove("first_start");
+        fields.insert("chosen_projects".to_owned(), serde_json::json!([]));
         std::fs::write(dir.path().join(FILE), old.to_string()).unwrap();
         assert_eq!(
             take(dir.path(), now + 1_000),

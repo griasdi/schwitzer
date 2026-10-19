@@ -38,6 +38,10 @@ pub struct Settings {
     /// omp sessions in them are shared with the project's room.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub repos: BTreeMap<String, Vec<PathBuf>>,
+    /// Per room, the project last picked in it; the app shows it again after a restart.
+    /// Keys are room ids in hex; a key that is no room id is dropped on load.
+    #[serde(with = "room_map", skip_serializing_if = "BTreeMap::is_empty")]
+    pub chosen_projects: BTreeMap<RoomId, u64>,
     /// The folders whose subfolders are matched against project names when a repo is linked.
     /// `None` until the app first starts with this setting; it then enters the default folders
     /// that exist (see [`default_projects_dirs`]). `Some(vec![])` means the member removed them all.
@@ -62,9 +66,34 @@ impl Default for Settings {
             auto_install_updates: true,
             auto_restart_updates: true,
             repos: BTreeMap::new(),
+            chosen_projects: BTreeMap::new(),
             projects_dirs: None,
             wsl_distros: Vec::new(),
         }
+    }
+}
+
+/// `BTreeMap<RoomId, u64>` as a TOML table keyed by room id hex.
+mod room_map {
+    use std::collections::BTreeMap;
+
+    use schwitzer_proto::RoomId;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(map: &BTreeMap<RoomId, u64>, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_map(
+            map.iter()
+                .map(|(room, project)| (room.to_string(), project)),
+        )
+    }
+
+    /// A key that is no room id is dropped: the entry only remembers a choice.
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<RoomId, u64>, D::Error> {
+        let raw = BTreeMap::<String, u64>::deserialize(d)?;
+        Ok(raw
+            .into_iter()
+            .filter_map(|(key, project)| Some((key.parse().ok()?, project)))
+            .collect())
     }
 }
 
@@ -295,12 +324,32 @@ mod tests {
                 format!("{}/1", "ab".repeat(32)),
                 vec![PathBuf::from("/code/x")],
             )]),
+            chosen_projects: BTreeMap::from([(RoomId([0xab; 32]), 2)]),
             projects_dirs: Some(vec![PathBuf::from("/code"), PathBuf::from("/work")]),
             wsl_distros: vec!["Ubuntu".to_owned()],
         };
         settings.save(dir.path()).unwrap();
         assert!(!dir.path().join("settings.toml.tmp").exists());
         assert_eq!(Settings::load(dir.path()), (settings, None));
+    }
+
+    #[test]
+    fn chosen_projects_keep_room_ids_and_drop_bad_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(FILE),
+            format!(
+                "[chosen_projects]\n\"{}\" = 3\n\"nope\" = 1\n",
+                "ab".repeat(32)
+            ),
+        )
+        .unwrap();
+        let (settings, problem) = Settings::load(dir.path());
+        assert_eq!(problem, None);
+        assert_eq!(
+            settings.chosen_projects,
+            BTreeMap::from([(RoomId([0xab; 32]), 3)])
+        );
     }
 
     #[test]

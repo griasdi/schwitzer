@@ -303,6 +303,7 @@ flowchart LR
 |`last_server`|prefills "Create room"|
 |`rooms`|room keys in list order|
 |`repos`|`"<room id hex>/<project id>"` → linked repo paths|
+|`chosen_projects`|`"<room id hex>"` → the project last picked in that room|
 |`projects_dirs`|folders whose subfolders are matched against project names|
 |`wsl_distros`|WSL distros whose default projects folders were entered|
 |`auto_update_plugins`, `auto_install_updates`, `auto_restart_updates`|all three default `true`|
