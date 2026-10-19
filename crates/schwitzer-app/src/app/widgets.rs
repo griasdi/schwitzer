@@ -180,7 +180,7 @@ pub fn lamp_kind(task: &Task) -> Lamp {
         (Stage::Accepted | Stage::Ready, Some(_)) => Lamp::Running,
         (Stage::Done, _) => Lamp::Closed,
         (Stage::Rejected, _) => Lamp::Rejected,
-        _ if logic::pickable(task) => Lamp::Pickable,
+        _ if logic::Group::of(task) == logic::Group::Pickable => Lamp::Pickable,
         _ => Lamp::Planning,
     }
 }

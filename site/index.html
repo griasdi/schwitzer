@@ -76,7 +76,7 @@
                 <div class="group"><div class="group-head"><span class="icon i-chevron"></span>In progress <span class="pill">1</span></div>
                   <div class="group-body"><div class="task slab"><div class="task-main"><div class="task-title"><i class="lamp l-running"></i><span>Retry failed webhooks with backoff</span></div><div class="task-meta"><span class="num">#7</span><span class="pill">Building</span><span class="tag tag--orange">teo</span></div></div></div></div></div>
                 <div class="group"><div class="group-head"><span class="icon i-chevron"></span>Ready to pick <span class="pill">1</span></div>
-                  <div class="group-body"><div class="task slab"><div class="task-main"><div class="task-title"><i class="lamp l-pickable"></i><span>Rate-limit the login endpoint</span></div><div class="task-meta"><span class="num">#12</span><span class="pill">Plan ready</span></div></div><span class="btn btn-primary"><span class="icon i-grab"></span>Pick</span></div></div></div>
+                  <div class="group-body"><div class="task slab"><div class="task-main"><div class="task-title"><i class="lamp l-pickable"></i><span>Rate-limit the login endpoint</span></div><div class="task-meta"><span class="num">#12</span><span class="pill">Plan ready</span></div></div><span class="btn btn-primary"><span class="icon i-check"></span>Approve</span></div></div></div>
                 <div class="group"><div class="group-head"><span class="icon i-chevron"></span>Proposals <span class="pill">0</span></div></div>
                 <div class="group"><div class="group-head"><span class="icon i-chevron"></span>Ideas <span class="pill">1</span></div>
                   <div class="group-body"><div class="task slab"><div class="task-main"><div class="task-title"><i class="lamp lamp--hollow l-idea"></i><span>Export a room as Markdown</span></div><div class="task-meta"><span class="num">#10</span><span class="pill">Idea</span></div></div></div></div></div>
@@ -127,7 +127,7 @@
           <li><button type="button" data-step="1">teo's agent proposes</button></li>
           <li><button type="button" data-step="2">You accept</button></li>
           <li><button type="button" data-step="3">teo's agent plans</button></li>
-          <li><button type="button" data-step="4">You pick</button></li>
+          <li><button type="button" data-step="4">You approve and pick</button></li>
           <li><button type="button" data-step="5">Your agent builds</button></li>
           <li><button type="button" data-step="6">Done</button></li>
         </ol>
@@ -164,12 +164,13 @@
         <div class="step-head"><i class="lamp l-pickable"></i>Plan ready</div>
         <div class="step-who"><span class="pill"><span class="icon i-bot"></span>agent</span></div>
         <p>An agent claims it with <code>/schwitzer plan</code> and hands in its plan.</p>
-        <span class="btn btn-primary btn-replica" aria-hidden="true"><span class="icon i-grab"></span>Pick</span>
+        <span class="btn btn-primary btn-replica" aria-hidden="true"><span class="icon i-check"></span>Approve</span>
       </li>
       <li class="step slab" style="--i:4">
         <div class="step-head"><i class="lamp l-pickable"></i>Approved</div>
         <div class="step-who"><span class="pill"><span class="icon i-users"></span>human</span></div>
-        <p>A person approves the plan, or picks it, which approves and claims it at once.</p>
+        <p>A person approves the plan. An agent waiting on its plan review starts building.</p>
+        <span class="btn btn-primary btn-replica" aria-hidden="true"><span class="icon i-grab"></span>Pick</span>
       </li>
       <li class="step slab" style="--i:5">
         <div class="step-head"><i class="lamp l-running"></i>Building</div>

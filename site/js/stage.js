@@ -65,7 +65,8 @@ const STAGES = {
   proposed: { group: "Proposals", label: "Proposed", lamp: "l-new", hollow: true, button: "accept" },
   accepted: { group: "Planning", label: "Accepted", lamp: "l-planning" },
   planning: { group: "In progress", label: "Being planned", lamp: "l-running" },
-  planready: { group: "Ready to pick", label: "Plan ready", lamp: "l-pickable", button: "pick" },
+  planready: { group: "Ready to pick", label: "Plan ready", lamp: "l-pickable", button: "approve" },
+  approved: { group: "Ready to pick", label: "Approved", lamp: "l-pickable", button: "pick" },
   building: { group: "In progress", label: "Building", lamp: "l-running", button: "release" },
   done: { group: "Done", label: "Done", lamp: "l-closed" },
 };
@@ -78,6 +79,7 @@ const ALWAYS = new Set(["Proposals", "Ideas"]);
 const HUE = { mara: "violet", teo: "orange" };
 const BUTTONS = {
   accept: { label: "Accept", icon: "i-check", kind: "btn-primary" },
+  approve: { label: "Approve", icon: "i-check", kind: "btn-primary" },
   pick: { label: "Pick", icon: "i-grab", kind: "btn-primary" },
   release: { label: "Release", icon: "i-leave", kind: "btn-secondary" },
 };
@@ -132,9 +134,11 @@ const STEPS = [
     ],
   },
   {
-    caption: "You pick it: the plan is approved and the build is yours.",
+    caption: "You approve the plan, then pick it: the build is yours.",
     ops: [
-      ["wait", 12, "Plan ready. Pick it for your agent."],
+      ["wait", 12, "Plan ready. Press Approve."],
+      ["send", "mara", (s) => setTask(s, 12, { stage: "approved" }), "#12 approved", "approved"],
+      ["wait", 12, "Approved. Pick it for your agent."],
       ["notice", "#12 is yours, prompt copied"],
       ["send", "mara", (s) => { setTask(s, 12, { stage: "building", claim: "mara" }); s.sessions.push(clone(S12B)); }, "#12 picked by mara", "building"],
       ["cmd", "mara", 'Work on schwitzer task #12 in room "harbor": Rate-limit the login endpoint'],

@@ -1930,8 +1930,8 @@ impl App {
         call(self.request(room, req), Message::Proposed)
     }
 
-    /// Approves the plan when it still waits for that, claims the build for this member and
-    /// hands back the room name and the claimed task for the prompt.
+    /// Claims the build of an approved task for this member and hands back the room name and the
+    /// claimed task for the prompt.
     fn pick(&mut self, number: u64) -> Task<Message> {
         if self.picking.is_some() {
             return Task::none();
@@ -1945,24 +1945,11 @@ impl App {
         if !logic::pickable(task) {
             return Task::none();
         }
-        let (room, name, approve) = (state.id, state.name.clone(), task.stage == Stage::Planned);
+        let (room, name) = (state.id, state.name.clone());
         self.picking = Some(number);
         let client = self.client.clone();
         call(
             async move {
-                if approve {
-                    let decision = Decision::Approve;
-                    client
-                        .request(
-                            room,
-                            Request::Decide {
-                                room,
-                                task: number,
-                                decision,
-                            },
-                        )
-                        .await?;
-                }
                 let claim = Request::Claim {
                     room,
                     work: Work::Build,

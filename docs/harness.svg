@@ -141,11 +141,10 @@
   <rect x="924" y="222" width="105" height="24" rx="6" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.16"/>
   <text x="977" y="238" class="chip mid">Approve plan</text>
   <path d="M977 246 L977 326" fill="none" stroke="#3dcb5c" stroke-width="1.5" marker-end="url(#m-human)"/>
-  <path d="M860 300 C860 130, 1250 130, 1250 300" fill="none" stroke="#3dcb5c" stroke-width="1.5" marker-end="url(#m-human)"/>
-  <rect x="958" y="150" width="195" height="24" rx="6" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.16"/>
-  <text x="1055" y="166" class="chip mid">Pick → claim + copy prompt</text>
-  <text x="1268" y="196" class="small">from Plan ready or Approved:</text>
-  <text x="1268" y="210" class="small">approves first if needed</text>
+  <path d="M1100 300 C1100 236, 1250 236, 1250 300" fill="none" stroke="#3dcb5c" stroke-width="1.5" marker-end="url(#m-human)"/>
+  <rect x="1083" y="222" width="195" height="24" rx="6" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.16"/>
+  <text x="1180" y="238" class="chip mid">Pick → claim + copy prompt</text>
+  <text x="1180" y="214" class="small mid">from Approved only</text>
 
   <!-- Replan, release, reopen -->
   <path d="M830 300 C830 256, 520 256, 520 300" fill="none" stroke="#93a597" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m-file)"/>

@@ -194,10 +194,23 @@ fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
     )
 }
 
-/// The one button a slab carries: Pick a finished plan, Accept a proposal, or Release your own
-/// claim. The button takes the press before the slab does.
+/// The one button a slab carries: Approve a finished plan, Pick an approved one, Accept a
+/// proposal, or Release your own claim. The button takes the press before the slab does.
 fn next_step<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
     let n = task.number;
+    if logic::approvable(task) {
+        return Some(with_tip(
+            icon_text_button(
+                format!("approve-{n}"),
+                Icon::Check,
+                Tone::OnPrimary,
+                "Approve",
+                Some(Message::Decide(n, Decision::Approve)),
+                theme::button_primary,
+            ),
+            "Approve the plan; an omp session waiting on its review builds it",
+        ));
+    }
     if logic::pickable(task) {
         let busy = app.picking == Some(n);
         return Some(with_tip(

@@ -417,7 +417,7 @@ sequenceDiagram
 
 A Replan in the app sends the waiting review back instead: the plugin claims the task for planning again and answers the review with "Refine plan", feeding it the notes written since the plan was sent and the new claim line. Without an open review, or with an omp that cannot answer one, an approved task is built with `/schwitzer build` or Pick.
 
-**Pick, the human's shortcut.** On a Plan-ready or Approved task a human presses "Pick and copy prompt". `App::pick` sends `Decide(Approve)` if the task is still `Planned`, then `Claim(Build, task N, agent "omp")`, and copies `logic::pick_prompt` to the clipboard ("#N is yours, prompt copied"). Nothing is launched: the human pastes the prompt into their own agent. Next to it, "Approve plan" approves without claiming, for an omp session that waits on its plan review. The pick prompt's three lines are:
+**Approve, then Pick.** A Plan-ready task carries "Approve" on its slab and "Approve plan" as the open task's primary action; approving sets it `Ready`, which an omp session waiting on its plan review builds itself. Only an Approved, unclaimed task carries "Pick" ("Pick and copy prompt" in the open task), the human's shortcut: `App::pick` sends `Claim(Build, task N, agent "omp")` and copies `logic::pick_prompt` to the clipboard ("#N is yours, prompt copied"). Nothing is launched: the human pastes the prompt into their own agent. The pick prompt's three lines are:
 
 ```text
 Work on schwitzer task #<n> in room "<room>": <title>
@@ -470,7 +470,7 @@ Every message text is in [the plugin README](../crates/schwitzer-app/omp-plugin/
 |accept, reject, approve, replan, reopen|"Accept", "Reject", "Approve plan", "Replan", "Reopen" (`Decide`)|never|
 |claim for planning|none|`/schwitzer plan`, `schwitzer_claim` (`work: plan`)|
 |hand in a plan|none: "Edit plan" → "Save plan" only edits the text (`EditTask`), the stage stays|plan review hook, `schwitzer_submit_plan`|
-|claim for building|"Pick and copy prompt" (approves a Planned task first)|`/schwitzer build`, `schwitzer_claim` (`work: build`)|
+|claim for building|"Pick and copy prompt" (Approved tasks only)|`/schwitzer build`, `schwitzer_claim` (`work: build`)|
 |finish|none|`schwitzer_finish`|
 |give a claim back|"Release claim"|`schwitzer_release`|
 |add a note|note field, "Add" (`AddNote`)|`schwitzer_add_note`|

@@ -72,10 +72,15 @@ impl Group {
     }
 }
 
-/// Whether the task has a finished plan nobody builds yet: picking it approves the plan (when
-/// still `Planned`) and claims the build for the picker.
+/// Whether the task has an approved plan nobody builds yet: picking it claims the build for
+/// the picker.
 pub fn pickable(task: &Task) -> bool {
-    Group::of(task) == Group::Pickable
+    task.stage == Stage::Ready && task.claim.is_none()
+}
+
+/// Whether the task has a finished plan that waits for a human's approval.
+pub fn approvable(task: &Task) -> bool {
+    task.stage == Stage::Planned && !task.plan.trim().is_empty()
 }
 
 /// The tasks of `project` in `group`, high priority first, then by number.
@@ -457,13 +462,15 @@ mod tests {
             Group::InProgress
         );
         assert_eq!(Group::of(&task(1, Stage::Accepted, None)), Group::Planning);
-        // A planned task without plan text cannot be approved, so it is not pickable.
+        // A planned task without plan text cannot be approved, so it is not in "Ready to pick".
         let mut planned = task(1, Stage::Planned, None);
         assert_eq!(Group::of(&planned), Group::Planning);
         planned.plan = "Do it".to_owned();
         assert_eq!(Group::of(&planned), Group::Pickable);
-        assert!(pickable(&planned));
+        assert!(!pickable(&planned));
+        assert!(approvable(&planned));
         assert_eq!(Group::of(&task(1, Stage::Ready, None)), Group::Pickable);
+        assert!(pickable(&task(1, Stage::Ready, None)));
         let building = task(1, Stage::Ready, Some(claim(Work::Build, token)));
         assert_eq!(Group::of(&building), Group::InProgress);
         assert!(!pickable(&building));

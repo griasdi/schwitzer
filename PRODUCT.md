@@ -26,13 +26,13 @@ Agents and humans share one light queue with explicit human decisions (accept, a
 
 - Each member runs the desktop app; omp agents talk to it through the omp plugin the app installs in shared repos, which calls the app's local MCP server (`claim`, `submit_plan`, `finish`, ...).
 - Agent sessions are omp sessions on the member's machine. A room holds projects, and every task belongs to one. Each member links local repositories to projects; a project's tasks show once this member has linked a repo to it, and active omp sessions whose working directory lies in a linked repo are shared with the room (title, project, runtime, tokens). Sessions outside those repositories never leave the machine.
-- Picking a finished plan claims it for the member and copies a prompt with the claim marker for their own agent.
+- Picking an approved plan claims it for the member and copies a prompt with the claim marker for their own agent.
 - Rooms live on a standalone `schwitzer-server`; a room key carries server address and secret.
 
 ## Capabilities and Constraints
 
 - Stages: Idea (a rough sketch, written up into a proposal later), Proposed, Accepted (planning), Planned (plan ready), Ready (approved), In progress (Ready with a build claim, labelled "Building"), Done, Rejected. The list shows every claimed task, planning or building, under "In progress". Priority High/Normal/Low, no Kanban.
-- Each task is a raised slab in the list that carries its own next-step button: Accept on a proposal, Pick on a finished plan, Release on your own claim. All other decisions (reject, approve, replan, reopen) stay in the open task.
+- Each task is a raised slab in the list that carries its own next-step button: Accept on a proposal, Approve on a finished plan, Pick on an approved one, Release on your own claim. All other decisions (reject, replan, reopen) stay in the open task.
 - Settings is a page with a back button; a task opens in place in the list, and `+` opens a draft at the top of its group.
 - Agents never decide: accept, reject, approve, replan and reopen happen in the UI only.
 - Desktop only (Linux, Windows, macOS); no web client.

@@ -312,7 +312,7 @@ Each is a lamp tint; none is used as a surface.
 - **New, Outline Grey** (#7d8c80 / #7d9182): Proposed. Drawn as a *hollow* lamp.
 - **Idea, Faint Grey** (#869589 / #6f8374, `stage-idea`): an idea not yet written up into a proposal. Hollow lamp, fainter than New in Night: an idea is less than a proposal. Idea and New are the only stages not filled.
 - **Planning Amber** (#c98410 / #f0a630): Accepted and Planned without a ready plan; someone is writing or the plan is not final.
-- **Pickable Blue** (#2f7fd6 / #5aa6f5): a plan is ready or approved and nobody builds it; the Pick button is on the slab.
+- **Pickable Blue** (#2f7fd6 / #5aa6f5): a plan is ready or approved and nobody builds it; the slab carries Approve on a ready plan, Pick on an approved one.
 - **Running Green** (#22a340 / #3dcb5c): a claimed task, Accepted with a plan claim or Ready with a build claim; someone is working. Also the online dot.
 - **Closed Muted** (#869589 / #738678): Done. Same day value as Idea; the filled form tells them apart.
 - **Rejected Red** (#d9473f / #f06a62): Rejected.
@@ -417,14 +417,14 @@ Soft but not bubbly. Everything interactive is a rounded rectangle with an 8px r
 ### Buttons
 Four kinds plus a segmented control; every button is wrapped in an id container so tests and the headless control can address it.
 - **Shape:** 8px radius; 32px tall (6px 12px padding around a 14px medium label; icon+label gap 6px, icon 16px). Primary, secondary and danger buttons are raised plates: under-edge shadow at rest, deeper on hover, none when pressed or disabled.
-- **Primary:** Action Green fill, Deep Green Ink text. Hovered: `primary-hover`. Pressed: Leaf Ink fill. Disabled: Hairline fill, Moss Grey text. One per view for the main call to action (Propose, Save, Approve, "Pick and copy prompt"); on a slab it is the next step: **Pick** (hand-grab icon) on finished plans, **Accept** (check icon) on proposals. Pick is disabled (muted icon) while a pick runs.
+- **Primary:** Action Green fill, Deep Green Ink text. Hovered: `primary-hover`. Pressed: Leaf Ink fill. Disabled: Hairline fill, Moss Grey text. One per view for the main call to action (Propose, Save, "Approve plan", "Pick and copy prompt"); on a slab it is the next step: **Approve** (check icon) on a ready plan, **Pick** (hand-grab icon) on an approved one, **Accept** (check icon) on proposals. Pick is disabled (muted icon) while a pick runs.
 - **Secondary:** raised fill, Mint Hairline border; hovered Mint Breath with Sage Edge border; pressed Mint Pressed. Cancel, Replan, Reopen, Add, Save name; **Release** (leave icon) on a slab whose claim is yours.
 - **Danger:** red text and 1px red border on no fill; hovered Alarm Wash; pressed solid red with on-danger text. Reject (open task only).
 - **Ghost:** no border, no fill, no shadow; hover Mint Breath, pressed Mint Pressed. Icon buttons (32x32, 16px glyph, tooltip above, below in the header and page bars) in the bars (invite, settings, back), group headers (`+`) and the head of the open task (edit, close), text links ("Share mine"), the `#n` session task link.
 - **Segment:** 1px border; the active segment is Mint Pressed with Leaf Ink border and text, shadowless (priority High / Normal / Low).
 
 ### Slabs and group headers
-- **Task slab:** a full-width button on `raised`, 8px radius, 1px Mint Hairline border, under-edge shadow, padding 8px 12px. Hover: Mint Breath fill, Sage Edge border, deeper shadow. Pressed: Mint Pressed, no shadow. Opens the task in place. Two lines plus the next-step button (see Layout); the button takes the press before the slab does. Reject, Approve, Replan and Reopen stay in the open task.
+- **Task slab:** a full-width button on `raised`, 8px radius, 1px Mint Hairline border, under-edge shadow, padding 8px 12px. Hover: Mint Breath fill, Sage Edge border, deeper shadow. Pressed: Mint Pressed, no shadow. Opens the task in place. Two lines plus the next-step button (see Layout); the button takes the press before the slab does. Reject, Replan and Reopen stay in the open task.
 - **Open task:** a press on a slab opens it in place; only one element is open. Head = the slab's two lines on a flat hover-tinted row (press closes), with ghost Edit and Close (`Esc`) icons; under a hairline, at 12px padding: details, people, action row, Plan, Priority, Notes, with hairlines between. Resting shadow, Sage Edge border; opening scrolls it into view.
 - **Draft:** `+` (or `Ctrl+N` for a proposal) opens a draft at the top of Proposals or Ideas: hollow lamp + title field, details editor, Cancel + Propose / Add idea. Esc, Cancel or opening another element closes it and keeps its text.
 - **Group header:** a flat full-width button in the well, 32px tall: chevron (14px muted), title (12px semibold), count pill, spacer, and on Proposals and Ideas a ghost `+` (tooltips "New proposal  (Ctrl+N)" and "New idea") that opens a draft at the top of that group. Hover Mint Breath, pressed Mint Pressed; the `+` takes the press before the header.
@@ -471,7 +471,7 @@ iced 0.14 exposes no accessibility tree and screen readers cannot read the windo
 
 ### Do:
 - **Do** express stage only with the lamp colour from the stage tokens (`stage-new` and `stage-idea` hollow, `stage-planning`, `stage-pickable`, `stage-running`, `stage-closed`, `stage-rejected`) plus the stage label.
-- **Do** put the next step on the slab it acts on: at most one button (Pick, Accept or Release) per slab.
+- **Do** put the next step on the slab it acts on: at most one button (Approve, Pick, Accept or Release) per slab.
 - **Do** use `primary` for the main action of a view (or a slab's next step) and `ink` for green text, links and the focus ring.
 - **Do** keep every neutral mint-tinted: well `#e9f0ea` / `#0d1310`, lines `#d9e5db` / `#2a3a30`, text `#142019` / `#e4eee6`.
 - **Do** keep the well darker than the slabs on it, in both themes.

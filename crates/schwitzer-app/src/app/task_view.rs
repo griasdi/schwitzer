@@ -258,7 +258,7 @@ fn people<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a,
     .into()
 }
 
-/// Pick (when a finished plan waits) and the human decisions the server allows now.
+/// Pick (when an approved plan waits) and the human decisions the server allows now.
 fn actions<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
     let mut row = row![].spacing(SP_2).align_y(Alignment::Center);
     let mut any = false;
@@ -295,11 +295,6 @@ fn actions<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
         let message = Some(Message::Decide(task.number, decision));
         row = row.push(match decision {
             Decision::Reject => text_button(id, label, message, theme::button_danger),
-            // Pick stays the view's one primary action; Approve next to it approves without
-            // claiming, for an omp session that waits on its plan review.
-            Decision::Approve if pickable => {
-                text_button(id, label, message, theme::button_secondary)
-            }
             Decision::Accept | Decision::Approve => {
                 text_button(id, label, message, theme::button_primary)
             }
