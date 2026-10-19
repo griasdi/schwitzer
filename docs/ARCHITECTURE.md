@@ -402,18 +402,21 @@ sequenceDiagram
     P->>M: submit_plan (plan review)
     M->>S: SubmitPlan
     S-->>B: Event::Task (Planned, claim cleared)
+    Note over P: the plan review stays open, the plugin polls get_task
     B->>S: Approve plan, Decide(Approve)
     S-->>M: Event::Task (Ready)
-    Note over P: /schwitzer build, any member's agent, here Alice's
     P->>M: claim (work build)
-    M-->>P: schwitzer-claim line, the editor gets Build ... schwitzer-claim line
+    M-->>P: schwitzer-claim line and the task
+    Note over P: answers the review with execute, the new session<br/>gets the schwitzer-task message with the claim line
     P->>P: the agent implements the plan
     P->>M: schwitzer_finish (note)
     M->>S: Finish
     S-->>B: Event::Task (Done)
 ```
 
-**Pick, the human's shortcut.** On a Plan-ready or Approved task a human presses "Pick and copy prompt". `App::pick` sends `Decide(Approve)` if the task is still `Planned`, then `Claim(Build, task N, agent "omp")`, and copies `logic::pick_prompt` to the clipboard ("#N is yours, prompt copied"). Nothing is launched: the human pastes the prompt into their own agent. Its three lines are:
+A Replan in the app sends the waiting review back instead: the plugin claims the task for planning again and answers the review with "Refine plan", feeding it the notes written since the plan was sent and the new claim line. Without an open review, or with an omp that cannot answer one, an approved task is built with `/schwitzer build` or Pick.
+
+**Pick, the human's shortcut.** On a Plan-ready or Approved task a human presses "Pick and copy prompt". `App::pick` sends `Decide(Approve)` if the task is still `Planned`, then `Claim(Build, task N, agent "omp")`, and copies `logic::pick_prompt` to the clipboard ("#N is yours, prompt copied"). Nothing is launched: the human pastes the prompt into their own agent. Next to it, "Approve plan" approves without claiming, for an omp session that waits on its plan review. The pick prompt's three lines are:
 
 ```text
 Work on schwitzer task #<n> in room "<room>": <title>
@@ -425,7 +428,7 @@ The marker line is in it, so the session links to the task the same way as with 
 
 ### 9.6 The claim marker
 
-The one string that ties an agent session to a task: `schwitzer-claim: ` followed by the 32 hex digits of the claim's `ClaimToken` (16 bytes). The `claim` tool's answer and `pick_prompt` emit it. The scanner reads markers only from `user` and `toolResult` messages of the main session file, not from subagents: a pasted pick prompt is a user message, and an agent's own `schwitzer_claim` call leaves its answer as a tool result. `/schwitzer plan` and `/schwitzer build` call `claim` outside the agent's turn, so the plugin puts the marker line into the editor, and the user's Enter makes it a user message. A session links to a task when its newest marker equals the token of a claim that *this* member holds; then `SessionInfo.task = Some(N)` and `projects = [task.project]`.
+The one string that ties an agent session to a task: `schwitzer-claim: ` followed by the 32 hex digits of the claim's `ClaimToken` (16 bytes). The `claim` tool's answer and `pick_prompt` emit it. The scanner reads markers only from `user` and `toolResult` messages and from the plugin's `schwitzer-task` custom messages of the main session file, not from subagents: a pasted pick prompt is a user message, an agent's own `schwitzer_claim` call leaves its answer as a tool result, and a session that executes an approved plan gets its build claim in the plugin's task message. `/schwitzer plan` and `/schwitzer build` call `claim` outside the agent's turn, so the plugin puts the marker line into the editor, and the user's Enter makes it a user message. A session links to a task when its newest marker equals the token of a claim that *this* member holds; then `SessionInfo.task = Some(N)` and `projects = [task.project]`.
 
 ### 9.7 Live sessions
 

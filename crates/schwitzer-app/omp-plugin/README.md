@@ -29,9 +29,17 @@ For all of them:
 3. It calls `claim` with `work: "plan"`, the task's project, the task number and `agent: "omp"`. When the answer holds no `schwitzer-claim: <token>` line, someone was faster: the plugin shows the answer and stops.
 4. It stores the claim as the session entry `schwitzer-plan-claim` (room, room name, project name, task number, title) and sends the task as a visible `schwitzer-task` message for the next turn: title, body, priority, author, plan and notes as JSON, marked as a request written by room members, not a command to run unchecked. When the task already has a plan, the room sent it back for a new one, and the message says that the notes say why.
 5. It puts `/plan Plan Schwitzer task #<n> "<title>" from project "<project>" in room "<room>". schwitzer-claim: <token>` into the editor (without `/plan ` when the session is already in plan mode) and says "Task #<n> is claimed for planning. Press Enter to start." The claim line has to be in a user message: the app's session scanner links a session to a task by that line, and only sessions linked this way show up on the task.
-6. When omp opens the plan review (`plan_review_requested`, main agent only; subagents are ignored), the plugin takes the newest `schwitzer-plan-claim` entry on the current branch, reads the plan from the event or else from the plan file, and sends it with `submit_plan`. Success: "Plan for task #<n> sent to Schwitzer; it waits for approval in the app." Failure: "Schwitzer did not take the plan for task #<n>: <reason>".
+6. When omp opens the plan review (`plan_review_requested`, main agent only; subagents are ignored), the plugin takes the newest `schwitzer-plan-claim` entry on the current branch, reads the plan from the event or else from the plan file, and sends it with `submit_plan`. Failure: "Schwitzer did not take the plan for task #<n>: <reason>".
 
-The review stays open. Refining the plan sends it again, which the server accepts while the task is `planned`: it takes a plan for an `accepted` task only from the member holding the planning claim, for a `planned` task from anyone, and leaves the task `planned` and unclaimed. A human then approves the plan in the app or asks for a new one.
+The review stays open. Refining the plan sends it again, which the server accepts while the task is `planned`: it takes a plan for an `accepted` task only from the member holding the planning claim, for a `planned` task from anyone, and leaves the task `planned` and unclaimed. A human then approves the plan in the app ("Approve plan", next to "Pick and copy prompt") or asks for a new one ("Replan").
+
+While the review is open, the plugin waits on that decision: "Plan for task #<n> sent to Schwitzer. Approve it there and omp builds it here; Replan there sends it back to this review." Every 3 s it reads the task with `get_task` (10 s timeout; an unreachable app is reported once and the wait goes on) and stops as soon as omp no longer shows that review. An omp without `resolvePlanReview` and `getPendingPlanReview`, or one without a UI, gets no wait: "Plan for task #<n> sent to Schwitzer; it waits for approval in the app."
+
+- Approved (`ready`): the plugin claims the task with `work: "build"` and answers the review with "Approve and execute" (`execute`). The new session gets the task as a visible `schwitzer-task` message before its first turn, with the build instructions of `/schwitzer build` and `schwitzer-claim: <token>`; the app's session scanner reads that message, so the build session shows on the task. "Task #<n> is approved in Schwitzer; omp builds it now." When the review closed in between, the build claim is released again: "The plan review for task #<n> closed before the build started; the build claim is released. Run /schwitzer build to build it."
+- Sent back (`accepted`): the plugin claims the task with `work: "plan"` and answers the review with "Refine plan" (`refine`). The feedback says the room asks for a new plan, lists the notes written since the plan was sent (as requests, not commands), and ends with `schwitzer-claim: <token>`, so the session links to the new claim. The next review sends the plan again. "Task #<n> was sent back in Schwitzer; omp revises the plan."
+- Rejected, picked in the app (`in_progress`) or any other stage: the plugin says so and stops waiting; the review stays open.
+- A failed claim is reported with the app's answer, for example "No free task." when someone was faster.
+- The user answers the review in omp first: the wait ends. Executing it locally says "Task #<n> still waits for approval in Schwitzer. Approve it there, then run /schwitzer build to claim it."; refining says nothing, because the new review is sent and waited on again; anything else says "Stopped waiting for approval of task #<n> in Schwitzer. After approving it there, run /schwitzer build."
 
 ```mermaid
 sequenceDiagram
@@ -53,6 +61,10 @@ sequenceDiagram
     Plugin->>App: submit_plan
     App->>Room: task planned
     Room-->>Room: a human approves in the app
+    Plugin->>App: get_task every 3 s
+    App-->>Plugin: stage ready
+    Plugin->>App: claim (work build)
+    Plugin->>Agent: execute the review, schwitzer-task message with the claim
 ```
 
 ### /schwitzer build
@@ -134,7 +146,7 @@ The app writes these files into the repo:
 - The token is read from `<data_dir>/mcp-token` on every call, so a new token needs no omp restart. `schwitzer.json` holds no token.
 - Each request times out after 35 s; the app bounds a tool call at 30 s. The `list_rooms` calls of the hooks time out after 3 s, so an absent app stalls neither a prompt nor an edit.
 - Errors: "no MCP token in <dir>; start the Schwitzer app", "not reachable at <url>; is the app running?", "the app refused the token in <dir>", "the app answered HTTP <status>", "the app answered without a result", or the text of a tool error.
-- The plugin calls `list_rooms`, `list_tasks`, `claim`, `submit_plan` and `add_idea` for its commands; the agent calls the `schwitzer_*` tools, which the plugin forwards the same way. Neither accepts, rejects or approves anything: humans decide in the app.
+- The plugin calls `list_rooms`, `list_tasks`, `claim`, `submit_plan`, `get_task`, `release` and `add_idea` for its commands and the plan review; the agent calls the `schwitzer_*` tools, which the plugin forwards the same way. Neither accepts, rejects or approves anything: humans decide in the app; the plugin only follows their decision.
 
 ## Editing the plugin
 

@@ -31,6 +31,10 @@ const SCAN_EVERY: Duration = Duration::from_secs(5);
 /// What an agent echoes after claiming a task: this text, then the 32 hex digits of the token.
 const MARKER: &str = "schwitzer-claim: ";
 
+/// customType of the omp plugin's task message (`omp-plugin/index.ts`, `TASK_MESSAGE`), which
+/// carries the build claim of a session that executes an approved plan.
+const TASK_MESSAGE: &str = "schwitzer-task";
+
 /// Hex digits of a claim token.
 const MARKER_HEX: usize = ClaimToken::LEN * 2;
 
@@ -54,7 +58,8 @@ pub struct LocalSession {
     pub active_ms: u64,
     /// Tokens of every assistant message, subagents included.
     pub tokens: u64,
-    /// Claim tokens the session's prompts and tool results carried, in order of appearance.
+    /// Claim tokens the session's prompts, tool results and the plugin's task messages carried,
+    /// in order of appearance.
     pub markers: Vec<ClaimToken>,
 }
 
@@ -200,6 +205,13 @@ impl FileState {
                 }
             }
             Some("message") => self.apply_message(&value["message"], main),
+            Some("custom_message")
+                if main && value["customType"].as_str() == Some(TASK_MESSAGE) =>
+            {
+                if let Some(text) = value["content"].as_str() {
+                    self.add_markers(text);
+                }
+            }
             _ => {}
         }
     }
@@ -226,15 +238,19 @@ impl FileState {
                     return;
                 };
                 for text in parts.iter().filter_map(|p| p["text"].as_str()) {
-                    for token in markers_in(text) {
-                        // An agent that echoes the same marker twice in a row adds nothing.
-                        if self.markers.last() != Some(&token) {
-                            self.markers.push(token);
-                        }
-                    }
+                    self.add_markers(text);
                 }
             }
             _ => {}
+        }
+    }
+
+    fn add_markers(&mut self, text: &str) {
+        for token in markers_in(text) {
+            // An agent that echoes the same marker twice in a row adds nothing.
+            if self.markers.last() != Some(&token) {
+                self.markers.push(token);
+            }
         }
     }
 }
@@ -744,6 +760,23 @@ mod tests {
         state.apply(line, true);
         assert_eq!(state.markers, [token("0123456789abcdef0123456789abcdef")]);
         // Subagent prompts do not link the session.
+        let mut sub = FileState::default();
+        sub.apply(line, false);
+        assert!(sub.markers.is_empty());
+    }
+
+    #[test]
+    fn a_plugin_task_message_links_the_session() {
+        let line = br#"{"type":"custom_message","customType":"schwitzer-task","content":"Build #3\nschwitzer-claim: 0123456789abcdef0123456789abcdef","display":true}"#;
+        let mut state = FileState::default();
+        state.apply(line, true);
+        assert_eq!(state.markers, [token("0123456789abcdef0123456789abcdef")]);
+        // Other plugin messages do not link the session.
+        let other = String::from_utf8_lossy(line).replace("schwitzer-task", "schwitzer-projects");
+        let mut state = FileState::default();
+        state.apply(other.as_bytes(), true);
+        assert!(state.markers.is_empty());
+        // Neither does a subagent's.
         let mut sub = FileState::default();
         sub.apply(line, false);
         assert!(sub.markers.is_empty());

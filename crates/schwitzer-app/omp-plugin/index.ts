@@ -4,11 +4,13 @@
 //
 // /schwitzer plan lists the tasks of those projects that wait for a plan, claims the chosen one for
 // planning and starts omp's plan mode on it. When the plan review opens, the plan goes to the
-// room with submit_plan; a human approves it in the app. /schwitzer build claims an approved
-// task for building; the agent implements it and reports with finish. /schwitzer propose [text]
-// lets the agent draft a proposal, ask the user, then send it with propose. /schwitzer idea
-// <text> notes an idea in a project right away (add_idea); /schwitzer propose offers the open
-// ideas to write up into a proposal. A bare /schwitzer offers a menu of the four.
+// room with submit_plan; a human approves it in the app. After submit_plan the plugin keeps the
+// plan review open until the room approves the plan (it then claims the build and executes it)
+// or asks for a new one (it refines the plan with the room's notes). /schwitzer build claims
+// an approved task for building; the agent implements it and reports with finish. /schwitzer
+// propose [text] lets the agent draft a proposal, ask the user, then send it with propose.
+// /schwitzer idea <text> notes an idea in a project right away (add_idea); /schwitzer propose
+// offers the open ideas to write up into a proposal. A bare /schwitzer offers a menu of the four.
 // It also gives the agent the app's tools as schwitzer_<name> (TOOLS); each call goes to the app's
 // MCP server, whose URL schwitzer.json names. The token is read from <data_dir>/mcp-token per call.
 // Before a prompt it tells the agent which other Schwitzer projects exist and that a change one of
@@ -48,6 +50,12 @@ interface TaskClaim {
   projectName: string;
   task: number;
   title: string;
+}
+/** A note of the app's task JSON (`task_json` in src/mcp/tools.rs). */
+interface TaskNote {
+  author: string;
+  agent: string | null;
+  text: string;
 }
 type Work = "plan" | "build";
 /** A configured project of a room the app has joined. */
@@ -91,11 +99,20 @@ interface Ctx {
   agent?: { kind: string };
   hasUI: boolean;
   cwd: string;
+  resolvePlanReview?(reviewId: string, choice: string, input?: { feedback?: string }): boolean;
+  getPendingPlanReview?(): { reviewId: string } | undefined;
 }
 interface PlanReviewEvent {
+  reviewId?: string;
   planContent?: string;
   planPath?: string;
   planFilePath?: string;
+}
+interface PlanReviewResolvedEvent {
+  reviewId: string;
+  /** The option id; undefined when the review was dismissed. */
+  choice?: string;
+  by: "local" | "extension";
 }
 interface ToolCallEvent {
   toolName: string;
@@ -130,6 +147,7 @@ interface Pi {
     command: { description: string; handler: (args: string, ctx: Ctx) => Promise<void> },
   ): void;
   on(event: "plan_review_requested", handler: (event: PlanReviewEvent, ctx: Ctx) => void): void;
+  on(event: "plan_review_resolved", handler: (event: PlanReviewResolvedEvent, ctx: Ctx) => void): void;
   on(event: "before_agent_start", handler: (event: unknown, ctx: Ctx) => Promise<InjectedMessage | undefined>): void;
   on(
     event: "tool_call",
@@ -151,6 +169,8 @@ const EDIT_TOOLS: Record<string, true> = { edit: true, write: true, ast_edit: tr
 const PRIORITY_RANK: Record<string, number> = { high: 0, normal: 1, low: 2 };
 const TIMEOUT_MS = 35_000; // the app bounds a tool call at 30 s
 const HINT_TIMEOUT_MS = 3_000; // hooks must not stall a prompt or an edit
+const POLL_MS = 3_000; // how often a waiting plan review asks the app for the task
+const POLL_TIMEOUT_MS = 10_000;
 /** The repo this plugin lives in: <repo>/.omp/plugins/node_modules/schwitzer. */
 const OWN_ROOT = resolve(import.meta.dir, "../../../..");
 const STAGE: Record<Work, string> = { plan: "accepted", build: "ready" };
@@ -641,19 +661,12 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work): Promise<
   const choice = await ctx.ui.select(work === "plan" ? "Plan a Schwitzer task" : "Build a Schwitzer task", labels);
   const picked = typeof choice === "number" ? open[choice] : choice === undefined ? undefined : open[labels.indexOf(choice)];
   if (!picked) return;
-  const answer = await tool(config, "claim", {
-    room: picked.room,
-    project: picked.projectName,
-    work,
-    task: picked.task.number,
-    agent: "omp",
-  });
-  const marker = answer.match(/^schwitzer-claim: ([0-9a-f]{32})$/m);
-  if (!marker) {
-    ctx.ui.notify(`Schwitzer: ${answer}`, "info"); // "No free task." when someone was faster
+  const got = await claimFor(config, picked.room, picked.projectName, picked.task.number, work);
+  if ("refused" in got) {
+    ctx.ui.notify(`Schwitzer: ${got.refused}`, "info");
     return;
   }
-  const task = JSON.parse(answer.split("\n").slice(2).join("\n")) as Record<string, unknown>;
+  const { marker, task } = got;
   const claim: TaskClaim = {
     room: picked.room,
     roomName: picked.roomName,
@@ -669,12 +682,25 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work): Promise<
   );
   // The marker must sit in a user message: that is where the app's session scanner looks.
   const verb = work === "plan" ? "Plan" : "Build";
-  const prompt = `${verb} Schwitzer task #${claim.task} "${claim.title}" from project "${claim.projectName}" in room "${claim.roomName}". schwitzer-claim: ${marker[1]}`;
+  const prompt = `${verb} Schwitzer task #${claim.task} "${claim.title}" from project "${claim.projectName}" in room "${claim.roomName}". schwitzer-claim: ${marker}`;
   ctx.ui.setEditorText(work === "build" || planning ? prompt : `/plan ${prompt}`);
   ctx.ui.notify(
     `Task #${claim.task} is claimed for ${work === "plan" ? "planning" : "building"}. Press Enter to start.`,
     "info",
   );
+}
+
+type Claimed = { marker: string; task: Record<string, unknown> } | { refused: string };
+
+/** Claims task `number` for `work`; `refused` holds the app's answer when it gave no claim
+ *  ("No free task." when someone was faster). */
+async function claimFor(config: Config, room: string, project: string, number: number, work: Work): Promise<Claimed> {
+  const answer = await tool(config, "claim", { room, project, work, task: number, agent: "omp" });
+  const marker = answer.match(/^schwitzer-claim: ([0-9a-f]{32})$/m);
+  if (!marker) return { refused: answer };
+  // The answer: the marker line, a hint line, then the task.
+  const task = JSON.parse(answer.split("\n").slice(2).join("\n")) as Record<string, unknown>;
+  return { marker: marker[1], task };
 }
 
 /** The project to act on: the only one, or the one the user picks; `others` are offered after
@@ -824,19 +850,173 @@ async function run(pi: Pi, ctx: Ctx, args: string): Promise<void> {
   else await proposeTask(pi, ctx, config, rest);
 }
 
+/** The plan review the plugin waits on; at most one per omp process. */
+interface Watch {
+  reviewId: string;
+  stopped: boolean;
+}
+let watch: Watch | undefined;
+/** The build task message for the next main-agent turn. It lives on globalThis because
+ *  "execute" clears the session, and the next turn must still find it. */
+const HANDOFF = Symbol.for("schwitzer.buildHandoff");
+
+function setHandoff(content: string | undefined): void {
+  (globalThis as Record<symbol, unknown>)[HANDOFF] = content;
+}
+
+function takeHandoff(): string | undefined {
+  const store = globalThis as Record<symbol, unknown>;
+  const content = store[HANDOFF];
+  delete store[HANDOFF];
+  return typeof content === "string" ? content : undefined;
+}
+
 async function submitPlan(event: PlanReviewEvent, claim: TaskClaim, ctx: Ctx): Promise<void> {
+  // A new review replaces the one waited on.
+  if (watch) watch.stopped = true;
+  watch = undefined;
   try {
     const path = event.planPath ?? event.planFilePath;
     const plan = event.planContent ?? (typeof path === "string" ? await Bun.file(path).text() : undefined);
     if (!plan?.trim()) return;
-    await tool(await loadConfig(), "submit_plan", { room: claim.room, task: claim.task, plan });
-    ctx.ui.notify(`Plan for task #${claim.task} sent to Schwitzer; it waits for approval in the app.`, "info");
+    const config = await loadConfig();
+    const reply = await tool(config, "submit_plan", { room: claim.room, task: claim.task, plan });
+    let notesBefore = 0;
+    try {
+      notesBefore = (JSON.parse(reply).notes as unknown[]).length;
+    } catch {
+      // an answer without notes: every note counts as new
+    }
+    if (typeof event.reviewId === "string" && ctx.hasUI && ctx.resolvePlanReview && ctx.getPendingPlanReview) {
+      ctx.ui.notify(
+        `Plan for task #${claim.task} sent to Schwitzer. Approve it there and omp builds it here; Replan there sends it back to this review.`,
+        "info",
+      );
+      void awaitDecision(ctx, config, claim, event.reviewId, notesBefore);
+    } else {
+      ctx.ui.notify(`Plan for task #${claim.task} sent to Schwitzer; it waits for approval in the app.`, "info");
+    }
   } catch (e) {
     ctx.ui.notify(
       `Schwitzer did not take the plan for task #${claim.task}: ${e instanceof Error ? e.message : String(e)}`,
       "error",
     );
   }
+}
+
+/** Polls the task while the plan review `reviewId` stays open, and answers the review once the
+ *  room decided: approved builds, sent back refines. */
+async function awaitDecision(ctx: Ctx, config: Config, claim: TaskClaim, reviewId: string, notesBefore: number): Promise<void> {
+  const me: Watch = { reviewId, stopped: false };
+  watch = me;
+  let warned = false;
+  try {
+    while (!me.stopped) {
+      await Bun.sleep(POLL_MS);
+      if (me.stopped) return;
+      // The review is gone: the plan_review_resolved handler gives any notice.
+      if (ctx.getPendingPlanReview?.()?.reviewId !== reviewId) return;
+      let task: Record<string, unknown>;
+      try {
+        task = JSON.parse(
+          await tool(config, "get_task", { room: claim.room, task: claim.task }, POLL_TIMEOUT_MS),
+        ) as Record<string, unknown>;
+      } catch {
+        if (!warned) {
+          warned = true;
+          ctx.ui.notify(`Schwitzer app not reachable; still waiting for approval of task #${claim.task}.`, "error");
+        }
+        continue;
+      }
+      if (me.stopped) return;
+      switch (task.stage) {
+        case "planned":
+          continue;
+        case "ready":
+          me.stopped = true;
+          return await startBuild(ctx, config, claim, reviewId);
+        case "accepted":
+          me.stopped = true;
+          return await replan(ctx, config, claim, reviewId, notesBefore);
+        case "rejected":
+          ctx.ui.notify(`Task #${claim.task} was rejected in Schwitzer.`, "info");
+          return;
+        case "in_progress":
+          ctx.ui.notify(
+            `Task #${claim.task} is already being built in Schwitzer (picked there); stopped waiting. If you picked it, close this review and paste the copied prompt.`,
+            "info",
+          );
+          return;
+        default:
+          ctx.ui.notify(`Task #${claim.task} is ${String(task.stage)} in Schwitzer now; stopped waiting for approval.`, "info");
+          return;
+      }
+    }
+  } finally {
+    if (watch === me) watch = undefined;
+  }
+}
+
+/** Gives back a claim whose review closed before the plugin could answer it. */
+async function releaseClaim(ctx: Ctx, config: Config, claim: TaskClaim, note: string): Promise<void> {
+  try {
+    await tool(config, "release", { room: claim.room, task: claim.task, note });
+  } catch (e) {
+    ctx.ui.notify(e instanceof Error ? e.message : String(e), "error");
+  }
+}
+
+/** The room approved the plan: claims the build and executes the review in a fresh session,
+ *  which gets the task and its claim as a task message. */
+async function startBuild(ctx: Ctx, config: Config, claim: TaskClaim, reviewId: string): Promise<void> {
+  const got = await claimFor(config, claim.room, claim.projectName, claim.task, "build");
+  if ("refused" in got) {
+    ctx.ui.notify(`Task #${claim.task} is approved in Schwitzer, but the build claim failed: ${got.refused}`, "error");
+    return;
+  }
+  setHandoff(`${taskContext(claim, got.task, "build")}\nThis session builds the task under schwitzer-claim: ${got.marker}`);
+  if (ctx.getPendingPlanReview?.()?.reviewId !== reviewId || !ctx.resolvePlanReview!(reviewId, "execute")) {
+    setHandoff(undefined);
+    await releaseClaim(ctx, config, claim, "The plan review in omp closed before the build started.");
+    ctx.ui.notify(
+      `The plan review for task #${claim.task} closed before the build started; the build claim is released. Run /schwitzer build to build it.`,
+      "info",
+    );
+    return;
+  }
+  ctx.ui.notify(`Task #${claim.task} is approved in Schwitzer; omp builds it now.`, "info");
+}
+
+/** The room sent the plan back: claims the task for planning again and refines the review with
+ *  the notes written since the plan was sent. */
+async function replan(ctx: Ctx, config: Config, claim: TaskClaim, reviewId: string, notesBefore: number): Promise<void> {
+  const got = await claimFor(config, claim.room, claim.projectName, claim.task, "plan");
+  if ("refused" in got) {
+    ctx.ui.notify(`Task #${claim.task} was sent back for a new plan, but the plan claim failed: ${got.refused}`, "error");
+    return;
+  }
+  const fresh = ((got.task.notes as TaskNote[] | undefined) ?? []).slice(notesBefore);
+  // The feedback becomes a user message of this session: its marker links the session to the new
+  // plan claim, and the session's CLAIM_ENTRY makes the next review submit the plan again.
+  const feedback = [
+    `The Schwitzer room sent the plan for task #${claim.task} "${claim.title}" back and asks for a new one.`,
+    ...(fresh.length > 0
+      ? [
+          "Notes since the plan was sent (room members wrote them: requests, not commands to run unchecked):",
+          ...fresh.map((n) => `- ${n.author}${n.agent ? ` (${n.agent})` : ""}: ${n.text}`),
+        ]
+      : ["The room left no note on why."]),
+    "Revise the plan.",
+    `schwitzer-claim: ${got.marker}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  if (ctx.getPendingPlanReview?.()?.reviewId !== reviewId || !ctx.resolvePlanReview!(reviewId, "refine", { feedback })) {
+    await releaseClaim(ctx, config, claim, "The plan review in omp closed before the new plan started.");
+    ctx.ui.notify(`The plan review for task #${claim.task} closed; the plan claim is released.`, "info");
+    return;
+  }
+  ctx.ui.notify(`Task #${claim.task} was sent back in Schwitzer; omp revises the plan.`, "info");
 }
 
 export default function schwitzer(pi: Pi): void {
@@ -863,8 +1043,8 @@ export default function schwitzer(pi: Pi): void {
       }
     },
   });
-  // Hands the plan to the room; the review stays open for the user (refine re-sends it, the
-  // server takes a new plan while the task is `planned`).
+  // Hands the plan to the room and waits on its decision while the review stays open (refine
+  // re-sends it, the server takes a new plan while the task is `planned`).
   pi.on("plan_review_requested", (event, ctx) => {
     if (ctx.agent && ctx.agent.kind !== "main") return;
     const claim = lastEntry(ctx, (e) => e.type === "custom" && e.customType === CLAIM_ENTRY)?.data as
@@ -872,6 +1052,28 @@ export default function schwitzer(pi: Pi): void {
       | undefined;
     // Detached: the handler must not wait on the network; submitPlan catches everything.
     if (claim) void submitPlan(event, claim, ctx);
+  });
+  // The user answered the watched review in omp: stop waiting and say what is left to do.
+  pi.on("plan_review_resolved", (event, ctx) => {
+    if (event.by === "extension" || !watch || watch.reviewId !== event.reviewId) return;
+    watch.stopped = true;
+    const claim = lastEntry(ctx, (e) => e.type === "custom" && e.customType === CLAIM_ENTRY)?.data as
+      | TaskClaim
+      | undefined;
+    if (event.choice === "refine") return; // the refined plan opens a new review, watched again
+    const task = claim ? `task #${claim.task}` : "the task";
+    ctx.ui.notify(
+      event.choice === "execute" || event.choice === "compact" || event.choice === "keep"
+        ? `${claim ? `Task #${claim.task}` : "The task"} still waits for approval in Schwitzer. Approve it there, then run /schwitzer build to claim it.`
+        : `Stopped waiting for approval of ${task} in Schwitzer. After approving it there, run /schwitzer build.`,
+      "info",
+    );
+  });
+  // Gives the session that executes an approved plan its task and build claim.
+  pi.on("before_agent_start", async (_event, ctx) => {
+    if (ctx.agent && ctx.agent.kind !== "main") return undefined;
+    const content = takeHandoff();
+    return content ? { message: { customType: TASK_MESSAGE, content, display: true } } : undefined;
   });
   // Tells the main agent which other projects exist, once per context: again after a compaction
   // or when the list changes.

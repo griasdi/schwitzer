@@ -284,10 +284,6 @@ fn actions<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
         ));
     }
     for decision in logic::legal_decisions(task) {
-        // Picking approves the plan already.
-        if pickable && decision == Decision::Approve {
-            continue;
-        }
         any = true;
         let (id, label) = match decision {
             Decision::Accept => ("accept", "Accept"),
@@ -299,6 +295,11 @@ fn actions<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
         let message = Some(Message::Decide(task.number, decision));
         row = row.push(match decision {
             Decision::Reject => text_button(id, label, message, theme::button_danger),
+            // Pick stays the view's one primary action; Approve next to it approves without
+            // claiming, for an omp session that waits on its plan review.
+            Decision::Approve if pickable => {
+                text_button(id, label, message, theme::button_secondary)
+            }
             Decision::Accept | Decision::Approve => {
                 text_button(id, label, message, theme::button_primary)
             }
