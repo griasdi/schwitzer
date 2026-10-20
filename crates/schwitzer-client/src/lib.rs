@@ -10,18 +10,15 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
 
 use schwitzer_proto::{
     ApiError, MemberId, Request, Response, RoomId, RoomKey, RoomState, ServerAddr,
 };
 use tokio::sync::broadcast;
-use weida::{FilesOptions, IdentitySource, ReconnectPolicy, RuntimeConfig};
+use weida::{FilesOptions, IdentitySource};
 
 use crate::conn::ServerConn;
 
-/// Longest wait of weida's own redial of a dropped connection.
-const REDIAL_MAX: Duration = Duration::from_secs(5);
 /// Capacity of the event channel.
 const EVENT_CAPACITY: usize = 1024;
 
@@ -98,7 +95,6 @@ struct Inner {
     identity: IdentitySource,
     handle: tokio::runtime::Handle,
     rt: Mutex<Option<tokio::runtime::Runtime>>,
-    wrt: weida::Runtime,
     events: broadcast::Sender<ClientEvent>,
     /// The rooms the user keeps, in the order they were added.
     keys: Mutex<Vec<RoomKey>>,
@@ -129,23 +125,12 @@ impl Client {
             .build()
             .map_err(|e| ClientError::Net(e.to_string()))?;
         let handle = rt.handle().clone();
-        let wrt = weida::Runtime::with_handle(
-            handle.clone(),
-            RuntimeConfig {
-                reconnect: ReconnectPolicy {
-                    max: REDIAL_MAX,
-                    ..ReconnectPolicy::default()
-                },
-                ..RuntimeConfig::default()
-            },
-        );
         Ok(Self(Arc::new(Inner {
             member,
             name: Mutex::new(name),
             identity,
             handle,
             rt: Mutex::new(Some(rt)),
-            wrt,
             events: broadcast::channel(EVENT_CAPACITY).0,
             keys: Mutex::default(),
             rooms: Mutex::default(),

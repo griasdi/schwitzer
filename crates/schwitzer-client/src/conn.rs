@@ -3,6 +3,7 @@
 //! for the next session.
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -12,7 +13,7 @@ use schwitzer_proto::{
 };
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use weida::{ClientTls, IdentitySource, Requester, Runtime, Trust};
+use weida::{ClientTls, IdentitySource, ReconnectPolicy, Requester, RuntimeConfig, Trust};
 
 use crate::{ClientError, lock};
 
@@ -20,6 +21,19 @@ use crate::{ClientError, lock};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a request waits for a server to come online.
 const SESSION_WAIT: Duration = Duration::from_secs(10);
+/// Longest wait of weida's own redial of a dropped connection.
+const REDIAL_MAX: Duration = Duration::from_secs(5);
+
+/// The weida runtime settings of every session.
+fn runtime_config() -> RuntimeConfig {
+    RuntimeConfig {
+        reconnect: ReconnectPolicy {
+            max: REDIAL_MAX,
+            ..ReconnectPolicy::default()
+        },
+        ..RuntimeConfig::default()
+    }
+}
 
 /// The TLS terms of every dial: the address names the server key, our key
 /// proves who we are.
@@ -27,24 +41,33 @@ fn tls(identity: &IdentitySource) -> ClientTls {
     ClientTls::new(Trust::by_address()).with_identity(identity.clone())
 }
 
-/// The live endpoints of one connection attempt to a server.
+/// The live endpoints of one connection attempt to a server, on a weida runtime of its
+/// own: a fresh UDP socket per attempt, so a socket that died (quinn ends its endpoint
+/// on most recv errors, and weida never rebinds it) costs one attempt, not the process.
 pub(crate) struct Session {
     pub(crate) events: Requester,
     rpc: Requester,
     addr: ServerAddr,
+    wrt: weida::Runtime,
+    handle: tokio::runtime::Handle,
+    closed: AtomicBool,
 }
 
 impl Session {
     /// Dials `/rpc` and `/events`; a failed dial leaves nothing behind.
     pub(crate) async fn connect(
-        runtime: &Runtime,
+        handle: &tokio::runtime::Handle,
         identity: &IdentitySource,
         addr: ServerAddr,
     ) -> Result<Self, ClientError> {
+        let wrt = weida::Runtime::with_handle(handle.clone(), runtime_config());
         let session = Self {
-            events: runtime.requester(tls(identity)),
-            rpc: runtime.requester(tls(identity)),
+            events: wrt.requester(tls(identity)),
+            rpc: wrt.requester(tls(identity)),
             addr,
+            wrt,
+            handle: handle.clone(),
+            closed: AtomicBool::new(false),
         };
         if let Err(e) = session.dial().await {
             session.close();
@@ -71,10 +94,24 @@ impl Session {
         from_bytes::<Reply>(&bytes)?.map_err(ClientError::Api)
     }
 
-    /// Forgets both addresses so the runtime stops redialling them.
+    /// Forgets both addresses, so the runtime stops redialling them, then shuts the
+    /// runtime down: its socket and pooled connections close.
     pub(crate) fn close(&self) {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        // Before the shutdown: a slot still registered would redial and bind a new
+        // endpoint.
         self.rpc.disconnect(&self.addr.url(PATH_RPC));
         self.events.disconnect(&self.addr.url(PATH_EVENTS));
+        let wrt = self.wrt.clone();
+        self.handle.spawn(async move { wrt.shutdown().await });
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 

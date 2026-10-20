@@ -69,7 +69,7 @@ impl Client {
         let mut backoff = Backoff::new(FIRST_BACKOFF, MAX_BACKOFF);
         loop {
             let outcome =
-                match Session::connect(&self.0.wrt, &self.0.identity, conn.addr.clone()).await {
+                match Session::connect(&self.0.handle, &self.0.identity, conn.addr.clone()).await {
                     Ok(session) => {
                         let session = Arc::new(session);
                         let outcome = self.run_session(&conn, &session, &mut backoff).await;
