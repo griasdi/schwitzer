@@ -38,7 +38,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |`schwitzer` desktop app|each member's machine (Linux, Windows, macOS)|task list, decisions, settings; MCP server for the member's agents; session scanner; plugin keeper; self-update|room servers over weida/QUIC; omp through the plugin files and the MCP server; GitHub over HTTPS|
 |omp + the Schwitzer plugin|the member's machine, in every repo linked to a project|the coding agent; `/schwitzer plan · build · propose · idea` and the `schwitzer_*` tools|the app's MCP server on `127.0.0.1`|
 |`schwitzer-server`|anyone's host, UDP (default `0.0.0.0:7444`)|rooms, projects, tasks, claims, notes; fans out events; holds live sessions in memory; announces the newest release|apps over weida/QUIC; the GitHub releases API|
-|stkn.org|the shared server, `weida://…@stkn.org:7444`|`schwitzer-server` as the systemd user unit `schwitzer-server`, deployed by `deploy/deploy.sh stkn`; other people use it, so a protocol break cuts off their older apps until they update|apps|
+|stkn.org|the shared server, `weida://…@stkn.org:7444`|`schwitzer-server` as the systemd user unit `schwitzer-server`, deployed by `deploy/release.sh` through `deploy/deploy.sh stkn` with every release; other people use it, so a protocol break cuts off their older apps until they update|apps|
 |GitHub Releases + releases API|github.com|release assets with sha256 digests; the server polls `RELEASES_URL` every 300 s, the app downloads from it|apps, servers|
 |GitHub Actions|github.com|`ci.yml` (gate), `release.yml` (assets on `v*` tags), `site.yml` (product site)|GitHub Releases, GitHub Pages|
 |Product site|`site/`, GitHub Pages|the product page and downloads|nothing|
@@ -490,6 +490,7 @@ flowchart TB
   classDef server fill:#16494a,stroke:#cdf5f2,color:#cdf5f2
   classDef ext fill:#222d26,stroke:#627568,color:#e4eee6
   rel["deploy/release.sh x.y.z"]:::ext --> tag["tag v*"]:::ext
+  tag --> stkn["deploy/deploy.sh stkn<br/>stkn.org runs the release"]:::server
   tag --> yml["release.yml<br/>4 platforms, --features self-update,<br/>deploy/package.sh"]:::ext
   yml --> gh["GitHub release<br/>assets + sha256 digests,<br/>notes from deploy/changelog.sh"]:::ext
   gh --> check["schwitzer-server release check, 5 min"]:::server
@@ -513,7 +514,7 @@ flowchart TB
 |`.github/workflows/ci.yml`|on every push to `main` and every pull request: the gate on ubuntu-24.04 (fmt, clippy with and without `schwitzer-app/remote`, tests), `cargo deny`, and app clippy plus the `update::` tests on macos-14 and windows-latest|
 |`.github/workflows/release.yml`|on `v*` tags: builds the four platforms with `deploy/package.sh` and publishes the GitHub release|
 |`.github/workflows/site.yml`|publishes `site/` to GitHub Pages|
-|`deploy/deploy.sh stkn`|builds the committed `HEAD` (uncommitted work is ignored), copies it to stkn.org with rsync, installs the systemd user unit `schwitzer-server` on `[::]:7444`, restarts it only when the binary or unit changed, and waits for its `server url:` line|
+|`deploy/deploy.sh stkn`|builds the committed `HEAD` (uncommitted work is ignored), copies it to stkn.org with rsync, installs the systemd user unit `schwitzer-server` on `[::]:7444`, restarts it only when the binary or unit changed, and waits for its `server url:` line; `deploy/release.sh` runs it after the tag push, the only time stkn.org is updated|
 
 Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UDP (a proposal through to Done, a restart on the same data dir, a forgotten room, the release announcement). Most unit tests sit in `app/logic.rs`, `store.rs` and `schwitzer-proto`; `sessions.rs` tests read `crates/schwitzer-app/tests/fixtures/*.jsonl`. The commands are in [AGENTS.md](../AGENTS.md) and [CONTRIBUTING.md](../CONTRIBUTING.md).
 

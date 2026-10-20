@@ -10,8 +10,8 @@ target/debug/schwitzer-server --listen 127.0.0.1:7454 --data-dir /tmp/sw/server 
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-deploy/deploy.sh stkn    # build HEAD, run it on stkn.org (ssh stkn.org) as the systemd user service schwitzer-server, UDP 7444
-deploy/release.sh 0.2.0   # on main, pushed: set the version, tag v0.2.0; .github/workflows/release.yml builds and publishes the desktop app
+deploy/deploy.sh stkn    # build HEAD, run it on stkn.org (ssh stkn.org) as the systemd user service schwitzer-server, UDP 7444; only deploy/release.sh runs it
+deploy/release.sh 0.2.0   # on main, pushed: set the version, tag v0.2.0 (.github/workflows/release.yml builds and publishes the desktop app), then deploy/deploy.sh stkn
 deploy/changelog.sh v0.1.0..HEAD   # release notes from the Changelog: trailers
 cargo run -p schwitzer-app --example licenses   # rewrite assets/licenses/third-party.json after Cargo.lock changed (needs cargo-about 0.9.2)
 ```
@@ -30,7 +30,7 @@ cargo test --workspace
 cargo deny check
 ```
 
-After the push, every change that touches code ends with `deploy/deploy.sh stkn` (see "Finishing a change"): the server on stkn.org always runs the latest `main`.
+stkn.org runs the latest release, not the latest `main`: `deploy/release.sh` deploys it right after pushing the tag, and no other change runs `deploy/deploy.sh stkn` (see "Finishing a change").
 
 `cargo deny check` (`deny.toml`) fetches the RustSec advisory database and checks the graph with every feature: it fails on every vulnerability, on an "unmaintained" notice only for a direct dependency, on a license outside the allow list, and on a source other than crates.io and the two git repositories listed there; a crate in two versions is a warning. An advisory is never silenced, a license never allowed and a source never added without the user's decision. Install it with `cargo install --locked cargo-deny`.
 
@@ -38,19 +38,18 @@ A change to doc comments also runs `RUSTDOCFLAGS="-D warnings" cargo doc --works
 
 ## Finishing a change
 
-A change is finished when its gate passed, it is committed and pushed to `origin main`, and `deploy/deploy.sh stkn` ran successfully afterwards. A change without code, such as documentation only, skips the gate but is still committed and pushed. `deploy/deploy.sh stkn` builds the committed `HEAD` on this machine (uncommitted work in the checkout is ignored), uploads it to stkn.org and restarts the systemd user service `schwitzer-server` there only when the binary or unit changed, so running it after every code push is cheap. Run it from this checkout on `main` after the push. If it fails, the change is not finished: fix the cause; if UDP 7444 on stkn.org is taken by a process the agent did not start, leave it alone and tell the user.
+A change is finished when its gate passed and it is committed and pushed to `origin main`. A change without code, such as documentation only, skips the gate but is still committed and pushed. A change does not deploy stkn.org: the server there is updated only with a release, so a protocol or schema change reaches the people using it together with the app that speaks it.
 
 - Stage paths explicitly, never `git add -A` or `git add .`: the checkout may hold the user's uncommitted work, which is left alone. `SCHWITZER_PLAN.md` and other local planning files are never committed; `.omp/mcp.json` holds a token and stays untracked.
 - Commit messages follow CONTRIBUTING.md: no prefix, a `Changelog:` trailer for user-visible changes.
 - Before pushing, `git pull --rebase origin main`; if that brought new commits, run the gate again. Push only to `origin`.
-- A change without code skips `deploy.sh` as well.
-- stkn.org is the shared server (`weida://…@stkn.org:7444`), which other people use: a change that breaks the protocol or migrates the schema cuts off their older apps until they update, so say so in the report. Logs: `ssh stkn.org journalctl --user -u schwitzer-server`.
+- stkn.org is the shared server (`weida://…@stkn.org:7444`), which other people use. It runs the latest release: `deploy/release.sh` deploys the tagged commit with `deploy/deploy.sh stkn` right after pushing the tag. If that deploy fails, the script stops with the tag already pushed: fix the cause and run `deploy/deploy.sh stkn` on the tagged commit; if UDP 7444 on stkn.org is taken by a process the agent did not start, leave it alone and tell the user. A change that breaks the protocol or migrates the schema cuts off older apps once the next release is deployed, until they update (while the release workflow still builds, the new app is not downloadable yet), so say so in the report. Logs: `ssh stkn.org journalctl --user -u schwitzer-server`.
 
 ## Running headless
 
 The user runs their own `schwitzer`, with its data in `~/.local/share/schwitzer` (`identity`, `mcp-token`, `settings.toml`) and its MCP server on `127.0.0.1:13339`. An agent never starts a windowed `schwitzer` and never runs it without `--headless` and a `SCHWITZER_HOME` under `/tmp`. That includes `--version`: without these it opens the GUI on the user's identity and rooms. Every headless instance gets its own `SCHWITZER_HOME` with a `settings.toml` that sets its own `mcp_port` (never 13339) and an `omp_sessions_dir` under `/tmp`; otherwise it shares the agent's own omp sessions. A server for a test runs from `target/` with `--data-dir` under `/tmp`.
 
-There is no local server. Tests never use the stkn.org server and never stop, restart or replace it other than through `deploy/deploy.sh stkn`; a test server runs from `target/` on loopback (the examples use 7454).
+There is no local server. Tests never use the stkn.org server and never stop, restart or replace it; only `deploy/release.sh` deploys it. A test server runs from `target/` on loopback (the examples use 7454).
 
 ```sh
 cargo build --workspace --features schwitzer-app/remote

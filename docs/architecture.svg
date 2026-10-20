@@ -276,10 +276,10 @@
   <text x="670" y="919" class="desc">site.yml publishes it</text>
   <rect x="956" y="845" width="286" height="190" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
   <text x="970" y="865" class="head">stkn.org</text>
-  <text x="970" y="885" class="small mono">deploy/deploy.sh stkn</text>
+  <text x="970" y="885" class="small mono">release.sh → deploy.sh stkn</text>
   <text x="970" y="902" class="desc">the shared room server</text>
   <text x="970" y="919" class="desc">systemd user unit schwitzer-server</text>
-  <text x="970" y="936" class="desc">UDP 7444 · runs the latest main</text>
+  <text x="970" y="936" class="desc">UDP 7444 · runs the latest release</text>
   <text x="970" y="1023" class="small">a protocol break cuts off older apps</text>
   <rect x="1256" y="845" width="286" height="190" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
   <text x="1270" y="865" class="head">Releases API</text>
