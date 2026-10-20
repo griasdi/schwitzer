@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use schwitzer_proto::RoomId;
+use schwitzer_proto::{Project, RoomId};
 use serde::{Deserialize, Serialize};
 
 /// The port of the MCP server unless `settings.toml` says otherwise.
@@ -205,6 +205,26 @@ impl Settings {
             .collect();
         linked.sort_by_key(|(project, _)| *project);
         linked
+    }
+
+    /// Forgets the repos linked to, and the choice of, projects of `room` that are not in
+    /// `projects` (the room's current list) any more; `true` when anything changed.
+    pub fn forget_deleted_projects(&mut self, room: &RoomId, projects: &[Project]) -> bool {
+        let hex = room.to_hex();
+        let exists = |id: u64| projects.iter().any(|p| p.id == id);
+        let before = (self.repos.len(), self.chosen_projects.len());
+        self.repos.retain(|key, _| match parse_repo_key(key) {
+            Some((r, id)) => r != hex || exists(id),
+            None => true,
+        });
+        if self
+            .chosen_projects
+            .get(room)
+            .is_some_and(|&id| !exists(id))
+        {
+            self.chosen_projects.remove(room);
+        }
+        before != (self.repos.len(), self.chosen_projects.len())
     }
 
     /// Writes `settings.toml` into `dir` through a temporary file and a rename.
@@ -427,5 +447,30 @@ mod tests {
         ] {
             assert_eq!(parse_repo_key(&bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn forgetting_deleted_projects_keeps_other_rooms() {
+        let (a, b) = (RoomId([1; 32]), RoomId([2; 32]));
+        let mut settings = Settings {
+            repos: BTreeMap::from([
+                (repo_key(&a, 1), vec![PathBuf::from("/app")]),
+                (repo_key(&a, 2), vec![PathBuf::from("/old")]),
+                (repo_key(&b, 2), vec![PathBuf::from("/other")]),
+            ]),
+            chosen_projects: BTreeMap::from([(a, 2)]),
+            ..Settings::default()
+        };
+        let projects = [Project {
+            id: 1,
+            name: "app".into(),
+        }];
+        assert!(settings.forget_deleted_projects(&a, &projects));
+        assert_eq!(
+            settings.repos.keys().cloned().collect::<Vec<_>>(),
+            [repo_key(&a, 1), repo_key(&b, 2)]
+        );
+        assert!(settings.chosen_projects.is_empty());
+        assert!(!settings.forget_deleted_projects(&a, &projects));
     }
 }

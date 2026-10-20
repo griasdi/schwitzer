@@ -42,4 +42,9 @@ pub enum Event {
     Release {
         version: String,
     },
+    /// A deleted project; it had no tasks.
+    ProjectDeleted {
+        room: RoomId,
+        project: u64,
+    },
 }

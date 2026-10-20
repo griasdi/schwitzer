@@ -351,8 +351,34 @@ fn this_project(app: &App) -> Element<'_, Message> {
     let name = app.forms.project_name.trim();
     let renamed = !name.is_empty() && name != project.name;
     let filled = !app.forms.repo.trim().is_empty();
-    column![
+    let tasks = app.selected_state().map_or(0, |s| {
+        s.tasks.iter().filter(|t| t.project == project.id).count()
+    });
+    let head = row![
         heading(&project.name).width(Length::Fill),
+        icon_text_button(
+            "delete-project",
+            Icon::Trash,
+            Tone::Danger,
+            "Delete",
+            (tasks == 0).then_some(Message::DeleteProject),
+            theme::button_danger,
+        ),
+    ]
+    .spacing(SP_2)
+    .align_y(Alignment::Center);
+    let mut col = column![head].spacing(SP_3);
+    if tasks > 0 {
+        let count = if tasks == 1 {
+            "1 task".to_owned()
+        } else {
+            format!("{tasks} tasks")
+        };
+        col = col.push(muted(format!(
+            "Only an empty project can be deleted. Move its {count} into another project first."
+        )));
+    }
+    col.push(
         row![
             input(
                 "project-name-input",
@@ -370,6 +396,8 @@ fn this_project(app: &App) -> Element<'_, Message> {
         ]
         .spacing(SP_2)
         .align_y(Alignment::Center),
+    )
+    .push(
         column![
             text("Linked repos").size(TS_14).font(MEDIUM),
             muted(
@@ -382,7 +410,9 @@ fn this_project(app: &App) -> Element<'_, Message> {
             ),
         ]
         .spacing(SP_1),
-        repos,
+    )
+    .push(repos)
+    .push(
         row![
             input(
                 "repo-input",
@@ -408,8 +438,7 @@ fn this_project(app: &App) -> Element<'_, Message> {
         ]
         .spacing(SP_2)
         .align_y(Alignment::Center),
-    ]
-    .spacing(SP_3)
+    )
     .into()
 }
 

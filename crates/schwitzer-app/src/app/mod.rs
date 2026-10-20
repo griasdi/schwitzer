@@ -126,6 +126,9 @@ pub enum Message {
     ProjectNameInput(String),
     RenameProject,
     ProjectRenamed(Result<Response, String>),
+    /// Deletes the selected project; the server refuses one with tasks.
+    DeleteProject,
+    ProjectDeleted(Result<Response, String>),
     /// Moves the open task into project `id`.
     MoveTask(u64),
     TaskMoved(Result<Response, String>),
@@ -1209,6 +1212,24 @@ impl App {
                 }
                 Task::none()
             }
+            Message::DeleteProject => {
+                let (Some(room), Some(project)) = (self.selected, self.selected_project()) else {
+                    return Task::none();
+                };
+                let req = Request::DeleteProject {
+                    room,
+                    project: project.id,
+                };
+                call(self.request(room, req), Message::ProjectDeleted)
+            }
+            Message::ProjectDeleted(result) => {
+                match result {
+                    Ok(Response::Ok) => self.notify("Project deleted"),
+                    Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
+                    Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
             Message::MoveTask(project) => {
                 let Some((state, task)) = self.open() else {
                     return Task::none();
@@ -2097,6 +2118,12 @@ impl App {
             }
             ClientEvent::Room(state) => {
                 let id = state.id;
+                let shown = (self.selected == Some(id))
+                    .then(|| self.selected_project().map(|p| p.id))
+                    .flatten();
+                if self.settings.forget_deleted_projects(&id, &state.projects) {
+                    self.save_settings();
+                }
                 match self
                     .rooms
                     .iter_mut()
@@ -2112,6 +2139,9 @@ impl App {
                         entry.1 = Some(*state);
                     }
                     None => self.sync_rooms(),
+                }
+                if self.selected == Some(id) && self.selected_project().map(|p| p.id) != shown {
+                    self.sync_project_form();
                 }
                 if self.selected.is_none() {
                     self.select(Some(id));

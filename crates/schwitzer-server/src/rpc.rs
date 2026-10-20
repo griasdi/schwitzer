@@ -334,6 +334,9 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             })
             .await,
         ),
+        Request::DeleteProject { room, project } => {
+            delete_project(state, caller, room, project).await
+        }
     }
 }
 
@@ -409,6 +412,25 @@ where
         })
         .await?;
     Ok(Response::Project(project))
+}
+
+/// Deletes an empty project as a member of `room`, then tells the room's members.
+async fn delete_project(state: &State, caller: MemberId, room: RoomId, project: u64) -> Reply {
+    let st = state.clone();
+    state
+        .store
+        .run(move |conn| {
+            let tx = conn.transaction()?;
+            store::require_member(&tx, &room, &caller)?;
+            store::delete_project(&tx, &room, project)?;
+            let members = store::room_member_ids(&tx, &room)?;
+            tx.commit()?;
+            st.hub
+                .publish(&members, &Event::ProjectDeleted { room, project });
+            Ok(())
+        })
+        .await?;
+    Ok(Response::Ok)
 }
 
 /// Stores the caller's name and tells their rooms; `always` also when it did

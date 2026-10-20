@@ -136,7 +136,7 @@
   <text x="76" y="622" class="crate proto">schwitzer-proto</text>
   <text x="76" y="643" class="desc">Request · Event · Task · Stage</text>
   <text x="76" y="661" class="desc">postcard · u32 LE frames · caps</text>
-  <text x="76" y="679" class="desc mono">PROTOCOL_VERSION 5</text>
+  <text x="76" y="679" class="desc mono">PROTOCOL_VERSION 6</text>
   <rect x="340" y="600" width="500" height="104" rx="10" fill="#5aa6f5" stroke="#5aa6f5" stroke-width="1.5" fill-opacity="0.10"/>
   <text x="356" y="622" class="crate client">schwitzer-client</text>
   <text x="356" y="639" class="desc">own tokio runtime schwitzer-net (2 workers) + weida runtime</text>

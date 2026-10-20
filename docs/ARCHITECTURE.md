@@ -47,7 +47,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 
 |Crate|Owns|Must not know about|
 |---|---|---|
-|`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `RoomState`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (5), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
+|`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `RoomState`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (6), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
 |`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `release.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
 |`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
 |`schwitzer-app`|the `schwitzer` binary: UI, MCP server, plugin writer, session scanner, updater, WSL support|SQLite, weida: it reaches the network only through `schwitzer-client`|
@@ -150,7 +150,7 @@ weida is a QUIC framework with mutual TLS; Schwitzer pins it to an exact revisio
 
 The client holds one `Requester` per endpoint, so two QUIC connections per server (`conn.rs`).
 
-`Request` has 20 variants:
+`Request` has 21 variants:
 
 |Group|Variants|
 |---|---|
@@ -159,10 +159,10 @@ The client holds one `Requester` per endpoint, so two QUIC connections per serve
 |tasks|`Propose`, `AddIdea`, `ProposeIdea`, `EditTask`, `SetPriority`, `MoveTask`, `AddNote`|
 |decisions|`Decide`|
 |work|`Claim`, `SubmitPlan`, `Finish`, `Unclaim`|
-|projects|`CreateProject`, `RenameProject`|
+|projects|`CreateProject`, `RenameProject`, `DeleteProject` (only a project without tasks in any stage; its id is never given again)|
 |live|`PublishSessions`|
 
-`Event` has 8: `Room` (a full room snapshot), `Ready`, `Task`, `Member`, `Sessions`, `Left`, `Project`, `Release`. postcard is positional, so variants are append-only; a change old peers cannot read bumps `PROTOCOL_VERSION`. `ApiError` texts are shown verbatim in the UI and over MCP.
+`Event` has 9: `Room` (a full room snapshot), `Ready`, `Task`, `Member`, `Sessions`, `Left`, `Project`, `Release`, `ProjectDeleted`. postcard is positional, so variants are append-only; a change old peers cannot read bumps `PROTOCOL_VERSION`. `ApiError` texts are shown verbatim in the UI and over MCP.
 
 ## 6. Room server
 
@@ -349,7 +349,7 @@ A bad `settings.toml` loads as defaults with a notice and is not overwritten unt
 
 3. omp loads it as a project plugin the next time it starts in that repo.
 4. Every 5 s the app compares each installed plugin with what it would write: the three plugin files byte for byte, the lock entry's version, and no legacy `schwitzer` server in `.omp/mcp.json`. The result is `Current` or `Outdated`; with `auto_update_plugins` an outdated plugin is rewritten at once.
-5. When the linked repos change, every installed plugin is rewritten (its `projects` and `other_repos` change), and a repo with no project left loses the plugin.
+5. When the linked repos change, every installed plugin is rewritten (its `projects` and `other_repos` change), and a repo with no project left loses the plugin. A deleted project takes its repo links and its place in `chosen_projects` with it on every member's machine.
 
 A repo inside WSL gets Linux paths in `schwitzer.json` (`wsl::path_for`), because omp runs inside the distro.
 

@@ -617,6 +617,60 @@ async fn a_full_room_refuses_more_and_its_snapshot_still_arrives() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_empty_project_is_deleted_for_every_member() {
+    let data = TempDir::new().unwrap();
+    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
+    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
+    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
+    let mut rx_b = b.subscribe();
+
+    let key = a
+        .create_room(server.addr.clone(), "crew".into())
+        .await
+        .unwrap();
+    let room = RoomId::of(&key.token);
+    assert_eq!(b.join_room(key).await.unwrap(), room);
+    let create = |name: &str| Request::CreateProject {
+        room,
+        name: name.into(),
+    };
+    let app = project(a.request(room, create("app")).await.unwrap());
+    let old = project(a.request(room, create("old")).await.unwrap());
+    let propose = |project: u64| Request::Propose {
+        room,
+        project,
+        title: "a task".into(),
+        body: String::new(),
+    };
+    a.request(room, propose(app.id)).await.unwrap();
+    room_where(&mut rx_b, |s| {
+        s.projects == [app.clone(), old.clone()] && s.tasks.len() == 1
+    })
+    .await;
+
+    let delete = |project: u64| Request::DeleteProject { room, project };
+    assert_eq!(
+        api_error(a.request(room, delete(app.id)).await),
+        ApiError::ProjectNotEmpty
+    );
+    assert_eq!(a.request(room, delete(old.id)).await.unwrap(), Response::Ok);
+    room_where(&mut rx_b, |s| s.projects == [app.clone()]).await;
+    assert_eq!(
+        api_error(b.request(room, delete(old.id)).await),
+        ApiError::NoSuchProject
+    );
+    assert_eq!(
+        api_error(b.request(room, propose(old.id)).await),
+        ApiError::NoSuchProject
+    );
+
+    a.shutdown();
+    b.shutdown();
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_member_is_in_at_most_50_rooms() {
     let data = TempDir::new().unwrap();
     let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;

@@ -113,6 +113,11 @@ pub enum Request {
         task: u64,
         project: u64,
     },
+    /// Deletes a project without tasks in any stage; its id is never given again.
+    DeleteProject {
+        room: RoomId,
+        project: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +157,8 @@ pub enum ApiError {
     NoSuchProject,
     #[error("a project with this name already exists")]
     ProjectExists,
+    #[error("the project still has tasks; move them into another project first")]
+    ProjectNotEmpty,
 }
 
 pub type Reply = Result<Response, ApiError>;

@@ -494,6 +494,25 @@ pub fn rename_project(conn: &Connection, room: &RoomId, id: u64, name: &str) -> 
     })
 }
 
+/// Deletes a project that has no tasks in any stage. `rooms.next_project` stays as it is,
+/// so the id is never given to another project.
+pub fn delete_project(conn: &Connection, room: &RoomId, id: u64) -> R<()> {
+    require_project(conn, room, id)?;
+    let used: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tasks WHERE room = ?1 AND project = ?2)",
+        params![room.as_bytes().as_slice(), int(id)],
+        |r| r.get(0),
+    )?;
+    if used {
+        return Err(ApiError::ProjectNotEmpty.into());
+    }
+    conn.execute(
+        "DELETE FROM projects WHERE room = ?1 AND id = ?2",
+        params![room.as_bytes().as_slice(), int(id)],
+    )?;
+    Ok(())
+}
+
 /// Moves a task into another project; any stage may move, so mixed rooms can be sorted out.
 pub fn move_task(conn: &Connection, room: &RoomId, number: u64, project: u64, now: u64) -> R<Task> {
     require_task(conn, room, number)?;
@@ -1338,6 +1357,43 @@ CREATE INDEX notes_by_task ON notes(room, number);
             rename_project(&conn, &room, 9, "x"),
             Err(Fail::Api(ApiError::NoSuchProject))
         ));
+    }
+
+    #[test]
+    fn only_an_empty_project_is_deleted_and_its_id_is_not_given_again() {
+        let (conn, room, me) = setup();
+        assert_eq!(create_project(&conn, &room, "site", NOW).unwrap().id, 2);
+        assert_eq!(create_project(&conn, &room, "old", NOW).unwrap().id, 3);
+        let n = task_in(&conn, &room, &me, Stage::Idea);
+        move_task(&conn, &room, n, 2, NOW).unwrap();
+
+        assert!(matches!(
+            delete_project(&conn, &room, 2),
+            Err(Fail::Api(ApiError::ProjectNotEmpty))
+        ));
+        assert!(matches!(
+            delete_project(&conn, &room, 9),
+            Err(Fail::Api(ApiError::NoSuchProject))
+        ));
+        delete_project(&conn, &room, 3).unwrap();
+        assert_eq!(
+            read_projects(&conn, &room).unwrap(),
+            vec![
+                Project {
+                    id: 1,
+                    name: "app".into()
+                },
+                Project {
+                    id: 2,
+                    name: "site".into()
+                }
+            ]
+        );
+        assert!(matches!(
+            delete_project(&conn, &room, 3),
+            Err(Fail::Api(ApiError::NoSuchProject))
+        ));
+        assert_eq!(create_project(&conn, &room, "old", NOW).unwrap().id, 4);
     }
 
     #[test]

@@ -262,6 +262,12 @@ impl Client {
                 }
                 room
             }
+            Event::ProjectDeleted { room, project } => {
+                if !self.update(room, |state| state.projects.retain(|p| p.id != project)) {
+                    return;
+                }
+                room
+            }
         };
         let state = lock(&self.0.rooms)
             .get(&changed)
