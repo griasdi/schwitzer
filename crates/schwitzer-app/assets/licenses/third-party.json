@@ -1,5 +1,5 @@
 {
-  "lock": "7f70168961e3191194f611a75f54253a89f82f5bee79e7fdfbd1dbf383525482",
+  "lock": "39b7efb192c642cbfe2bfaa2b85fb2e2b2c1ca9520c70719a3a6ef01e5e6af94",
   "licenses": [
     {
       "id": "Apache-2.0",
@@ -280,8 +280,8 @@
       "crates": [
         {
           "name": "webpki-roots",
-          "version": "1.0.9",
-          "source": "https://crates.io/crates/webpki-roots/1.0.9"
+          "version": "1.0.10",
+          "source": "https://crates.io/crates/webpki-roots/1.0.10"
         }
       ]
     },
@@ -496,8 +496,8 @@
       "crates": [
         {
           "name": "rustls-webpki",
-          "version": "0.103.15",
-          "source": "https://crates.io/crates/rustls-webpki/0.103.15"
+          "version": "0.103.16",
+          "source": "https://crates.io/crates/rustls-webpki/0.103.16"
         }
       ]
     },
