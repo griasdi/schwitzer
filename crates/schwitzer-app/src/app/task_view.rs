@@ -4,7 +4,7 @@ use iced::widget::{
     Space, column, container, markdown, pick_list, row, text, text_editor, text_input,
 };
 use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task};
+use schwitzer_proto::{Decision, Priority, RoomId, RoomState, Stage, Task};
 
 use super::chrome::ProjectChoice;
 use super::icons::{Icon, Tone, icon};
@@ -64,7 +64,7 @@ pub fn view<'a>(
         body = body.push(details);
     }
     body = body.push(people(app, state, task));
-    if let Some(actions) = actions(app, task) {
+    if let Some(actions) = actions(app, state.id, task) {
         body = body.push(actions);
     }
     body = body
@@ -282,9 +282,22 @@ fn people<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a,
     .into()
 }
 
-/// Pick (when an approved plan waits) and the human decisions the server allows now.
-fn actions<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
+/// Pick (when an approved plan waits) and the human decisions the server allows now. Right
+/// after an approval only the busy "Approve & build" shows while the planning session claims
+/// the build.
+fn actions<'a>(app: &'a App, room: RoomId, task: &'a Task) -> Option<Element<'a, Message>> {
     let mut row = row![].spacing(SP_2).align_y(Alignment::Center);
+    if app.handing_off(room, task) {
+        return Some(
+            row.push(text_button(
+                "approve",
+                "Approve & build",
+                None,
+                theme::button_primary,
+            ))
+            .into(),
+        );
+    }
     let mut any = false;
     let pickable = logic::pickable(task);
     if task.stage == Stage::Idea && app.task_draft.is_none() {
@@ -312,7 +325,7 @@ fn actions<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
         let (id, label) = match decision {
             Decision::Accept => ("accept", "Accept"),
             Decision::Reject => ("reject", "Reject"),
-            Decision::Approve => ("approve", "Approve plan"),
+            Decision::Approve => ("approve", "Approve & build"),
             Decision::Replan => ("replan", "Replan"),
             Decision::Reopen => ("reopen", "Reopen"),
         };
@@ -330,9 +343,9 @@ fn actions<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
     if task.claim.is_some() {
         any = true;
         row = row.push(text_button(
-            "release",
-            "Release claim",
-            Some(Message::Release(task.number)),
+            "unclaim",
+            "Unclaim",
+            Some(Message::Unclaim(task.number)),
             theme::button_secondary,
         ));
     }

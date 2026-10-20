@@ -249,11 +249,11 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
                 .await,
             )
         }
-        Request::Release { room, task, note } => {
+        Request::Unclaim { room, task, note } => {
             let note = text("note", &note, caps::NOTE, false)?;
             task_reply(
                 mutate(state, caller, room, move |conn, now| {
-                    store::release(conn, &room, &caller, task, &note, now).map(Some)
+                    store::unclaim(conn, &room, &caller, task, &note, now).map(Some)
                 })
                 .await,
             )

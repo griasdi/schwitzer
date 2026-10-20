@@ -83,6 +83,31 @@ pub fn approvable(task: &Task) -> bool {
     task.stage == Stage::Planned && !task.plan.trim().is_empty()
 }
 
+/// How long after an approval the list waits for the omp session that wrote the plan to
+/// claim the build before it offers Pick.
+pub const HANDOFF_MS: u64 = 6_000;
+
+/// The tasks whose plan was approved between `old` and `new`: `Planned` in `old`, approved
+/// and unclaimed in `new`.
+pub fn approved_between(old: &RoomState, new: &RoomState) -> Vec<u64> {
+    new.tasks
+        .iter()
+        .filter(|t| pickable(t))
+        .filter(|t| {
+            old.tasks
+                .iter()
+                .any(|o| o.number == t.number && o.stage == Stage::Planned)
+        })
+        .map(|t| t.number)
+        .collect()
+}
+
+/// Whether `task`, seen approved at `approved_ms` (local time), still waits for its build
+/// claim within [`HANDOFF_MS`]: the app shows Approve busy instead of Pick meanwhile.
+pub fn handing_off(task: &Task, approved_ms: Option<u64>, now_ms: u64) -> bool {
+    pickable(task) && approved_ms.is_some_and(|at| now_ms.saturating_sub(at) < HANDOFF_MS)
+}
+
 /// The tasks of `project` in `group`, high priority first, then by number.
 pub fn tasks_in(state: &RoomState, project: u64, group: Group) -> Vec<&Task> {
     let mut tasks: Vec<&Task> = state
@@ -268,7 +293,7 @@ pub fn pick_prompt(room: &str, task: &Task, token: &ClaimToken) -> String {
          schwitzer-claim: {token}\n\
          The build is claimed for you. Read the task and its approved plan with the tool \
          schwitzer_get_task (room \"{room}\", task {number}), implement the plan, then call \
-         schwitzer_finish with a short note, or schwitzer_release if you stop.",
+         schwitzer_finish with a short note, or schwitzer_unclaim if you stop.",
         number = task.number,
         title = task.title,
         token = token.to_hex(),
@@ -630,6 +655,41 @@ mod tests {
                 ("w", vec![2])
             ]
         );
+    }
+
+    #[test]
+    fn only_an_approval_starts_the_handoff() {
+        let token = ClaimToken([5; 16]);
+        let mut planned = task(1, Stage::Planned, None);
+        planned.plan = "plan".to_owned();
+        let mut planned_3 = planned.clone();
+        planned_3.number = 3;
+        let old = room(vec![
+            planned,
+            task(2, Stage::Ready, Some(claim(Work::Build, token))),
+            planned_3,
+        ]);
+        let new = room(vec![
+            task(1, Stage::Ready, None),
+            task(2, Stage::Ready, None),
+            task(3, Stage::Ready, Some(claim(Work::Build, token))),
+            task(4, Stage::Ready, None),
+        ]);
+        assert_eq!(approved_between(&old, &new), [1]);
+    }
+
+    #[test]
+    fn the_handoff_ends_after_its_window_or_a_claim() {
+        let ready = task(1, Stage::Ready, None);
+        assert!(handing_off(&ready, Some(1000), 1000 + HANDOFF_MS - 1));
+        assert!(!handing_off(&ready, Some(1000), 1000 + HANDOFF_MS));
+        assert!(!handing_off(&ready, None, 1000));
+        let claimed = task(
+            1,
+            Stage::Ready,
+            Some(claim(Work::Build, ClaimToken([6; 16]))),
+        );
+        assert!(!handing_off(&claimed, Some(1000), 1000));
     }
 
     #[test]

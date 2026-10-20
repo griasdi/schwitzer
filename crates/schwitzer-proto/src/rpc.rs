@@ -67,7 +67,7 @@ pub enum Request {
         task: u64,
         note: String,
     },
-    Release {
+    Unclaim {
         room: RoomId,
         task: u64,
         note: String,

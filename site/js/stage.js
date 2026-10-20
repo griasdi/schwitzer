@@ -67,7 +67,7 @@ const STAGES = {
   planning: { group: "In progress", label: "Being planned", lamp: "l-running" },
   planready: { group: "Ready to pick", label: "Plan ready", lamp: "l-pickable", button: "approve" },
   approved: { group: "Ready to pick", label: "Approved", lamp: "l-pickable", button: "pick" },
-  building: { group: "In progress", label: "Building", lamp: "l-running", button: "release" },
+  building: { group: "In progress", label: "Building", lamp: "l-running", button: "unclaim" },
   done: { group: "Done", label: "Done", lamp: "l-closed" },
 };
 const LAMP_VAR = {
@@ -81,7 +81,7 @@ const BUTTONS = {
   accept: { label: "Accept", icon: "i-check", kind: "btn-primary" },
   approve: { label: "Approve", icon: "i-check", kind: "btn-primary" },
   pick: { label: "Pick", icon: "i-grab", kind: "btn-primary" },
-  release: { label: "Release", icon: "i-leave", kind: "btn-secondary" },
+  unclaim: { label: "Unclaim", icon: "i-leave", kind: "btn-secondary" },
 };
 
 const clone = (v) => structuredClone(v);
@@ -272,7 +272,7 @@ class AppWindow {
       if (t.claim) { s.tag.textContent = t.claim; s.tag.className = `tag tag--${HUE[t.claim]}`; }
       s.root.classList.toggle("is-building", t.stage === "building");
       let kind = info.button ?? null;
-      if (kind === "release" && t.claim !== this.me) kind = null;
+      if (kind === "unclaim" && t.claim !== this.me) kind = null;
       if (kind !== s.btnKind) {
         s.btn?.remove();
         s.btn = null;

@@ -96,7 +96,7 @@ Addresses (`addr.rs`): a `ServerAddr` is `weida://sha256:<64 hex>@host:port`, th
 
 A room holds members, projects and tasks. A `Project` is `{id, name}` with ids per room from 1. A `Task` (`model.rs`) has a number per room, its project, title, body, plan, stage, priority, author, times, an optional `Claim {member, agent, work, since_ms, token}` and its `Note`s. A member's name is global per key (`people.name` on the server), set by `Hello` and `SetName`.
 
-The stage machine, from `store.rs` (`next_stage`, `claim`, `submit_plan`, `finish`, `release`):
+The stage machine, from `store.rs` (`next_stage`, `claim`, `submit_plan`, `finish`, `unclaim`):
 
 ```mermaid
 stateDiagram-v2
@@ -120,7 +120,7 @@ stateDiagram-v2
     note right of Ready: Claim(build) keeps the stage
 ```
 
-**Claims.** `Request::Claim {work, project?, task?, agent}` takes from `Accepted` for `Work::Plan` and from `Ready` for `Work::Build`. With a task number it fails with `WrongStage` or `Claimed`; without one it takes the first unclaimed task `ORDER BY priority, number LIMIT 1` (high priority first, then the oldest), optionally within one project, and answers `Claimed(None)` when nothing is free. Selection and update run in one transaction. A claim does not expire; Reject, SubmitPlan, Finish and Release clear it. Any member may release any claim, so a stuck one can be freed.
+**Claims.** `Request::Claim {work, project?, task?, agent}` takes from `Accepted` for `Work::Plan` and from `Ready` for `Work::Build`. With a task number it fails with `WrongStage` or `Claimed`; without one it takes the first unclaimed task `ORDER BY priority, number LIMIT 1` (high priority first, then the oldest), optionally within one project, and answers `Claimed(None)` when nothing is free. Selection and update run in one transaction. A claim does not expire; Reject, SubmitPlan, Finish and Unclaim clear it. Any member may unclaim any claim, so a stuck one can be freed.
 
 **One stage, four names.** The server knows seven stages; the app and the MCP tools split some of them by claim and plan:
 
@@ -158,7 +158,7 @@ The client holds one `Requester` per endpoint, so two QUIC connections per serve
 |rooms|`CreateRoom`, `JoinRoom`, `LeaveRoom`|
 |tasks|`Propose`, `AddIdea`, `ProposeIdea`, `EditTask`, `SetPriority`, `MoveTask`, `AddNote`|
 |decisions|`Decide`|
-|work|`Claim`, `SubmitPlan`, `Finish`, `Release`|
+|work|`Claim`, `SubmitPlan`, `Finish`, `Unclaim`|
 |projects|`CreateProject`, `RenameProject`|
 |live|`PublishSessions`|
 
@@ -369,7 +369,7 @@ The plugin turns failures into one line: "no MCP token in <dir>; start the Schwi
 |`claim`|`room?`, `work: plan\|build`, `task?`, `project?`, `agent`|`Claim`; answers `schwitzer-claim: <token>`, the next step and the task JSON, or "No free task."|
 |`submit_plan`|`room?`, `task`, `plan`|`SubmitPlan`|
 |`finish`|`room?`, `task`, `note`|`Finish`|
-|`release`|`room?`, `task`, `note`|`Release`|
+|`unclaim`|`room?`, `task`, `note`|`Unclaim`|
 |`add_note`|`room?`, `task`, `text`|`AddNote`|
 
 `room` may be left out when the app has joined one room; otherwise it matches a room name or at least 4 hex digits of the room id. The plugin registers each tool as `schwitzer_<name>`, with approval tier `read` for `list_rooms`, `list_tasks` and `get_task` and `write` for the rest. **There is no accept, reject, approve, replan or reopen tool, and none for `EditTask`, `SetPriority`, `MoveTask`, projects or rooms.**
@@ -405,7 +405,7 @@ sequenceDiagram
     M->>S: SubmitPlan
     S-->>B: Event::Task (Planned, claim cleared)
     Note over P: the plan review stays open, the plugin polls get_task
-    B->>S: Approve plan, Decide(Approve)
+    B->>S: Approve & build, Decide(Approve)
     S-->>M: Event::Task (Ready)
     P->>M: claim (work build)
     M-->>P: schwitzer-claim line and the task
@@ -418,12 +418,12 @@ sequenceDiagram
 
 A Replan in the app sends the waiting review back instead: the plugin claims the task for planning again and answers the review with "Refine plan", feeding it the notes written since the plan was sent and the new claim line. Without an open review, or with an omp that cannot answer one, an approved task is built with `/schwitzer build` or Pick.
 
-**Approve, then Pick.** A Plan-ready task carries "Approve" on its slab and "Approve plan" as the open task's primary action; approving sets it `Ready`, which an omp session waiting on its plan review builds itself. Only an Approved, unclaimed task carries "Pick" ("Pick and copy prompt" in the open task), the human's shortcut: `App::pick` sends `Claim(Build, task N, agent "omp")` and copies `logic::pick_prompt` to the clipboard ("#N is yours, prompt copied"). Nothing is launched: the human pastes the prompt into their own agent. The pick prompt's three lines are:
+**Approve, then Pick.** A Plan-ready task carries "Approve" on its slab and "Approve & build" as the open task's primary action; approving sets it `Ready`, which an omp session waiting on its plan review builds itself. Every app that sees a task go from Planned to Approved and unclaimed (`logic::approved_between`, `App::handoffs`) shows its Approve button busy instead of Pick for up to `logic::HANDOFF_MS` (6 s), so the waiting session claims the build before anyone else can pick it; an unclaimed build shows Pick at once. Only an Approved, unclaimed task carries "Pick" ("Pick and copy prompt" in the open task), the human's shortcut: `App::pick` sends `Claim(Build, task N, agent "omp")` and copies `logic::pick_prompt` to the clipboard ("#N is yours, prompt copied"). Nothing is launched: the human pastes the prompt into their own agent. The pick prompt's three lines are:
 
 ```text
 Work on schwitzer task #<n> in room "<room>": <title>
 schwitzer-claim: <token>
-The build is claimed for you. Read the task and its approved plan with the tool schwitzer_get_task (room "<room>", task <n>), implement the plan, then call schwitzer_finish with a short note, or schwitzer_release if you stop.
+The build is claimed for you. Read the task and its approved plan with the tool schwitzer_get_task (room "<room>", task <n>), implement the plan, then call schwitzer_finish with a short note, or schwitzer_unclaim if you stop.
 ```
 
 The marker line is in it, so the session links to the task the same way as with `/schwitzer build`.
@@ -468,12 +468,12 @@ Every message text is in [the plugin README](../crates/schwitzer-app/omp-plugin/
 |note an idea|`+` in Ideas, "Add idea" (`AddIdea`)|`/schwitzer idea`, `schwitzer_add_idea`|
 |propose|`+` in Proposals, "Propose" (`Propose`)|`/schwitzer propose`, `schwitzer_propose`|
 |write up an idea|"Write up", then "Propose" (`ProposeIdea`)|`/schwitzer propose` picking the idea, `schwitzer_propose` with `idea`|
-|accept, reject, approve, replan, reopen|"Accept", "Reject", "Approve plan", "Replan", "Reopen" (`Decide`)|never|
+|accept, reject, approve, replan, reopen|"Accept", "Reject", "Approve & build", "Replan", "Reopen" (`Decide`)|never|
 |claim for planning|none|`/schwitzer plan`, `schwitzer_claim` (`work: plan`)|
 |hand in a plan|none: "Edit plan" → "Save plan" only edits the text (`EditTask`), the stage stays|plan review hook, `schwitzer_submit_plan`|
 |claim for building|"Pick and copy prompt" (Approved tasks only)|`/schwitzer build`, `schwitzer_claim` (`work: build`)|
 |finish|none|`schwitzer_finish`|
-|give a claim back|"Release claim"|`schwitzer_release`|
+|give a claim back|"Unclaim"|`schwitzer_unclaim`|
 |add a note|note field, "Add" (`AddNote`)|`schwitzer_add_note`|
 |edit title and body, priority, move to another project, projects, rooms|in the app only|none|
 

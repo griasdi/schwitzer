@@ -176,7 +176,7 @@ pub enum Message {
     PlanSaved(Result<Response, String>),
     SetPriority(Priority),
     Decide(u64, Decision),
-    Release(u64),
+    Unclaim(u64),
     NoteInput(String),
     AddNote,
     NoteAdded(Result<Response, String>),
@@ -354,6 +354,9 @@ pub struct App {
     members_open: bool,
     /// The task whose pick is under way.
     picking: Option<u64>,
+    /// Tasks seen approved (Planned → Ready, unclaimed), with the local time, while the
+    /// planning omp session claims the build.
+    handoffs: HashMap<(RoomId, u64), u64>,
     /// Whether a folder dialog is open; its buttons are disabled meanwhile, so a second click
     /// opens no second dialog.
     folder_dialog: bool,
@@ -470,6 +473,7 @@ impl App {
             sessions_open: true,
             members_open: false,
             picking: None,
+            handoffs: HashMap::new(),
             folder_dialog: false,
             task_draft: None,
             plan_draft: None,
@@ -756,6 +760,9 @@ impl App {
         match message {
             Message::Tick => {
                 self.now_ms = now_ms();
+                let now = self.now_ms;
+                self.handoffs
+                    .retain(|_, at| now.saturating_sub(*at) < logic::HANDOFF_MS);
                 if self
                     .notice
                     .as_ref()
@@ -1394,10 +1401,10 @@ impl App {
                 )),
                 None => Task::none(),
             },
-            Message::Release(number) => match self.task_ids(number) {
+            Message::Unclaim(number) => match self.task_ids(number) {
                 Some((room, task)) => fire(self.request(
                     room,
-                    Request::Release {
+                    Request::Unclaim {
                         room,
                         task,
                         note: String::new(),
@@ -1605,6 +1612,15 @@ impl App {
     /// The selected room's id with task `number`, for the buttons on a slab.
     fn task_ids(&self, number: u64) -> Option<(RoomId, u64)> {
         self.selected_state().map(|s| (s.id, number))
+    }
+
+    /// Whether `task` of `room` was approved a moment ago and waits for its build claim.
+    fn handing_off(&self, room: RoomId, task: &RoomTask) -> bool {
+        logic::handing_off(
+            task,
+            self.handoffs.get(&(room, task.number)).copied(),
+            self.now_ms,
+        )
     }
 
     // ---- calls --------------------------------------------------------------------------
@@ -2086,7 +2102,15 @@ impl App {
                     .iter_mut()
                     .find(|(key, _)| RoomId::of(&key.token) == id)
                 {
-                    Some(entry) => entry.1 = Some(*state),
+                    Some(entry) => {
+                        if let Some(old) = &entry.1 {
+                            let now = now_ms();
+                            for n in logic::approved_between(old, &state) {
+                                self.handoffs.insert((id, n), now);
+                            }
+                        }
+                        entry.1 = Some(*state);
+                    }
                     None => self.sync_rooms(),
                 }
                 if self.selected.is_none() {

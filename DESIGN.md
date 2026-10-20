@@ -417,8 +417,8 @@ Soft but not bubbly. Everything interactive is a rounded rectangle with an 8px r
 ### Buttons
 Four kinds plus a segmented control; every button is wrapped in an id container so tests and the headless control can address it.
 - **Shape:** 8px radius; 32px tall (6px 12px padding around a 14px medium label; icon+label gap 6px, icon 16px). Primary, secondary and danger buttons are raised plates: under-edge shadow at rest, deeper on hover, none when pressed or disabled.
-- **Primary:** Action Green fill, Deep Green Ink text. Hovered: `primary-hover`. Pressed: Leaf Ink fill. Disabled: Hairline fill, Moss Grey text. One per view for the main call to action (Propose, Save, "Approve plan", "Pick and copy prompt"); on a slab it is the next step: **Approve** (check icon) on a ready plan, **Pick** (hand-grab icon) on an approved one, **Accept** (check icon) on proposals. Pick is disabled (muted icon) while a pick runs.
-- **Secondary:** raised fill, Mint Hairline border; hovered Mint Breath with Sage Edge border; pressed Mint Pressed. Cancel, Replan, Reopen, Add, Save name; **Release** (leave icon) on a slab whose claim is yours.
+- **Primary:** Action Green fill, Deep Green Ink text. Hovered: `primary-hover`. Pressed: Leaf Ink fill. Disabled: Hairline fill, Moss Grey text. One per view for the main call to action (Propose, Save, "Approve & build", "Pick and copy prompt"); on a slab it is the next step: **Approve** (check icon) on a ready plan, **Pick** (hand-grab icon) on an approved one, **Accept** (check icon) on proposals. Pick is disabled (muted icon) while a pick runs. Right after an approval Approve stays on the slab, disabled with a muted icon, for up to 6 s while the planning omp session claims the build, then Pick takes its place.
+- **Secondary:** raised fill, Mint Hairline border; hovered Mint Breath with Sage Edge border; pressed Mint Pressed. Cancel, Replan, Reopen, Add, Save name; **Unclaim** (leave icon) on a slab whose claim is yours.
 - **Danger:** red text and 1px red border on no fill; hovered Alarm Wash; pressed solid red with on-danger text. Reject (open task only).
 - **Ghost:** no border, no fill, no shadow; hover Mint Breath, pressed Mint Pressed. Icon buttons (32x32, 16px glyph, tooltip above, below in the header and page bars) in the bars (invite, settings, back), group headers (`+`) and the head of the open task (edit, close), text links ("Share mine"), the `#n` session task link.
 - **Segment:** 1px border; the active segment is Mint Pressed with Leaf Ink border and text, shadowless (priority High / Normal / Low).
@@ -471,7 +471,7 @@ iced 0.14 exposes no accessibility tree and screen readers cannot read the windo
 
 ### Do:
 - **Do** express stage only with the lamp colour from the stage tokens (`stage-new` and `stage-idea` hollow, `stage-planning`, `stage-pickable`, `stage-running`, `stage-closed`, `stage-rejected`) plus the stage label.
-- **Do** put the next step on the slab it acts on: at most one button (Approve, Pick, Accept or Release) per slab.
+- **Do** put the next step on the slab it acts on: at most one button (Approve, Pick, Accept or Unclaim) per slab.
 - **Do** use `primary` for the main action of a view (or a slab's next step) and `ink` for green text, links and the focus ring.
 - **Do** keep every neutral mint-tinted: well `#e9f0ea` / `#0d1310`, lines `#d9e5db` / `#2a3a30`, text `#142019` / `#e4eee6`.
 - **Do** keep the well darker than the slabs on it, in both themes.

@@ -146,13 +146,13 @@
   <text x="1180" y="238" class="chip mid">Pick → claim + copy prompt</text>
   <text x="1180" y="214" class="small mid">from Approved only</text>
 
-  <!-- Replan, release, reopen -->
+  <!-- Replan, unclaim, reopen -->
   <path d="M830 300 C830 256, 520 256, 520 300" fill="none" stroke="#93a597" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m-file)"/>
   <text x="675" y="258" class="small mid">Replan (also from Approved)</text>
   <path d="M650 364 C650 394, 570 394, 570 364" fill="none" stroke="#93a597" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m-file)"/>
-  <text x="610" y="402" class="small mid">release</text>
+  <text x="610" y="402" class="small mid">unclaim</text>
   <path d="M1230 364 C1230 394, 1110 394, 1110 364" fill="none" stroke="#93a597" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m-file)"/>
-  <text x="1170" y="402" class="small mid">release</text>
+  <text x="1170" y="402" class="small mid">unclaim</text>
   <path d="M1522 408 L1536 408 L1536 137 L370 137 L370 300" fill="none" stroke="#93a597" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m-file)"/>
   <text x="1530" y="152" class="small end">Reopen (from Done or Rejected) → Proposed</text>
 

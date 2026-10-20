@@ -952,7 +952,7 @@ pub fn finish(
 }
 
 /// Drops the claim; any member may, so stuck claims can be freed.
-pub fn release(
+pub fn unclaim(
     conn: &Connection,
     room: &RoomId,
     member: &MemberId,

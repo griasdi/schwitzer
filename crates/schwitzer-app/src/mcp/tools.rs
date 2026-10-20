@@ -164,7 +164,7 @@ struct SubmitPlanArgs {
     plan: String,
 }
 
-/// Arguments of `finish` and `release`.
+/// Arguments of `finish` and `unclaim`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct NoteArgs {
     /// Room name or id prefix; may be omitted when exactly one room is joined.
@@ -478,7 +478,7 @@ fn claim_text(task: &Task, members: &[Member], projects: &[Project]) -> Result<S
         .ok_or("The server answered without a claim.")?;
     let next = match claim.work {
         Work::Plan => "Write a plan for this task and call submit_plan.",
-        Work::Build => "Implement the approved plan, then call finish (or release if you stop).",
+        Work::Build => "Implement the approved plan, then call finish (or unclaim if you stop).",
     };
     Ok(format!(
         "schwitzer-claim: {}\n{next}\n{}",
@@ -737,9 +737,9 @@ impl Tools {
     #[tool(
         description = "Give a claimed task back without finishing it, with a note on why; someone else can claim it."
     )]
-    async fn release(&self, Parameters(args): Parameters<NoteArgs>) -> CallToolResult {
+    async fn unclaim(&self, Parameters(args): Parameters<NoteArgs>) -> CallToolResult {
         Self::bounded(self.update_task(args.room, |room| {
-            Ok(Request::Release {
+            Ok(Request::Unclaim {
                 room: room.id,
                 task: args.task,
                 note: args.note,
@@ -774,7 +774,7 @@ impl ServerHandler for Tools {
                  (add_idea) and written up into a proposal later (propose with idea); a human \
                  accepts it; an agent claims it to write a plan (claim with work \"plan\", then \
                  submit_plan); a human approves the plan; an agent claims it to build (claim \
-                 with work \"build\") and reports with finish, or gives it back with release. \
+                 with work \"build\") and reports with finish, or gives it back with unclaim. \
                  Stages: idea, proposed, accepted, planned, ready, in_progress, done, rejected. \
                  You cannot accept, reject, approve or reopen: humans decide. Keep the \
                  `schwitzer-claim:` line of a claim in your output. A change another project \
@@ -991,7 +991,7 @@ mod tests {
         .unwrap();
         assert!(
             build.contains(
-                "Implement the approved plan, then call finish (or release if you stop)."
+                "Implement the approved plan, then call finish (or unclaim if you stop)."
             )
         );
         assert!(claim_text(&task(1, Stage::Ready, None), &members, &projects).is_err());

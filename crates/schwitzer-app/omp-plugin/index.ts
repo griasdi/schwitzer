@@ -169,7 +169,7 @@ const EDIT_TOOLS: Record<string, true> = { edit: true, write: true, ast_edit: tr
 const PRIORITY_RANK: Record<string, number> = { high: 0, normal: 1, low: 2 };
 const TIMEOUT_MS = 35_000; // the app bounds a tool call at 30 s
 const HINT_TIMEOUT_MS = 3_000; // hooks must not stall a prompt or an edit
-const POLL_MS = 3_000; // how often a waiting plan review asks the app for the task
+const POLL_MS = 1_000; // how often a waiting plan review asks the app for the task
 const POLL_TIMEOUT_MS = 10_000;
 /** The repo this plugin lives in: <repo>/.omp/plugins/node_modules/schwitzer. */
 const OWN_ROOT = resolve(import.meta.dir, "../../../..");
@@ -308,8 +308,8 @@ const TOOLS: ToolSpec[] = [
     parameters: noteArgs,
   },
   {
-    name: "release",
-    label: "Schwitzer release",
+    name: "unclaim",
+    label: "Schwitzer unclaim",
     description: "Give a claimed task back without finishing it, with a note on why; someone else can claim it.",
     approval: "write",
     parameters: noteArgs,
@@ -329,7 +329,7 @@ const TOOLS: ToolSpec[] = [
   },
 ];
 
-/** The arguments of `finish` and `release`. */
+/** The arguments of `finish` and `unclaim`. */
 function noteArgs(z: Zod): ZodType {
   return z.object({
     room: z.string().optional().describe(ROOM_ARG),
@@ -633,7 +633,7 @@ function taskContext(claim: TaskClaim, task: Record<string, unknown>, work: Work
     replan ? "The room sent the previous plan (`plan`) back; the notes say why." : "",
     work === "plan"
       ? "Write a plan for this task in plan mode; do not implement it. The proposed plan goes to the Schwitzer room, where a human approves it or asks for a new one."
-      : `Implement the approved plan (\`plan\`) for this task. When it is done and checked, call the tool \`schwitzer_finish\` with room "${claim.room}", task ${claim.task} and a note on what was done. If you stop without finishing, call \`schwitzer_release\` with a note on why.`,
+      : `Implement the approved plan (\`plan\`) for this task. When it is done and checked, call the tool \`schwitzer_finish\` with room "${claim.room}", task ${claim.task} and a note on what was done. If you stop without finishing, call \`schwitzer_unclaim\` with a note on why.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -958,9 +958,9 @@ async function awaitDecision(ctx: Ctx, config: Config, claim: TaskClaim, reviewI
 }
 
 /** Gives back a claim whose review closed before the plugin could answer it. */
-async function releaseClaim(ctx: Ctx, config: Config, claim: TaskClaim, note: string): Promise<void> {
+async function unclaimTask(ctx: Ctx, config: Config, claim: TaskClaim, note: string): Promise<void> {
   try {
-    await tool(config, "release", { room: claim.room, task: claim.task, note });
+    await tool(config, "unclaim", { room: claim.room, task: claim.task, note });
   } catch (e) {
     ctx.ui.notify(e instanceof Error ? e.message : String(e), "error");
   }
@@ -977,9 +977,9 @@ async function startBuild(ctx: Ctx, config: Config, claim: TaskClaim, reviewId: 
   setHandoff(`${taskContext(claim, got.task, "build")}\nThis session builds the task under schwitzer-claim: ${got.marker}`);
   if (ctx.getPendingPlanReview?.()?.reviewId !== reviewId || !ctx.resolvePlanReview!(reviewId, "execute")) {
     setHandoff(undefined);
-    await releaseClaim(ctx, config, claim, "The plan review in omp closed before the build started.");
+    await unclaimTask(ctx, config, claim, "The plan review in omp closed before the build started.");
     ctx.ui.notify(
-      `The plan review for task #${claim.task} closed before the build started; the build claim is released. Run /schwitzer build to build it.`,
+      `The plan review for task #${claim.task} closed before the build started; the build claim is given back. Run /schwitzer build to build it.`,
       "info",
     );
     return;
@@ -1012,8 +1012,8 @@ async function replan(ctx: Ctx, config: Config, claim: TaskClaim, reviewId: stri
     .filter(Boolean)
     .join("\n");
   if (ctx.getPendingPlanReview?.()?.reviewId !== reviewId || !ctx.resolvePlanReview!(reviewId, "refine", { feedback })) {
-    await releaseClaim(ctx, config, claim, "The plan review in omp closed before the new plan started.");
-    ctx.ui.notify(`The plan review for task #${claim.task} closed; the plan claim is released.`, "info");
+    await unclaimTask(ctx, config, claim, "The plan review in omp closed before the new plan started.");
+    ctx.ui.notify(`The plan review for task #${claim.task} closed; the plan claim is given back.`, "info");
     return;
   }
   ctx.ui.notify(`Task #${claim.task} was sent back in Schwitzer; omp revises the plan.`, "info");

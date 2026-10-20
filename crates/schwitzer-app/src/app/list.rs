@@ -3,7 +3,7 @@
 
 use iced::widget::{Space, column, container, responsive, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{Decision, Project, RoomState, Stage, Task};
+use schwitzer_proto::{Decision, Project, RoomId, RoomState, Stage, Task};
 
 use super::icons::{Icon, Tone, icon};
 use super::logic::{self, Group};
@@ -186,7 +186,7 @@ fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
     let mut line = row![summary(state, task)]
         .spacing(SP_3)
         .align_y(Alignment::Center);
-    if let Some(action) = next_step(app, task) {
+    if let Some(action) = next_step(app, state.id, task) {
         line = line.push(action);
     }
     id_button(
@@ -199,8 +199,9 @@ fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
 }
 
 /// The one button a slab carries: Approve a finished plan, Pick an approved one, Accept a
-/// proposal, or Release your own claim. The button takes the press before the slab does.
-fn next_step<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
+/// proposal, or Unclaim your own claim. The button takes the press before the slab does.
+/// Right after an approval Approve stays, busy, while the planning session claims the build.
+fn next_step<'a>(app: &'a App, room: RoomId, task: &'a Task) -> Option<Element<'a, Message>> {
     let n = task.number;
     if logic::approvable(task) {
         return Some(with_tip(
@@ -213,6 +214,19 @@ fn next_step<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
                 theme::button_primary,
             ),
             "Approve the plan; an omp session waiting on its review builds it",
+        ));
+    }
+    if app.handing_off(room, task) {
+        return Some(with_tip(
+            icon_text_button(
+                format!("approve-{n}"),
+                Icon::Check,
+                Tone::Muted,
+                "Approve",
+                None,
+                theme::button_primary,
+            ),
+            "Approved; the omp session that wrote the plan starts the build",
         ));
     }
     if logic::pickable(task) {
@@ -242,11 +256,11 @@ fn next_step<'a>(app: &'a App, task: &'a Task) -> Option<Element<'a, Message>> {
     match &task.claim {
         Some(claim) if claim.member == app.client.member() => Some(with_tip(
             icon_text_button(
-                format!("release-{n}"),
+                format!("unclaim-{n}"),
                 Icon::Leave,
                 Tone::Text,
-                "Release",
-                Some(Message::Release(n)),
+                "Unclaim",
+                Some(Message::Unclaim(n)),
                 theme::button_secondary,
             ),
             "Give the claim back; someone else can take it",
