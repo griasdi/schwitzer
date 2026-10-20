@@ -345,6 +345,16 @@ pub fn rooms_of(conn: &Connection, member: &MemberId) -> R<Vec<RoomId>> {
     Ok(rooms)
 }
 
+/// How many rooms `member` belongs to.
+pub fn membership_count(conn: &Connection, member: &MemberId) -> R<u64> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM members WHERE member = ?1",
+        [member.as_bytes().as_slice()],
+        |r| r.get(0),
+    )?;
+    Ok(uns(n))
+}
+
 pub fn room_member_ids(conn: &Connection, room: &RoomId) -> R<Vec<MemberId>> {
     let mut stmt =
         conn.prepare("SELECT member FROM members WHERE room = ?1 ORDER BY joined_ms, member")?;

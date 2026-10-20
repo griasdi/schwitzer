@@ -58,6 +58,11 @@ pub fn to_bytes<T: Serialize + ?Sized>(value: &T) -> Vec<u8> {
     postcard::to_stdvec(value).expect("postcard serialization into a Vec")
 }
 
+/// Length of the postcard encoding of `value`, computed without encoding it.
+pub fn encoded_len<T: Serialize + ?Sized>(value: &T) -> usize {
+    postcard::experimental::serialized_size(value).expect("postcard size of the wire types")
+}
+
 /// Deserializes a postcard value.
 pub fn from_bytes<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ProtoError> {
     postcard::from_bytes(bytes).map_err(ProtoError::Decode)

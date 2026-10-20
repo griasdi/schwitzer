@@ -6,7 +6,7 @@ use std::time::Duration;
 use schwitzer_client::{Client, ClientError, ClientEvent};
 use schwitzer_proto::{
     ApiError, Decision, MemberId, Priority, Project, Request, Response, RoomId, RoomKey, RoomState,
-    ServerAddr, Stage, Task, Work,
+    ServerAddr, Stage, Task, Work, caps,
 };
 use schwitzer_server::{Options, Server};
 use tempfile::TempDir;
@@ -476,6 +476,190 @@ async fn a_forgotten_room_closes_its_server_connection() {
     a.add_room(key.clone());
     room_where(&mut rx_a, |s| s.id == room).await;
     room_where(&mut rx_b, alice_online(true)).await;
+
+    a.shutdown();
+    b.shutdown();
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_who_sends_too_fast_is_told_to_wait() {
+    let data = TempDir::new().unwrap();
+    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
+    let dir = TempDir::new().unwrap();
+    let a = Client::start(dir.path(), "alice".into()).unwrap();
+
+    let key = a
+        .create_room(server.addr.clone(), "crew".into())
+        .await
+        .unwrap();
+    let room = RoomId::of(&key.token);
+    let app = project(
+        a.request(
+            room,
+            Request::CreateProject {
+                room,
+                name: "app".into(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let proposal = task(
+        a.request(
+            room,
+            Request::Propose {
+                room,
+                project: app.id,
+                title: "tidy up".into(),
+                body: String::new(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let set_priority = || Request::SetPriority {
+        room,
+        task: proposal.number,
+        priority: Priority::High,
+    };
+
+    let mut sent = 0;
+    let refused = loop {
+        assert!(sent < 200, "never refused");
+        match a.request(room, set_priority()).await {
+            Ok(_) => sent += 1,
+            Err(e) => break api_error(Err(e)),
+        }
+    };
+    assert_eq!(
+        refused,
+        ApiError::Invalid("too many requests, try again in 1 s".into())
+    );
+    assert!(sent >= 57, "only {sent} requests before the refusal");
+
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    task(a.request(room, set_priority()).await.unwrap());
+
+    a.shutdown();
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_full_room_refuses_more_and_its_snapshot_still_arrives() {
+    let data = TempDir::new().unwrap();
+    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
+    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
+    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
+    let mut rx_b = b.subscribe();
+
+    let key = a
+        .create_room(server.addr.clone(), "crew".into())
+        .await
+        .unwrap();
+    let room = RoomId::of(&key.token);
+    let app = project(
+        a.request(
+            room,
+            Request::CreateProject {
+                room,
+                name: "app".into(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let mut refused = None;
+    for i in 0..20 {
+        let proposal = task(
+            a.request(
+                room,
+                Request::Propose {
+                    room,
+                    project: app.id,
+                    title: format!("task {i}"),
+                    body: String::new(),
+                },
+            )
+            .await
+            .unwrap(),
+        );
+        let edit = Request::EditTask {
+            room,
+            task: proposal.number,
+            title: proposal.title.clone(),
+            body: String::new(),
+            plan: "x".repeat(caps::PLAN),
+        };
+        if let Err(e) = a.request(room, edit).await {
+            refused = Some((i, api_error(Err(e)), proposal.number));
+            break;
+        }
+    }
+    let (i, error, number) = refused.expect("the room never filled up");
+    assert_eq!(i, 15);
+    assert_eq!(
+        error,
+        ApiError::Invalid(
+            "the room is full: its tasks, notes, members and sessions must stay under 4 MiB".into()
+        )
+    );
+
+    assert_eq!(b.join_room(key).await.unwrap(), room);
+    let state = room_where(&mut rx_b, |s| s.tasks.len() == 16).await;
+    let last = state.tasks.iter().find(|t| t.number == number).unwrap();
+    assert!(last.plan.is_empty());
+
+    a.shutdown();
+    b.shutdown();
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_is_in_at_most_50_rooms() {
+    let data = TempDir::new().unwrap();
+    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
+    let addr = server.addr.clone();
+    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
+    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
+    let too_many = ApiError::Invalid(
+        "you are in 50 rooms already; leave one to create or join another".into(),
+    );
+    let refusal = |result: Result<_, ClientError>| match result {
+        Err(ClientError::Api(e)) => e,
+        other => panic!("expected an API error, got {other:?}"),
+    };
+
+    let mut first = None;
+    for i in 0..50 {
+        let key = a
+            .create_room(addr.clone(), format!("room {i}"))
+            .await
+            .unwrap();
+        first.get_or_insert(RoomId::of(&key.token));
+    }
+    assert_eq!(
+        refusal(
+            a.create_room(addr.clone(), "one more".into())
+                .await
+                .map(|_| ())
+        ),
+        too_many
+    );
+
+    let key_b = b.create_room(addr.clone(), "bob's".into()).await.unwrap();
+    assert_eq!(
+        refusal(a.join_room(key_b.clone()).await.map(|_| ())),
+        too_many
+    );
+
+    a.leave_room(first.unwrap()).await.unwrap();
+    assert_eq!(
+        a.join_room(key_b.clone()).await.unwrap(),
+        RoomId::of(&key_b.token)
+    );
 
     a.shutdown();
     b.shutdown();

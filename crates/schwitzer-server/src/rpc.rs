@@ -4,6 +4,8 @@
 //! publishes its events right after the commit, still under the store's lock:
 //! events therefore reach subscribers in commit order.
 
+use std::time::Instant;
+
 use rusqlite::Connection;
 use schwitzer_proto::{
     ApiError, Event, MAX_RPC_BYTES, Member, MemberId, PROTOCOL_VERSION, Project, RPC_TIMEOUT,
@@ -94,7 +96,30 @@ fn clamp(value: &str, cap: usize) -> String {
     value[..end].to_owned()
 }
 
+/// Rooms one member may belong to.
+const MAX_ROOMS_PER_MEMBER: u64 = 50;
+
+fn too_many_rooms() -> ApiError {
+    ApiError::Invalid(format!(
+        "you are in {MAX_ROOMS_PER_MEMBER} rooms already; leave one to create or join another"
+    ))
+}
+
+/// Whether `req` spends from the caller's request budget: everything except `Hello` and
+/// `JoinRoom`, which every reconnect sends (one `JoinRoom` per room).
+fn limited(req: &Request) -> bool {
+    !matches!(req, Request::Hello { .. } | Request::JoinRoom { .. })
+}
+
 async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
+    if limited(&req) {
+        state.limits.take(caller, Instant::now()).map_err(|wait| {
+            ApiError::Invalid(format!(
+                "too many requests, try again in {} s",
+                wait.as_millis().div_ceil(1000)
+            ))
+        })?;
+    }
     match req {
         Request::Hello { protocol, name } => {
             if protocol != PROTOCOL_VERSION {
@@ -337,6 +362,10 @@ where
             let tx = conn.transaction()?;
             store::require_member(&tx, &room, &caller)?;
             let task = f(&tx, now_ms())?;
+            if let Some(task) = &task {
+                crate::require_task_fits(task)?;
+                st.require_room_fits(&tx, &room)?;
+            }
             let members = store::room_member_ids(&tx, &room)?;
             tx.commit()?;
             if let Some(task) = &task {
@@ -366,6 +395,7 @@ where
             let tx = conn.transaction()?;
             store::require_member(&tx, &room, &caller)?;
             let project = f(&tx, now_ms())?;
+            st.require_room_fits(&tx, &room)?;
             let members = store::room_member_ids(&tx, &room)?;
             tx.commit()?;
             st.hub.publish(
@@ -410,6 +440,9 @@ async fn create_room(state: &State, caller: MemberId, name: String) -> Reply {
         .store
         .run(move |conn| {
             let tx = conn.transaction()?;
+            if store::membership_count(&tx, &caller)? >= MAX_ROOMS_PER_MEMBER {
+                return Err(too_many_rooms().into());
+            }
             store::create_room(&tx, &id, &name, &caller, now_ms())?;
             let room = st.room_state(&tx, &id)?;
             tx.commit()?;
@@ -434,7 +467,11 @@ async fn join_room(state: &State, caller: MemberId, token: RoomToken) -> Reply {
             if !added {
                 return Ok(());
             }
-            let room = st.room_state(&tx, &id)?;
+            if store::membership_count(&tx, &caller)? > MAX_ROOMS_PER_MEMBER {
+                return Err(too_many_rooms().into());
+            }
+            let snapshot = Event::Room(st.room_state(&tx, &id)?);
+            crate::require_room_fits(&snapshot)?;
             let others: Vec<MemberId> = store::room_member_ids(&tx, &id)?
                 .into_iter()
                 .filter(|m| *m != caller)
@@ -445,7 +482,7 @@ async fn join_room(state: &State, caller: MemberId, token: RoomToken) -> Reply {
                 online: st.hub.is_online(&caller),
             };
             tx.commit()?;
-            st.hub.publish(&[caller], &Event::Room(room));
+            st.hub.publish(&[caller], &snapshot);
             st.hub.publish(&others, &Event::Member { room: id, member });
             Ok(())
         })
@@ -521,6 +558,12 @@ async fn publish_sessions(
         .store
         .run(move |conn| {
             store::require_member(conn, &room, &caller)?;
+            if !sessions.is_empty() {
+                let mut snapshot = st.room_state(conn, &room)?;
+                snapshot.sessions.retain(|(m, _)| *m != caller);
+                snapshot.sessions.push((caller, sessions.clone()));
+                crate::require_room_fits(&Event::Room(snapshot))?;
+            }
             st.sessions.set(room, caller, sessions.clone());
             let members = store::room_member_ids(conn, &room)?;
             st.hub.publish(

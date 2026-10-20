@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use rusqlite::Connection;
 use schwitzer_proto::{
-    Event, Member, MemberId, PATH_EVENTS, PATH_RPC, RoomId, RoomState, ServerAddr,
+    ApiError, Event, MAX_EVENT_FRAME, MAX_RPC_BYTES, Member, MemberId, PATH_EVENTS, PATH_RPC,
+    RoomId, RoomState, ServerAddr, Task, encoded_len,
 };
 use tokio::task::JoinSet;
 use weida::{
@@ -18,6 +19,7 @@ use weida::{
 mod auth;
 mod events;
 mod hub;
+mod limit;
 mod release;
 mod rpc;
 pub mod store;
@@ -48,6 +50,35 @@ pub(crate) struct Shared {
     pub sessions: Sessions,
     /// The app release announced to every stream, once the release check found one.
     pub release: Mutex<Option<semver::Version>>,
+    /// Request budget per member.
+    pub limits: limit::Limits,
+}
+
+/// What a room snapshot (`Event::Room`) may take. Name changes are not checked; the 64 KiB
+/// left of the frame cover them (at most 64 bytes per member and room).
+const ROOM_BYTES: usize = MAX_EVENT_FRAME - 64 * 1024;
+/// What a task may take: a reply wraps it in at most three enum tags and must fit
+/// `MAX_RPC_BYTES`.
+const TASK_BYTES: usize = MAX_RPC_BYTES - 16;
+
+/// Refuses a room snapshot above [`ROOM_BYTES`].
+pub(crate) fn require_room_fits(snapshot: &Event) -> Result<(), ApiError> {
+    if encoded_len(snapshot) > ROOM_BYTES {
+        return Err(ApiError::Invalid(
+            "the room is full: its tasks, notes, members and sessions must stay under 4 MiB".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Refuses a task above [`TASK_BYTES`].
+pub(crate) fn require_task_fits(task: &Task) -> Result<(), ApiError> {
+    if encoded_len(task) > TASK_BYTES {
+        return Err(ApiError::Invalid(
+            "the task is full: with its notes it must stay under 1 MiB".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) type State = Arc<Shared>;
@@ -62,6 +93,14 @@ impl Shared {
         }
         state.sessions = self.sessions.of_room(room);
         Ok(state)
+    }
+
+    /// Refuses when `room`'s snapshot, as it would be sent now (uncommitted changes of `conn`'s
+    /// transaction included), exceeds [`ROOM_BYTES`].
+    pub fn require_room_fits(&self, conn: &Connection, room: &RoomId) -> R<()> {
+        Ok(require_room_fits(&Event::Room(
+            self.room_state(conn, room)?,
+        ))?)
     }
 
     /// Tells every room of `member` about their name and presence.
@@ -152,6 +191,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Server> {
         hub: Hub::default(),
         sessions: Sessions::default(),
         release: Mutex::new(None),
+        limits: limit::Limits::default(),
     });
     let mut tasks: JoinSet<&'static str> = JoinSet::new();
     macro_rules! spawn {
