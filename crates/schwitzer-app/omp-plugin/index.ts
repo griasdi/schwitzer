@@ -501,7 +501,7 @@ function projectsHint(own: JoinedProject[], others: OtherProject[]): string {
         (o.repos.length > 0 ? `, local repo ${o.repos.join(", ")}` : ""),
     ),
     `This repo belongs to the Schwitzer project(s): ${own.map((p) => `"${p.projectName}" in room "${p.roomName}"`).join(", ")}.`,
-    `When the work here needs a change in one of the projects above, for example in a dependency, do not change that project's code from this session. Draft a proposal for that project instead: a one-line title and a Markdown body that says what is needed and why, starting with ${fromLine(own)} and the number of the Schwitzer task you work on, if any. Ask me with the ask tool whether to send it, with title and body in the question, and only after I agree call \`schwitzer_propose\` with that project's room id and project name.`,
+    `When the work here needs a change in one of the projects above, for example in a dependency, do not change that project's code from this session. Draft a proposal for that project instead: a one-line title and a Markdown body that says what is needed and why, starting with ${fromLine(own)} and the number of the Schwitzer task you work on, if any. Show me the title and the whole body as your reply in the chat, since the ask dialog cuts long text off; then ask me with the ask tool, naming only the title, whether to send, change or drop it, and only after I agree call \`schwitzer_propose\` with that project's room id and project name.`,
     "If a dependency you want to change is not a Schwitzer project, ask me before changing its code.",
   ].join("\n");
 }
@@ -786,7 +786,9 @@ async function proposeTask(pi: Pi, ctx: Ctx, config: Config, text: string): Prom
 const DRAFT_STEPS = [
   "Look into the repository where that makes the task concrete, but change nothing and do not implement it.",
   "Write a one-line title and a Markdown body that says what should be done and why.",
-  "Then ask me with the ask tool whether to send the proposal, change it or drop it. Put the title and the body into the question itself, so I see what I agree to.",
+  "Show me the title and the whole body as your reply in the chat, not inside a tool call: the ask dialog cuts long text off and cannot scroll.",
+  "Then ask me with the ask tool whether to send the proposal, change it or drop it. Keep the question short: name only the title, not the body.",
+  "If I want a change, show the changed title and body in the chat again and ask again.",
 ];
 
 /** The prompt for a new proposal; `from` holds this repo's projects when `target` is another one. */
