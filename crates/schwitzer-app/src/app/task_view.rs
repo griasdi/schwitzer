@@ -328,6 +328,8 @@ fn actions<'a>(app: &'a App, room: RoomId, task: &'a Task) -> Option<Element<'a,
             Decision::Approve => ("approve", "Approve & build"),
             Decision::Replan => ("replan", "Replan"),
             Decision::Reopen => ("reopen", "Reopen"),
+            Decision::MarkPlanned => ("mark-planned", "Mark planned"),
+            Decision::MarkDone => ("mark-done", "Mark done"),
         };
         let message = Some(Message::Decide(task.number, decision));
         row = row.push(match decision {
@@ -335,7 +337,7 @@ fn actions<'a>(app: &'a App, room: RoomId, task: &'a Task) -> Option<Element<'a,
             Decision::Accept | Decision::Approve => {
                 text_button(id, label, message, theme::button_primary)
             }
-            Decision::Replan | Decision::Reopen => {
+            Decision::Replan | Decision::Reopen | Decision::MarkPlanned | Decision::MarkDone => {
                 text_button(id, label, message, theme::button_secondary)
             }
         });

@@ -41,6 +41,10 @@ pub enum Decision {
     Approve,
     Replan,
     Reopen,
+    /// A human hands in the plan: `Accepted` with a non-empty plan becomes `Planned`.
+    MarkPlanned,
+    /// A human closes the build: `Ready` becomes `Done`.
+    MarkDone,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

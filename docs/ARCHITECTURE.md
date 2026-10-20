@@ -24,7 +24,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 
 ## 1. Principles
 
-- **Humans decide, agents work.** `Decision::{Accept, Reject, Approve, Replan, Reopen}` are buttons in the app (`crates/schwitzer-app/src/app/task_view.rs`, `actions`); the MCP tools never build a `Request::Decide` (`crates/schwitzer-app/src/mcp/tools.rs`). The server itself has no roles: any member may send any request (`store::require_member` only checks membership). The rule lives in the app.
+- **Humans decide, agents work.** `Decision::{Accept, Reject, Approve, Replan, Reopen, MarkPlanned, MarkDone}` are buttons in the app (`crates/schwitzer-app/src/app/task_view.rs`, `actions`); the MCP tools never build a `Request::Decide` (`crates/schwitzer-app/src/mcp/tools.rs`). The server itself has no roles: any member may send any request (`store::require_member` only checks membership). The rule lives in the app.
 - **A key is a member.** There are no accounts. A `MemberId` is the SHA-256 fingerprint of the app's weida key (`crates/schwitzer-server/src/auth.rs`, `caller`). A room is joined by holding its `RoomToken`; the server knows the room only as `RoomId = blake3(token)` (`crates/schwitzer-proto/src/ids.rs`).
 - **One mutation, one transaction, events in commit order.** `crates/schwitzer-server/src/rpc.rs` (`mutate`) runs the change in one SQLite transaction, commits, and publishes the events to the hub while it still holds the store lock.
 - **Nothing leaves the machine unless the member set it up.** Agent sessions are shared only from repos linked to a project; the MCP server listens on loopback only, behind a bearer token, and refuses any request with an `Origin` header.
@@ -105,11 +105,13 @@ stateDiagram-v2
     Idea --> Proposed: ProposeIdea
     Proposed --> Accepted: Accept
     Accepted --> Planned: SubmitPlan (own plan claim)
+    Accepted --> Planned: MarkPlanned (plan not empty)
     Planned --> Planned: SubmitPlan (refine)
     Planned --> Ready: Approve (plan not empty)
     Planned --> Accepted: Replan
     Ready --> Accepted: Replan (unclaimed)
     Ready --> Done: Finish (own build claim)
+    Ready --> Done: MarkDone
     Idea --> Rejected: Reject
     Proposed --> Rejected: Reject
     Accepted --> Rejected: Reject
@@ -473,11 +475,11 @@ Every message text is in [the plugin README](../crates/schwitzer-app/omp-plugin/
 |note an idea|`+` in Ideas, "Add idea" (`AddIdea`)|`/schwitzer idea`, `schwitzer_add_idea`|
 |propose|`+` in Proposals, "Propose" (`Propose`)|`/schwitzer propose`, `schwitzer_propose`|
 |write up an idea|"Write up", then "Propose" (`ProposeIdea`)|`/schwitzer propose` picking the idea, `schwitzer_propose` with `idea`|
-|accept, reject, approve, replan, reopen|"Accept", "Reject", "Approve & build", "Replan", "Reopen" (`Decide`)|never|
+|accept, reject, approve, replan, reopen, mark planned, mark done|"Accept", "Reject", "Approve & build", "Replan", "Reopen", "Mark planned", "Mark done" (`Decide`)|never|
 |claim for planning|none|`/schwitzer plan`, `schwitzer_claim` (`work: plan`)|
-|hand in a plan|none: "Edit plan" → "Save plan" only edits the text (`EditTask`), the stage stays|plan review hook, `schwitzer_submit_plan`|
+|hand in a plan|"Mark planned" (`Decide`, clears the claim); "Edit plan" → "Save plan" only edits the text (`EditTask`)|plan review hook, `schwitzer_submit_plan`|
 |claim for building|"Pick and copy prompt" (Approved tasks only)|`/schwitzer build`, `schwitzer_claim` (`work: build`)|
-|finish|none|`schwitzer_finish`|
+|finish|"Mark done" (`Decide`, clears the claim)|`schwitzer_finish`|
 |give a claim back|"Unclaim"|`schwitzer_unclaim`|
 |add a note|note field, "Add" (`AddNote`)|`schwitzer_add_note`|
 |edit title and body, priority, move to another project, projects, rooms|in the app only|none|
@@ -524,7 +526,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 - The store maps enums to explicit integers (`stage_to_int`, …); a schema change bumps `SCHEMA_VERSION`, and `open` refuses an unknown version.
 - Claim selection and its update stay in one transaction.
 - Events are published after the commit, in commit order.
-- Agents never decide: accept, reject, approve, replan and reopen exist only as buttons in the UI, never as MCP or plugin tools.
+- Agents never decide: accept, reject, approve, replan, reopen, mark planned and mark done exist only as buttons in the UI, never as MCP or plugin tools.
 - The MCP server stays loopback-only, behind a bearer token, and refuses `Origin`; the token never reaches a log (`McpKey` has no `Debug`).
 - Sessions outside the configured repositories never leave the machine.
 - Everything from the network and from omp files is untrusted: sizes are bounded, and malformed input is an error, never a panic.

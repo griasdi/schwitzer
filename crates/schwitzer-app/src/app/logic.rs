@@ -172,11 +172,12 @@ pub fn legal_decisions(task: &Task) -> Vec<Decision> {
     match task.stage {
         Stage::Idea => vec![Decision::Reject],
         Stage::Proposed => vec![Decision::Accept, Decision::Reject],
-        Stage::Accepted => vec![Decision::Reject],
+        Stage::Accepted if task.plan.trim().is_empty() => vec![Decision::Reject],
+        Stage::Accepted => vec![Decision::MarkPlanned, Decision::Reject],
         Stage::Planned if task.plan.trim().is_empty() => vec![Decision::Replan, Decision::Reject],
         Stage::Planned => vec![Decision::Approve, Decision::Replan, Decision::Reject],
-        Stage::Ready if task.claim.is_none() => vec![Decision::Replan],
-        Stage::Ready => Vec::new(),
+        Stage::Ready if task.claim.is_none() => vec![Decision::Replan, Decision::MarkDone],
+        Stage::Ready => vec![Decision::MarkDone],
         Stage::Done | Stage::Rejected => vec![Decision::Reopen],
     }
 }
@@ -582,6 +583,12 @@ mod tests {
             legal_decisions(&task(1, Stage::Accepted, None)),
             [Decision::Reject]
         );
+        let mut accepted = task(1, Stage::Accepted, None);
+        accepted.plan = "Do it".to_owned();
+        assert_eq!(
+            legal_decisions(&accepted),
+            [Decision::MarkPlanned, Decision::Reject]
+        );
         let mut planned = task(1, Stage::Planned, None);
         assert_eq!(
             legal_decisions(&planned),
@@ -594,10 +601,11 @@ mod tests {
         );
         assert_eq!(
             legal_decisions(&task(1, Stage::Ready, None)),
-            [Decision::Replan]
+            [Decision::Replan, Decision::MarkDone]
         );
-        assert!(
-            legal_decisions(&task(1, Stage::Ready, Some(claim(Work::Build, token)))).is_empty()
+        assert_eq!(
+            legal_decisions(&task(1, Stage::Ready, Some(claim(Work::Build, token)))),
+            [Decision::MarkDone]
         );
         assert_eq!(
             legal_decisions(&task(1, Stage::Done, None)),

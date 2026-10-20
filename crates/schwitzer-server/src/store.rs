@@ -826,6 +826,14 @@ fn next_stage(decision: Decision, task: &Task) -> Result<Stage, ApiError> {
         (Decision::Replan, Stage::Planned) => Ok(Stage::Accepted),
         (Decision::Replan, Stage::Ready) if task.claim.is_none() => Ok(Stage::Accepted),
         (Decision::Reopen, Stage::Rejected | Stage::Done) => Ok(Stage::Proposed),
+        (Decision::MarkPlanned, Stage::Accepted) => {
+            if task.plan.trim().is_empty() {
+                Err(ApiError::Invalid("plan is empty".into()))
+            } else {
+                Ok(Stage::Planned)
+            }
+        }
+        (Decision::MarkDone, Stage::Ready) => Ok(Stage::Done),
         _ => Err(wrong()),
     }
 }
@@ -840,7 +848,10 @@ pub fn decide(
 ) -> R<Task> {
     let task = require_task(conn, room, number)?;
     let stage = next_stage(decision, &task)?;
-    if decision == Decision::Reject {
+    if matches!(
+        decision,
+        Decision::Reject | Decision::MarkPlanned | Decision::MarkDone
+    ) {
         clear_claim(conn, room, number)?;
     }
     set_stage(conn, room, number, stage, now)?;
@@ -1205,6 +1216,13 @@ mod tests {
             n
         };
         assert_eq!(decide_from(done, Reopen), Ok(Proposed));
+        assert_eq!(decide_from(at(Ready), MarkDone), Ok(Done));
+        let with_plan = |c: &Connection, r: &RoomId, m: &MemberId| {
+            let n = task_in(c, r, m, Accepted);
+            edit_task(c, r, n, "t", "", "plan", NOW).unwrap();
+            n
+        };
+        assert_eq!(decide_from(with_plan, MarkPlanned), Ok(Planned));
     }
 
     #[test]
@@ -1229,6 +1247,14 @@ mod tests {
             (Ready, Reject),
             (Ready, Approve),
             (Ready, Reopen),
+            (Idea, MarkPlanned),
+            (Proposed, MarkPlanned),
+            (Planned, MarkPlanned),
+            (Ready, MarkPlanned),
+            (Idea, MarkDone),
+            (Proposed, MarkDone),
+            (Accepted, MarkDone),
+            (Planned, MarkDone),
         ];
         for (from, decision) in illegal {
             assert_eq!(
@@ -1267,6 +1293,35 @@ mod tests {
         let task = decide(&conn, &room, n, Decision::Reject, NOW).unwrap();
         assert_eq!(task.stage, Stage::Rejected);
         assert!(task.claim.is_none());
+    }
+
+    #[test]
+    fn mark_planned_and_mark_done_clear_the_claim() {
+        let (conn, room, me) = setup();
+        let agent = member(2);
+        let n = task_in(&conn, &room, &me, Stage::Accepted);
+        claim(&conn, &room, &agent, Work::Plan, None, Some(n), "a", NOW).unwrap();
+        edit_task(&conn, &room, n, "t", "", "p", NOW).unwrap();
+        let task = decide(&conn, &room, n, Decision::MarkPlanned, NOW).unwrap();
+        assert_eq!(task.stage, Stage::Planned);
+        assert!(task.claim.is_none());
+        assert_eq!(task.plan, "p");
+
+        let n = task_in(&conn, &room, &me, Stage::Accepted);
+        assert!(matches!(
+            decide(&conn, &room, n, Decision::MarkPlanned, NOW),
+            Err(Fail::Api(ApiError::Invalid(m))) if m == "plan is empty"
+        ));
+
+        let n = task_in(&conn, &room, &me, Stage::Ready);
+        claim(&conn, &room, &agent, Work::Build, None, Some(n), "a", NOW).unwrap();
+        let task = decide(&conn, &room, n, Decision::MarkDone, NOW).unwrap();
+        assert_eq!(task.stage, Stage::Done);
+        assert!(task.claim.is_none());
+        assert!(matches!(
+            finish(&conn, &room, &agent, n, "", NOW),
+            Err(Fail::Api(ApiError::WrongStage(Stage::Done)))
+        ));
     }
 
     #[test]

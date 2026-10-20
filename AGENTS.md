@@ -82,7 +82,7 @@ Invariants:
 - postcard is positional: enum variants in `rpc.rs`, `events.rs` and `model.rs` are append-only. An incompatible change bumps `PROTOCOL_VERSION`.
 - The store maps enums to explicit integers (`stage_to_int`, …), never to their postcard encoding. A schema change bumps `SCHEMA_VERSION`, and `open` refuses an unknown version.
 - Claim selection and its update stay in one transaction.
-- Agents never decide. Accept, reject, approve, replan and reopen exist only as buttons in the UI, never as MCP or plugin tools.
+- Agents never decide. Accept, reject, approve, replan, reopen, mark planned and mark done exist only as buttons in the UI, never as MCP or plugin tools.
 - The MCP server stays loopback-only, behind a bearer token, and refuses `Origin`; only its port is configurable (`mcp_port`). The token never reaches a log (`McpKey` has no `Debug`).
 - Sessions outside the configured repositories never leave the machine.
 - Everything from the network and from omp files is untrusted: bounded sizes (`caps`, `MAX_RPC_BYTES`, `MAX_EVENT_FRAME`), and malformed input is an error, never a panic.
