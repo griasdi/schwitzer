@@ -304,7 +304,7 @@ flowchart LR
 |`settings.toml` key|Meaning|
 |---|---|
 |`name`|display name|
-|`mcp_port`|MCP server port on `127.0.0.1`, default 13339|
+|`mcp_port`|MCP server port on `127.0.0.1`, default 13339; set in Settings, omp, where a change moves the listener and rewrites every installed plugin|
 |`omp_sessions_dir`|where omp keeps its sessions, default `~/.omp/agent/sessions`|
 |`last_server`|prefills "Create room"|
 |`rooms`|room keys in list order|

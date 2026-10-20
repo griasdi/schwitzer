@@ -23,7 +23,7 @@ const MAX_AGE_MS: u64 = 120_000;
 const FOCUS_WAIT_MS: u64 = 30_000;
 
 /// The ids of the inputs whose focus survives a restart.
-pub const FOCUSABLE: [&str; 14] = [
+pub const FOCUSABLE: [&str; 15] = [
     "proposal-title",
     "proposal-body",
     "task-title",
@@ -31,6 +31,7 @@ pub const FOCUSABLE: [&str; 14] = [
     "plan-editor",
     "note-input",
     "name-input",
+    "mcp-port-input",
     "projects-dir-input",
     "new-project-name",
     "project-name-input",
@@ -77,6 +78,9 @@ pub struct FormsSnapshot {
     pub room_name: String,
     pub room_key: String,
     pub name: String,
+    /// `None` in a file from a version without it.
+    #[serde(default)]
+    pub mcp_port: Option<String>,
     pub repo: String,
     pub new_project: String,
     pub project_name: String,
@@ -241,6 +245,7 @@ impl App {
                 room_name: forms.room_name.clone(),
                 room_key: forms.room_key.clone(),
                 name: forms.name.clone(),
+                mcp_port: Some(forms.mcp_port.clone()),
                 repo: forms.repo.clone(),
                 new_project: forms.new_project.clone(),
                 project_name: forms.project_name.clone(),
@@ -302,6 +307,9 @@ impl App {
         self.forms.room_name = forms.room_name;
         self.forms.room_key = forms.room_key;
         self.forms.name = forms.name;
+        if let Some(port) = forms.mcp_port {
+            self.forms.mcp_port = port;
+        }
         self.forms.repo = forms.repo;
         self.forms.new_project = forms.new_project;
         self.forms.project_name = forms.project_name;
@@ -353,6 +361,7 @@ mod tests {
                 room_name: String::new(),
                 room_key: String::new(),
                 name: "alice".to_owned(),
+                mcp_port: Some("13401".to_owned()),
                 repo: String::new(),
                 new_project: String::new(),
                 project_name: "smoke".to_owned(),
@@ -403,6 +412,7 @@ mod tests {
         fields.remove("members_open");
         fields.remove("first_start");
         fields.insert("chosen_projects".to_owned(), serde_json::json!([]));
+        fields["forms"].as_object_mut().unwrap().remove("mcp_port");
         std::fs::write(dir.path().join(FILE), old.to_string()).unwrap();
         assert_eq!(
             take(dir.path(), now + 1_000),
@@ -410,6 +420,10 @@ mod tests {
                 placement: None,
                 first_start: None,
                 members_open: false,
+                forms: FormsSnapshot {
+                    mcp_port: None,
+                    ..resume(now).forms
+                },
                 ..resume(now)
             })
         );

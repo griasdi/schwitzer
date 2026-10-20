@@ -116,6 +116,9 @@ pub enum Message {
     RemoveRoom,
     NameInput(String),
     SubmitName,
+    McpPortInput(String),
+    /// Saves the port in the omp section; the MCP server moves to it and every plugin follows.
+    SubmitMcpPort,
     /// Shows project `id` of the selected room.
     SelectProject(u64),
     /// Opens Settings with the focus on the new project's name.
@@ -252,6 +255,7 @@ struct Forms {
     room_name: String,
     room_key: String,
     name: String,
+    mcp_port: String,
     repo: String,
     new_project: String,
     /// The rename input of the selected project.
@@ -446,6 +450,7 @@ impl App {
                 room_name: String::new(),
                 room_key: String::new(),
                 name: settings.name.clone(),
+                mcp_port: settings.mcp_port.to_string(),
                 repo: String::new(),
                 new_project: String::new(),
                 project_name: String::new(),
@@ -1032,6 +1037,14 @@ impl App {
                 Task::none()
             }
             Message::SubmitName => self.submit_name(),
+            Message::McpPortInput(s) => {
+                self.forms.mcp_port = s;
+                Task::none()
+            }
+            Message::SubmitMcpPort => {
+                self.submit_mcp_port();
+                Task::none()
+            }
             Message::RepoInput(s) => {
                 self.forms.repo = s;
                 Task::none()
@@ -1735,6 +1748,22 @@ impl App {
         Task::perform(async move { client.set_name(name).await }, |()| {
             Message::Noop
         })
+    }
+
+    fn submit_mcp_port(&mut self) {
+        let Some(port) = logic::parse_port(&self.forms.mcp_port) else {
+            self.banner = Some("Port must be a number from 1 to 65535".to_owned());
+            return;
+        };
+        self.forms.mcp_port = port.to_string();
+        if port == self.settings.mcp_port {
+            return;
+        }
+        self.settings.mcp_port = port;
+        // "Starting…" until the listener on the new port reports.
+        self.mcp = None;
+        self.save_settings();
+        self.notify("Port saved");
     }
 
     /// Adds `path` to the projects folders; `false` when it is not a folder on this machine
@@ -2447,8 +2476,8 @@ impl App {
     }
 
     /// Writes `settings.toml` when something changed since it was last read or written.
-    /// Changed repos also update the omp plugins. On the first-start page the projects folders
-    /// and the entered WSL distros are held back.
+    /// Changed repos or a changed MCP port also rewrite the omp plugins. On the first-start page
+    /// the projects folders and the entered WSL distros are held back.
     fn save_settings(&mut self) {
         // On the first-start page the folders wait for the member's confirmation.
         let on_disk = if self.first_start {
@@ -2464,11 +2493,12 @@ impl App {
             return;
         }
         let repos_changed = on_disk.repos != self.saved.repos;
+        let port_changed = on_disk.mcp_port != self.saved.mcp_port;
         match on_disk.save(&self.data_dir) {
             Ok(()) => self.saved = on_disk.into_owned(),
             Err(e) => self.banner = Some(format!("Cannot save settings: {e}")),
         }
-        if repos_changed {
+        if repos_changed || port_changed {
             self.sync_plugins();
         }
     }

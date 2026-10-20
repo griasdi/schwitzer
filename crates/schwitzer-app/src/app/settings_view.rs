@@ -533,6 +533,8 @@ fn agents(app: &App) -> Element<'_, Message> {
         ),
         Some(McpStatus::Failed(e)) => (Some(false), e.clone()),
     };
+    let changed =
+        logic::parse_port(&app.forms.mcp_port).is_some_and(|p| p != app.settings.mcp_port);
     column![
         heading("omp"),
         row![
@@ -542,9 +544,28 @@ fn agents(app: &App) -> Element<'_, Message> {
         ]
         .spacing(SP_2)
         .align_y(Alignment::Center),
+        text("Port").size(TS_14).font(MEDIUM),
+        row![
+            input(
+                "mcp-port-input",
+                "13339",
+                &app.forms.mcp_port,
+                Message::McpPortInput,
+                Message::SubmitMcpPort
+            ),
+            text_button(
+                "save-mcp-port",
+                "Save",
+                changed.then_some(Message::SubmitMcpPort),
+                theme::button_secondary
+            ),
+        ]
+        .spacing(SP_2)
+        .align_y(Alignment::Center),
         muted(
-            "omp sessions in the shared repos reach this room through the omp plugin. The port \
-             is mcp_port in settings.toml."
+            "omp sessions in the shared repos reach this room through the omp plugin on this \
+             port. A new port reaches the plugin in every shared repo with its next call; omp \
+             needs no restart."
         ),
         text(format!(
             "omp sessions are read from {}",

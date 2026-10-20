@@ -300,6 +300,12 @@ pub fn pick_prompt(room: &str, task: &Task, token: &ClaimToken) -> String {
     )
 }
 
+/// The MCP port entered in Settings: 1 to 65535. Port 0 would bind a random port that the
+/// plugin's `mcp_url` could not name.
+pub fn parse_port(s: &str) -> Option<u16> {
+    s.trim().parse::<u16>().ok().filter(|p| *p != 0)
+}
+
 /// `text` cut to at most `max` bytes at a character boundary.
 pub fn truncate(text: &str, max: usize) -> String {
     if text.len() <= max {
@@ -384,6 +390,17 @@ mod tests {
 
     fn member(byte: u8) -> MemberId {
         MemberId([byte; 32])
+    }
+
+    #[test]
+    fn parse_port_takes_one_to_65535() {
+        for ok in ["13401", " 13401 ", "65535"] {
+            assert!(parse_port(ok).is_some(), "{ok:?}");
+        }
+        assert_eq!(parse_port(" 13401 "), Some(13401));
+        for bad in ["0", "65536", "", "-1", "abc"] {
+            assert_eq!(parse_port(bad), None, "{bad:?}");
+        }
     }
 
     #[test]
