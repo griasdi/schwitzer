@@ -1,6 +1,7 @@
 //! The application: state, messages and `update`. The views live in the submodules.
 
 mod chrome;
+mod gpu;
 mod icons;
 mod licenses_view;
 mod list;
@@ -23,7 +24,7 @@ use std::time::Duration;
 use iced::keyboard::{self, Key, key::Named};
 use iced::widget::operation::AbsoluteOffset;
 use iced::widget::selector::{self, Target};
-use iced::widget::{column, container, markdown, operation, text_editor};
+use iced::widget::{column, container, markdown, operation, stack, text_editor};
 use iced::{Element, Length, Subscription, Task, Theme};
 use schwitzer_client::{Client, ClientError, ClientEvent};
 use schwitzer_proto::{
@@ -51,6 +52,12 @@ const PICK_AGENT: &str = "omp";
 const NOTICE_MS: u64 = 5_000;
 /// How often the omp plugins in the shared repos are compared with this app's.
 const PLUGIN_CHECK_MS: u64 = 5_000;
+/// How long after start the view carries the device-lost probe when no wgpu device took it
+/// (tiny-skia).
+const GPU_PROBE_MS: u64 = 5_000;
+/// A process restarts for a lost graphics device only after running this long: at most one
+/// such restart per 10 s if the new device is lost again right away.
+const GPU_RESTART_UPTIME_MS: u64 = 10_000;
 
 /// Everything the user and the outside world can make the app do.
 #[derive(Debug, Clone)]
@@ -200,7 +207,7 @@ pub enum Message {
     UpdateInstalled(Result<semver::Version, String>),
     /// Restarts into the installed update; first asks which widget has the focus.
     RestartForUpdate,
-    /// The focused widget and the window's place just before the restart.
+    /// The focused widget and the window's place just before a restart.
     Restart(Option<iced::advanced::widget::Id>, Option<Placement>),
     AutoInstallUpdates(bool),
     AutoRestartUpdates(bool),
@@ -402,6 +409,10 @@ pub struct App {
     /// What to focus or reveal after a restart for an update, once it shows.
     resume_focus: Option<PendingFocus>,
     now_ms: u64,
+    /// When this process started.
+    started_ms: u64,
+    /// Whether the restart for a lost graphics device is under way.
+    gpu_restarting: bool,
 }
 
 impl App {
@@ -444,6 +455,7 @@ impl App {
 
         let rooms = client.rooms();
         let selected = rooms.first().map(|(key, _)| RoomId::of(&key.token));
+        let now = now_ms();
         let mut app = Self {
             forms: Forms {
                 server_url: settings.last_server.clone().unwrap_or_default(),
@@ -501,7 +513,9 @@ impl App {
             update_failed: None,
             releases: HashMap::new(),
             resume_focus: None,
-            now_ms: now_ms(),
+            now_ms: now,
+            started_ms: now,
+            gpu_restarting: false,
         };
         app.read_project_dirs();
         if update::ENABLED
@@ -573,15 +587,21 @@ impl App {
                 Page::Licenses => licenses_view::view(self),
             }
         };
-        container(
+        let window = container(
             page.push(container(body).height(Length::Fill))
                 .push(widgets::hrule())
                 .push(chrome::status_bar(self)),
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::ground)
-        .into()
+        .style(theme::ground);
+        // The probe is a layer above the window, so dropping it changes neither the layout nor
+        // the widget tree below it (no widget loses its state).
+        let mut root = stack![window].width(Length::Fill).height(Length::Fill);
+        if !gpu::armed() && self.now_ms < self.started_ms + GPU_PROBE_MS {
+            root = root.push(gpu::probe());
+        }
+        root.into()
     }
 
     /// The main page below the header bar: list and sessions, or an empty state.
@@ -782,7 +802,16 @@ impl App {
                     self.check_plugins();
                     self.read_project_dirs();
                 }
-                self.pending_focus()
+                let focus = self.pending_focus();
+                if gpu::lost()
+                    && !self.gpu_restarting
+                    && self.now_ms >= self.started_ms + GPU_RESTART_UPTIME_MS
+                {
+                    self.gpu_restarting = true;
+                    tracing::warn!("restarting: the graphics device was lost");
+                    return Task::batch([focus, restart_task()]);
+                }
+                focus
             }
             Message::SystemMode(mode) => {
                 self.theme = theme::for_mode(mode);
@@ -844,18 +873,10 @@ impl App {
                 if !matches!(self.updater, UpdateState::Installed(_)) {
                     return Task::none();
                 }
-                iced::advanced::widget::operate(
-                    iced::advanced::widget::operation::focusable::find_focused(),
-                )
-                .collect()
-                .then(|ids| {
-                    let focus = ids.into_iter().next();
-                    resume::placement()
-                        .map(move |placement| Message::Restart(focus.clone(), placement))
-                })
+                restart_task()
             }
             Message::Restart(focus, placement) => {
-                self.restart_for_update(focus.as_ref(), placement);
+                self.restart(focus.as_ref(), placement);
                 Task::none()
             }
             Message::AutoInstallUpdates(on) => {
@@ -2382,15 +2403,17 @@ impl App {
         Task::none()
     }
 
-    /// Writes what the window shows for the new process, starts it and exits. The exit skips
-    /// every destructor, so nothing of the old process removes what the new one already set up
-    /// (the remote control socket).
-    fn restart_for_update(
+    /// Writes what the window shows for the new process, starts it and exits (for an installed
+    /// update or after the graphics device was lost). The exit skips every destructor, so
+    /// nothing of the old process removes what the new one already set up (the remote control
+    /// socket).
+    fn restart(
         &mut self,
         focus: Option<&iced::advanced::widget::Id>,
         placement: Option<Placement>,
     ) {
-        let (UpdateState::Installed(_), Some(program)) = (&self.updater, &self.program) else {
+        let Some(program) = &self.program else {
+            tracing::error!("cannot restart: this program's file is unknown");
             return;
         };
         let snapshot = self.snapshot(focus, placement);
@@ -2540,6 +2563,16 @@ impl App {
         }
         Task::batch(calls)
     }
+}
+
+/// Asks which widget has the focus and where the window is, then restarts (`Message::Restart`).
+fn restart_task() -> Task<Message> {
+    iced::advanced::widget::operate(iced::advanced::widget::operation::focusable::find_focused())
+        .collect()
+        .then(|ids| {
+            let focus = ids.into_iter().next();
+            resume::placement().map(move |placement| Message::Restart(focus.clone(), placement))
+        })
 }
 
 /// The app's keyboard shortcuts, from key presses no widget took.

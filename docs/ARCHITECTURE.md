@@ -301,7 +301,7 @@ flowchart LR
 |`identity/`|the weida key: the member id|
 |`mcp-token`|bearer token of the MCP server (file mode 0600)|
 |`settings.toml`|settings, below|
-|`resume.json`|the snapshot a restart after an update opens; ignored when older than 120 s, removed when read|
+|`resume.json`|the snapshot a restart after an update or a lost graphics device opens; ignored when older than 120 s, removed when read|
 
 |`settings.toml` key|Meaning|
 |---|---|
@@ -547,6 +547,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |New setting|`settings.rs`, `app/settings_view.rs`|
 |Colours, sizes, widget looks|DESIGN.md first, then `theme.rs`|
 |Self-update|`update.rs`, `app/resume.rs`, `deploy/package.sh` (asset names)|
+|Graphics device lost|`app/gpu.rs` (a 1×1 shader layer that registers wgpu's device-lost callback), the `Message::Tick` arm in `app/mod.rs` (restart through `App::restart`)|
 |Server deployment|`deploy/deploy.sh`, `deploy/schwitzer-server.service`|
 
 ### Repository map
