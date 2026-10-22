@@ -39,7 +39,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |omp + the Schwitzer plugin|the member's machine, in every repo linked to a project|the coding agent; `/schwitzer plan · build · propose · idea` and the `schwitzer_*` tools|the app's MCP server on `127.0.0.1`|
 |`schwitzer-server`|anyone's host, UDP (default `0.0.0.0:7444`)|rooms, projects, tasks, claims, notes; fans out events; holds live sessions in memory; announces the newest release|apps over weida/QUIC; the GitHub releases API|
 |stkn.org|the shared server, `weida://…@stkn.org:7444`|`schwitzer-server` as the systemd user unit `schwitzer-server`, deployed by `deploy/release.sh` through `deploy/deploy.sh stkn` with every release; other people use it, so a protocol break cuts off their older apps until they update|apps|
-|GitHub Releases + releases API|github.com|release assets with sha256 digests; the server polls `RELEASES_URL` every 300 s, the app downloads from it|apps, servers|
+|GitHub Releases + releases API|github.com|release assets with sha256 digests; the server polls `RELEASES_URL` every 120 s, the app downloads from it|apps, servers|
 |GitHub Actions|github.com|`ci.yml` (gate), `release.yml` (assets on `v*` tags), `site.yml` (product site)|GitHub Releases, GitHub Pages|
 |Product site|`site/`, GitHub Pages|the product page and downloads|nothing|
 
@@ -232,7 +232,7 @@ sequenceDiagram
 
 Enums are stored as explicit integers (`stage_to_int`: `Proposed 0`, `Accepted 1`, `Planned 2`, `Ready 3`, `Done 4`, `Rejected 5`, `Idea 6`), never as their postcard encoding.
 
-**Release check** (`release.rs`): every 300 s it reads the release list from `--releases-url`, picks the newest stable release (no draft, no prerelease, valid semver) and sends `Event::Release` to everyone when it changes, whatever the server's own version.
+**Release check** (`release.rs`): every 120 s it reads the release list from `--releases-url`, picks the newest stable release (no draft, no prerelease, valid semver) and sends `Event::Release` to everyone when it changes, whatever the server's own version.
 
 **What the server holds.** Tasks, plans, notes, room and project names and member names, in plain text in its database; TLS protects them only on the wire. Shared sessions (title, model, token counts, linked task) only in memory. It never sees code, the MCP token, or sessions outside the repos a member linked.
 
@@ -499,7 +499,7 @@ flowchart TB
   tag --> stkn["deploy/deploy.sh stkn<br/>stkn.org runs the release"]:::server
   tag --> yml["release.yml<br/>4 platforms, --features self-update,<br/>deploy/package.sh"]:::ext
   yml --> gh["GitHub release<br/>assets + sha256 digests,<br/>notes from deploy/changelog.sh"]:::ext
-  gh --> check["schwitzer-server release check, 5 min"]:::server
+  gh --> check["schwitzer-server release check, 2 min"]:::server
   check --> ev["Event::Release"]:::server
   ev --> target["App::release_target<br/>highest announced by the kept rooms' servers,<br/>else GitHub latest"]:::app
   target --> upd["update::check<br/>releases/tags/v-version"]:::app

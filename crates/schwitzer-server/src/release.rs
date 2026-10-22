@@ -12,7 +12,7 @@ use crate::State;
 
 /// GitHub API URL of the schwitzer release list.
 pub const RELEASES_URL: &str = "https://api.github.com/repos/griasdi/schwitzer/releases";
-const CHECK_INTERVAL: Duration = Duration::from_secs(300);
+const CHECK_INTERVAL: Duration = Duration::from_secs(120);
 const MAX_JSON: u64 = 4 << 20;
 /// Releases asked for per check; the newest stable one is among them.
 const PER_PAGE: &str = "10";
@@ -67,7 +67,7 @@ fn fetch(url: &str) -> Result<Option<semver::Version>, String> {
     newest_stable(&json)
 }
 
-/// Checks `url` every five minutes and announces a changed release to every stream. Stores the
+/// Checks `url` every two minutes and announces a changed release to every stream. Stores the
 /// release before publishing it: `/events` reads it after subscribing, so no stream misses it.
 pub(crate) async fn watch(state: State, url: String) {
     let mut interval = tokio::time::interval(CHECK_INTERVAL);

@@ -208,7 +208,7 @@
   <text x="1245" y="494" class="desc">online = ≥ 1 stream</text>
   <rect x="1231" y="600" width="131" height="122" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
   <text x="1245" y="619" class="head">release check</text>
-  <text x="1245" y="638" class="desc">GitHub every 5 min</text>
+  <text x="1245" y="638" class="desc">GitHub every 2 min</text>
   <text x="1245" y="654" class="desc">newest stable</text>
   <text x="1245" y="670" class="desc">→ Event::Release</text>
 
@@ -285,7 +285,7 @@
   <text x="1270" y="865" class="head">Releases API</text>
   <text x="1270" y="885" class="small mono">api.github.com/repos/</text>
   <text x="1270" y="902" class="small mono">griasdi/schwitzer/releases</text>
-  <text x="1270" y="919" class="desc">server polls it every 5 min</text>
+  <text x="1270" y="919" class="desc">server polls it every 2 min</text>
   <text x="1270" y="936" class="desc">app fetches releases/tags/v&lt;version&gt;</text>
 
   <!-- arrows into E -->

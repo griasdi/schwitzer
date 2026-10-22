@@ -39,7 +39,7 @@ pub struct Options {
     pub public_host: String,
     /// Directory for the database and the server's identity.
     pub data_dir: PathBuf,
-    /// GitHub API URL of the release list, checked every five minutes; `None` checks nothing.
+    /// GitHub API URL of the release list, checked every two minutes; `None` checks nothing.
     pub releases_url: Option<String>,
 }
 
