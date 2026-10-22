@@ -1330,7 +1330,7 @@ impl App {
                 Task::none()
             }
             Message::CreateProject => {
-                let name = logic::truncate(self.forms.new_project.trim(), caps::PROJECT_NAME);
+                let name = caps::cut(self.forms.new_project.trim(), caps::PROJECT_NAME).to_owned();
                 let Some(room) = self.selected.filter(|_| !name.is_empty()) else {
                     return Task::none();
                 };
@@ -1363,7 +1363,7 @@ impl App {
                 Task::none()
             }
             Message::RenameProject => {
-                let name = logic::truncate(self.forms.project_name.trim(), caps::PROJECT_NAME);
+                let name = caps::cut(self.forms.project_name.trim(), caps::PROJECT_NAME).to_owned();
                 let (Some(room), Some(project)) = (self.selected, self.selected_project()) else {
                     return Task::none();
                 };
@@ -1896,7 +1896,7 @@ impl App {
             self.banner = Some("Room name is empty".to_owned());
             return Task::none();
         }
-        let name = logic::truncate(name, caps::ROOM_NAME);
+        let name = caps::cut(name, caps::ROOM_NAME).to_owned();
         let client = self.client.clone();
         call(
             async move { client.create_room(server, name).await },
@@ -1950,7 +1950,7 @@ impl App {
     }
 
     fn submit_name(&mut self) -> Task<Message> {
-        let name = logic::truncate(self.forms.name.trim(), caps::MEMBER_NAME);
+        let name = caps::cut(self.forms.name.trim(), caps::MEMBER_NAME).to_owned();
         if name.is_empty() {
             self.banner = Some("Name is empty".to_owned());
             return Task::none();

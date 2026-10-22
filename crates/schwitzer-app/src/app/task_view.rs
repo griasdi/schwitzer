@@ -6,7 +6,7 @@ use iced::widget::{
     Row, Space, column, container, markdown, pick_list, row, text, text_editor, text_input,
 };
 use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task};
+use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task, caps};
 
 use super::chrome::ProjectChoice;
 use super::icons::{Icon, Tone, icon};
@@ -598,7 +598,7 @@ fn waits<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
             t.number != task.number && logic::editable(t) && !task.waits_for.contains(&t.number)
         })
         .map(|t| {
-            let mut title = logic::truncate(&t.title, 40);
+            let mut title = caps::cut(&t.title, 40).to_owned();
             if title.len() < t.title.len() {
                 title.push('…');
             }

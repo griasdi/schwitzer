@@ -101,12 +101,7 @@ fn waits(mut list: Vec<u64>) -> Result<Vec<u64>, ApiError> {
 
 /// Display metadata: trimmed and cut to `cap` bytes at a character boundary.
 fn clamp(value: &str, cap: usize) -> String {
-    let value = value.trim();
-    let mut end = value.len().min(cap);
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    value[..end].to_owned()
+    caps::cut(value.trim(), cap).to_owned()
 }
 
 /// Rooms one member may belong to.

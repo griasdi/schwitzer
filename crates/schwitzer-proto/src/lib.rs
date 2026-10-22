@@ -45,6 +45,30 @@ pub mod caps {
     pub const SESSION_PROJECTS: usize = 64;
     /// Tasks one task may wait for.
     pub const WAITS_FOR: usize = 32;
+
+    /// `text` cut to at most `max` bytes at a character boundary.
+    pub fn cut(text: &str, max: usize) -> &str {
+        if text.len() <= max {
+            return text;
+        }
+        let end = (0..=max)
+            .rev()
+            .find(|&i| text.is_char_boundary(i))
+            .unwrap_or(0);
+        &text[..end]
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::cut;
+
+        #[test]
+        fn text_is_cut_at_a_character_boundary() {
+            assert_eq!(cut("abc", 5), "abc");
+            assert_eq!(cut("äbc", 1), "");
+            assert_eq!(cut("äbc", 2), "ä");
+        }
+    }
 }
 
 /// Error of the postcard helpers.

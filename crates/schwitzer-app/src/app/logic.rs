@@ -361,7 +361,7 @@ pub fn shared_sessions(
             projects.truncate(caps::SESSION_PROJECTS);
             Some(SessionInfo {
                 id: session.id.clone(),
-                title: truncate(&session.title, caps::SESSION_TITLE),
+                title: caps::cut(&session.title, caps::SESSION_TITLE).to_owned(),
                 project: session.project.clone(),
                 model: session.model.clone(),
                 started_ms: session.started_ms,
@@ -412,18 +412,6 @@ pub fn details_markdown(title: &str, body: &str) -> String {
 /// plugin's `mcp_url` could not name.
 pub fn parse_port(s: &str) -> Option<u16> {
     s.trim().parse::<u16>().ok().filter(|p| *p != 0)
-}
-
-/// `text` cut to at most `max` bytes at a character boundary.
-pub fn truncate(text: &str, max: usize) -> String {
-    if text.len() <= max {
-        return text.to_owned();
-    }
-    let end = (0..=max)
-        .rev()
-        .find(|&i| text.is_char_boundary(i))
-        .unwrap_or(0);
-    text[..end].to_owned()
 }
 
 /// Whether `url` is an http or https link with something after the scheme: the only
@@ -951,13 +939,6 @@ mod tests {
         let prompt = pick_prompt("room", &task(7, Stage::Ready, None), &token);
         assert!(prompt.contains(&format!("\nschwitzer-claim: {}\n", token.to_hex())));
         assert!(prompt.starts_with("Work on schwitzer task #7"));
-    }
-
-    #[test]
-    fn titles_are_cut_at_a_character_boundary() {
-        assert_eq!(truncate("abc", 5), "abc");
-        assert_eq!(truncate("äbc", 1), "");
-        assert_eq!(truncate("äbc", 2), "ä");
     }
 
     #[test]
