@@ -116,6 +116,7 @@ An agent in one repo may need a change in another Schwitzer project, for example
 - `schwitzer_list_rooms`, `schwitzer_list_tasks` and `schwitzer_get_task` have approval tier `read`, the rest `write`.
 - A restricted subagent does not get extension tools (an omp rule), so it does not get these either.
 - None accepts, rejects or approves: humans decide in the app.
+- A build claim (`/schwitzer build`, the build after an approved plan, or `schwitzer_claim` with `work: build`) remembers `HEAD` of this repo in the omp process, keyed by room and task. `schwitzer_finish` then appends the commits since then to its note: a `Commits:` line and `` - `<hash>` <subject> `` per commit, newest first, at most 50, cut so the note stays within 16 KiB, the rest as `- … <n> more`. No new commit, no git repo, an omp restart since the claim, or a note that alone leaves no room: the note goes out as written. A finish or unclaim forgets the start.
 
 ## How the app installs it
 

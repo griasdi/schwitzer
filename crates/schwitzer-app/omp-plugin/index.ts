@@ -182,6 +182,9 @@ const SUBCOMMANDS = [
 ] as const;
 const USAGE = "Usage: /schwitzer plan | build | propose [text] | idea <text>";
 const TITLE_BYTES = 200; // caps::TITLE on the server
+const NOTE_BYTES = 16 * 1024; // caps::NOTE on the server
+const MAX_COMMITS = 50; // commits listed in a finish note at most
+const GIT_TIMEOUT_MS = 5_000;
 
 /** An MCP tool of the app that the agent gets as `schwitzer_<name>`. Mirrors src/mcp/tools.rs. */
 interface ToolSpec {
@@ -453,6 +456,30 @@ async function listRooms(config: Config, timeoutMs = TIMEOUT_MS): Promise<RoomRo
   return JSON.parse(await tool(config, "list_rooms", {}, timeoutMs)) as RoomRow[];
 }
 
+/** The room id8 (as list_rooms shows it) a tool's `room` argument names: a full 64-hex id directly,
+ *  else through list_rooms like the app resolves it (name case-insensitively, then an id prefix of at
+ *  least 4 hex digits, omitted the only joined room); undefined when it names no single room or the
+ *  app does not answer within HINT_TIMEOUT_MS. */
+async function roomKey(config: Config, arg: string | undefined): Promise<string | undefined> {
+  const wanted = (arg ?? "").trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(wanted)) return wanted.slice(0, 8);
+  let rows: RoomRow[];
+  try {
+    rows = await listRooms(config, HINT_TIMEOUT_MS);
+  } catch {
+    return undefined;
+  }
+  if (wanted === "") return rows.length === 1 ? rows[0].room : undefined;
+  const byName = rows.filter((r) => r.name?.toLowerCase() === wanted);
+  const hits =
+    byName.length > 0
+      ? byName
+      : /^[0-9a-f]{4,}$/.test(wanted)
+        ? rows.filter((r) => (wanted.length <= 8 ? r.room.startsWith(wanted) : wanted.startsWith(r.room)))
+        : [];
+  return hits.length === 1 ? hits[0].room : undefined;
+}
+
 /** The configured projects among the joined rooms `rows`, in config order. */
 function ownProjects(config: Config, rows: RoomRow[]): JoinedProject[] {
   const joined: JoinedProject[] = [];
@@ -695,7 +722,13 @@ type Claimed = { marker: string; task: Record<string, unknown> } | { refused: st
 /** Claims task `number` for `work`; `refused` holds the app's answer when it gave no claim
  *  ("No free task." when someone was faster). */
 async function claimFor(config: Config, room: string, project: string, number: number, work: Work): Promise<Claimed> {
-  const answer = await tool(config, "claim", { room, project, work, task: number, agent: "omp" });
+  const got = parseClaim(await tool(config, "claim", { room, project, work, task: number, agent: "omp" }));
+  if (work === "build" && !("refused" in got)) await rememberStart(config, room, number);
+  return got;
+}
+
+/** The app's answer to a claim: the marker and the task, or `refused` with the answer. */
+function parseClaim(answer: string): Claimed {
   const marker = answer.match(/^schwitzer-claim: ([0-9a-f]{32})$/m);
   if (!marker) return { refused: answer };
   // The answer: the marker line, a hint line, then the task.
@@ -873,6 +906,84 @@ function takeHandoff(): string | undefined {
   return typeof content === "string" ? content : undefined;
 }
 
+/** HEAD of this repo when a build claim started, keyed `<room id8>/<task>`. It lives on globalThis
+ *  like the handoff: "execute" clears the session, and the build runs in the next one. */
+const BUILD_STARTS = Symbol.for("schwitzer.buildStarts");
+
+function buildStarts(): Map<string, string> {
+  const store = globalThis as Record<symbol, unknown>;
+  let starts = store[BUILD_STARTS] as Map<string, string> | undefined;
+  if (!starts) {
+    starts = new Map();
+    store[BUILD_STARTS] = starts;
+  }
+  return starts;
+}
+
+/** git in this repo: its trimmed stdout, or undefined when git is missing, fails or takes too long. */
+async function git(args: string[]): Promise<string | undefined> {
+  try {
+    const proc = Bun.spawn(["git", "-C", OWN_ROOT, ...args], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const timer = setTimeout(() => proc.kill(), GIT_TIMEOUT_MS);
+    const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    clearTimeout(timer);
+    return code === 0 ? out.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Remembers HEAD of this repo for the build claim on `task`; never throws. Without a git HEAD an
+ *  older start for the same task is dropped. */
+async function rememberStart(config: Config, room: string | undefined, task: number): Promise<void> {
+  try {
+    const key = await roomKey(config, room);
+    if (key === undefined) return;
+    const head = await git(["rev-parse", "--verify", "HEAD"]);
+    if (head !== undefined && /^[0-9a-f]{40,64}$/.test(head)) buildStarts().set(`${key}/${task}`, head);
+    else buildStarts().delete(`${key}/${task}`);
+  } catch {}
+}
+
+/** Forgets the start of `task` after its claim ended (finish or unclaim); never throws. */
+async function forgetStart(config: Config, room: string | undefined, task: number): Promise<void> {
+  try {
+    const key = await roomKey(config, room);
+    if (key !== undefined) buildStarts().delete(`${key}/${task}`);
+  } catch {}
+}
+
+/** `note` with the commits since the build claim on `task` appended; `note` unchanged when no start
+ *  is remembered, git fails, there is no new commit, or the note alone leaves no room. */
+async function withCommits(config: Config, room: string | undefined, task: number, note: string): Promise<string> {
+  try {
+    const key = await roomKey(config, room);
+    const start = key === undefined ? undefined : buildStarts().get(`${key}/${task}`);
+    if (start === undefined) return note;
+    const count = Number(await git(["rev-list", "--count", `${start}..HEAD`]));
+    if (!(count > 0)) return note;
+    const log = await git(["log", "--oneline", "--no-decorate", "--no-color", "-n", String(MAX_COMMITS), `${start}..HEAD`]);
+    if (!log) return note;
+    const lines = log
+      .split("\n")
+      .filter((l) => l !== "")
+      .map((l) => {
+        const cut = l.indexOf(" ");
+        return cut < 0 ? `- \`${l}\`` : `- \`${l.slice(0, cut)}\` ${l.slice(cut + 1)}`;
+      });
+    const base = note.trim();
+    const head = base === "" ? "Commits:" : `${base}\n\nCommits:`;
+    for (let shown = lines.length; shown >= 0; shown--) {
+      const rest = count - shown;
+      const text = head + lines.slice(0, shown).map((l) => `\n${l}`).join("") + (rest > 0 ? `\n- … ${rest} more` : "");
+      if (Buffer.byteLength(text) <= NOTE_BYTES) return text;
+    }
+    return note;
+  } catch {
+    return note;
+  }
+}
+
 async function submitPlan(event: PlanReviewEvent, claim: TaskClaim, ctx: Ctx): Promise<void> {
   // A new review replaces the one waited on.
   if (watch) watch.stopped = true;
@@ -963,6 +1074,7 @@ async function awaitDecision(ctx: Ctx, config: Config, claim: TaskClaim, reviewI
 async function unclaimTask(ctx: Ctx, config: Config, claim: TaskClaim, note: string): Promise<void> {
   try {
     await tool(config, "unclaim", { room: claim.room, task: claim.task, note });
+    await forgetStart(config, claim.room, claim.task);
   } catch (e) {
     ctx.ui.notify(e instanceof Error ? e.message : String(e), "error");
   }
@@ -1021,6 +1133,26 @@ async function replan(ctx: Ctx, config: Config, claim: TaskClaim, reviewId: stri
   ctx.ui.notify(`Task #${claim.task} was sent back in Schwitzer; omp revises the plan.`, "info");
 }
 
+/** An agent's schwitzer_<name> call: a build claim remembers HEAD, finish gets the commits since then
+ *  appended to its note, and a finished or given-back claim forgets its start. */
+async function forward(config: Config, name: string, args: Record<string, unknown>): Promise<string> {
+  const room = typeof args.room === "string" ? args.room : undefined;
+  const task = typeof args.task === "number" ? args.task : undefined;
+  if (name === "finish" && task !== undefined && typeof args.note === "string") {
+    args = { ...args, note: await withCommits(config, room, task, args.note) };
+  }
+  const text = await tool(config, name, args);
+  if (name === "claim" && args.work === "build") {
+    try {
+      const got = parseClaim(text);
+      if (!("refused" in got) && typeof got.task.number === "number") await rememberStart(config, room, got.task.number);
+    } catch {} // the claim stands; only the commit list is lost
+  } else if ((name === "finish" || name === "unclaim") && task !== undefined) {
+    await forgetStart(config, room, task);
+  }
+  return text;
+}
+
 export default function schwitzer(pi: Pi): void {
   for (const spec of TOOLS) {
     pi.registerTool({
@@ -1030,7 +1162,7 @@ export default function schwitzer(pi: Pi): void {
       parameters: spec.parameters(pi.zod),
       approval: spec.approval,
       async execute(_toolCallId, params) {
-        const text = await tool(await loadConfig(), spec.name, params as Record<string, unknown>);
+        const text = await forward(await loadConfig(), spec.name, params as Record<string, unknown>);
         return { content: [{ type: "text", text }] };
       },
     });
