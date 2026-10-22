@@ -340,7 +340,7 @@ A bad `settings.toml` loads as defaults with a notice and is not overwritten unt
 |---|---|---|
 |omp plugin|`.omp/plugins/node_modules/schwitzer/` in each linked repo; source `crates/schwitzer-app/omp-plugin/index.ts`|`/schwitzer` command, `schwitzer_*` tools, plan review hook, projects hint, cross-project edit guard|
 |MCP server|`crates/schwitzer-app/src/mcp/serve.rs`, `mcp/tools.rs`|the ten tools, on `127.0.0.1:<mcp_port>/mcp`|
-|plugin keeper|`crates/schwitzer-app/src/omp_plugin.rs`, `App::check_plugins`, `App::sync_plugins`|installs, compares, updates and removes the plugin|
+|plugin keeper|`crates/schwitzer-app/src/omp_plugin.rs`, `app/plugins.rs` (`App::check_plugins`, `App::sync_plugins`)|installs, compares, updates and removes the plugin|
 |session scanner|`crates/schwitzer-app/src/sessions.rs`, `logic::shared_sessions`, `App::publish`|reads omp session logs, shares the ones in linked repos|
 |pick prompt|`logic::pick_prompt`, `App::pick`|the prompt a human pastes into their own agent|
 |claim marker|`schwitzer-claim: <32 hex>` (`sessions::MARKER`)|ties an agent session to a claimed task|
