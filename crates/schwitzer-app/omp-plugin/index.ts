@@ -102,6 +102,11 @@ interface Ctx {
   resolvePlanReview?(reviewId: string, choice: string, input?: { feedback?: string }): boolean;
   getPendingPlanReview?(): { reviewId: string } | undefined;
 }
+/** The context of a slash-command handler: Ctx plus omp's session controls. */
+interface CommandCtx extends Ctx {
+  waitForIdle(): Promise<void>;
+  newSession(): Promise<{ cancelled: boolean }>;
+}
 interface PlanReviewEvent {
   reviewId?: string;
   planContent?: string;
@@ -117,6 +122,10 @@ interface PlanReviewResolvedEvent {
 interface ToolCallEvent {
   toolName: string;
   input: Record<string, unknown>;
+}
+interface ToolResultEvent {
+  toolName: string;
+  isError: boolean;
 }
 interface InjectedMessage {
   message: { customType: string; content: string; display: boolean };
@@ -144,7 +153,7 @@ interface Pi {
   }): void;
   registerCommand(
     name: string,
-    command: { description: string; handler: (args: string, ctx: Ctx) => Promise<void> },
+    command: { description: string; handler: (args: string, ctx: CommandCtx) => Promise<void> },
   ): void;
   on(event: "plan_review_requested", handler: (event: PlanReviewEvent, ctx: Ctx) => void): void;
   on(event: "plan_review_resolved", handler: (event: PlanReviewResolvedEvent, ctx: Ctx) => void): void;
@@ -153,6 +162,8 @@ interface Pi {
     event: "tool_call",
     handler: (event: ToolCallEvent, ctx: Ctx) => Promise<{ block: true; reason: string } | undefined>,
   ): void;
+  on(event: "tool_result", handler: (event: ToolResultEvent, ctx: Ctx) => void): void;
+  on(event: "agent_end", handler: (event: unknown, ctx: Ctx) => void): void;
   appendEntry(customType: string, data: unknown): void;
   sendMessage(
     message: { customType: string; content: string; display: boolean },
@@ -181,6 +192,7 @@ const SUBCOMMANDS = [
   { name: "idea", label: "idea · note an idea for later" },
 ] as const;
 const USAGE = "Usage: /schwitzer plan | build | propose [text] | idea <text>";
+const LEAVE_PLAN_MODE = "Leave plan mode, then run /schwitzer build again.";
 const TITLE_BYTES = 200; // caps::TITLE on the server
 const NOTE_BYTES = 16 * 1024; // caps::NOTE on the server
 const MAX_COMMITS = 50; // commits listed in a finish note at most
@@ -666,11 +678,15 @@ function taskContext(claim: TaskClaim, task: Record<string, unknown>, work: Work
     .join("\n");
 }
 
+function planMode(ctx: Ctx): boolean {
+  return lastEntry(ctx, (e) => e.type === "mode_change")?.mode === "plan";
+}
+
 /** Lets the user pick a free task for `work`, claims it and puts the prompt in the editor. */
 async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work): Promise<void> {
-  const planning = lastEntry(ctx, (e) => e.type === "mode_change")?.mode === "plan";
+  const planning = planMode(ctx);
   if (work === "build" && planning) {
-    ctx.ui.notify("Leave plan mode, then run /schwitzer build again.", "info");
+    ctx.ui.notify(LEAVE_PLAN_MODE, "info");
     return;
   }
   const open = await unclaimed(config, STAGE[work]);
@@ -688,6 +704,11 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work): Promise<
   const choice = await ctx.ui.select(work === "plan" ? "Plan a Schwitzer task" : "Build a Schwitzer task", labels);
   const picked = typeof choice === "number" ? open[choice] : choice === undefined ? undefined : open[labels.indexOf(choice)];
   if (!picked) return;
+  await claimPicked(pi, ctx, config, picked, work, planning);
+}
+
+/** Claims `picked` for `work`, sends the task as the next turn's message and puts the prompt in the editor. */
+async function claimPicked(pi: Pi, ctx: Ctx, config: Config, picked: Candidate, work: Work, planning: boolean): Promise<void> {
   const got = await claimFor(config, picked.room, picked.projectName, picked.task.number, work);
   if ("refused" in got) {
     ctx.ui.notify(`Schwitzer: ${got.refused}`, "info");
@@ -715,6 +736,46 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work): Promise<
     `Task #${claim.task} is claimed for ${work === "plan" ? "planning" : "building"}. Press Enter to start.`,
     "info",
   );
+}
+
+const NEXT_CHOICES = ["In a fresh session (recommended)", "In this session", "Not now"] as const;
+
+/** After a finished build: offers the first unclaimed approved task of the configured projects. */
+async function offerNext(pi: Pi, ctx: Ctx): Promise<void> {
+  try {
+    const config = await loadConfig();
+    if (config.projects.length === 0) return;
+    const [next] = await unclaimed(config, STAGE.build);
+    if (!next) return;
+    const from = config.projects.length > 1 ? ` from project "${next.projectName}"` : "";
+    const choice = await ctx.ui.select(`Build #${next.task.number} "${next.task.title}"${from} next?`, [...NEXT_CHOICES]);
+    const index =
+      typeof choice === "number"
+        ? choice
+        : choice === undefined
+          ? -1
+          : NEXT_CHOICES.indexOf(choice as (typeof NEXT_CHOICES)[number]);
+    if (index === 0) {
+      ctx.ui.setEditorText("/schwitzer build new");
+      ctx.ui.notify("Press Enter for a new session with /schwitzer build; a fresh session keeps the context small.", "info");
+    } else if (index === 1) {
+      if (planMode(ctx)) {
+        ctx.ui.notify(LEAVE_PLAN_MODE, "info");
+        return;
+      }
+      await claimPicked(pi, ctx, config, next, "build", false);
+    }
+  } catch (e) {
+    ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
+  }
+}
+
+/** `/schwitzer build new`: a new omp session with `/schwitzer build` in its editor. */
+async function buildInNewSession(ctx: CommandCtx): Promise<void> {
+  await ctx.waitForIdle();
+  if ((await ctx.newSession()).cancelled) return;
+  ctx.ui.setEditorText("/schwitzer build");
+  ctx.ui.notify("New session: press Enter to pick the task to build.", "info");
 }
 
 type Claimed = { marker: string; task: Record<string, unknown> } | { refused: string };
@@ -852,7 +913,7 @@ function writeUpPrompt(c: Candidate): string {
 }
 
 /** `/schwitzer [plan | build | propose [text] | idea <text>]`. */
-async function run(pi: Pi, ctx: Ctx, args: string): Promise<void> {
+async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
   const trimmed = args.trim();
   const cut = trimmed.search(/\s/);
   let sub = cut < 0 ? trimmed : trimmed.slice(0, cut);
@@ -880,7 +941,8 @@ async function run(pi: Pi, ctx: Ctx, args: string): Promise<void> {
     if (!picked) return;
     sub = picked.name;
   }
-  if (sub === "plan" || sub === "build") await claimTask(pi, ctx, config, sub);
+  if (sub === "build" && rest === "new") await buildInNewSession(ctx);
+  else if (sub === "plan" || sub === "build") await claimTask(pi, ctx, config, sub);
   else if (sub === "idea") await addIdea(ctx, config, rest);
   else await proposeTask(pi, ctx, config, rest);
 }
@@ -891,6 +953,8 @@ interface Watch {
   stopped: boolean;
 }
 let watch: Watch | undefined;
+/** The main agent finished a build with schwitzer_finish; the end of its run offers the next approved task. */
+let finishedBuild = false;
 /** The build task message for the next main-agent turn. It lives on globalThis because
  *  "execute" clears the session, and the next turn must still find it. */
 const HANDOFF = Symbol.for("schwitzer.buildHandoff");
@@ -1226,4 +1290,17 @@ export default function schwitzer(pi: Pi): void {
   });
   // A throwing handler would block the tool; crossProjectCheck catches what it must.
   pi.on("tool_call", async (event, ctx) => crossProjectCheck(pi, event, ctx));
+  // A successful schwitzer_finish of the main agent: offer the next approved task when its run ends.
+  pi.on("tool_result", (event, ctx) => {
+    if (ctx.agent && ctx.agent.kind !== "main") return;
+    if (event.toolName === "schwitzer_finish" && !event.isError) finishedBuild = true;
+  });
+  // The run that finished a build ended: ask whether to build the next approved task. Detached:
+  // the dialog must not hold up the hook.
+  pi.on("agent_end", (_event, ctx) => {
+    if (ctx.agent && ctx.agent.kind !== "main") return;
+    if (!finishedBuild) return;
+    finishedBuild = false;
+    if (ctx.hasUI) void offerNext(pi, ctx);
+  });
 }
