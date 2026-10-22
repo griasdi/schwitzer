@@ -217,8 +217,8 @@ impl Client {
         }
     }
 
-    /// Sends `req` to the server `room` lives on and waits for the reply, for up to 10 s
-    /// for a connection and then `RPC_TIMEOUT` for the answer.
+    /// Sends `req` to the server `room` lives on and waits for the reply, for up to
+    /// `SESSION_WAIT` for a connection and then `RPC_TIMEOUT` for the answer.
     pub async fn request(&self, room: RoomId, req: Request) -> Result<Response, ClientError> {
         let server = lock(&self.0.keys)
             .iter()
