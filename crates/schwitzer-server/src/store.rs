@@ -669,6 +669,14 @@ fn require_task(conn: &Connection, room: &RoomId, number: u64) -> R<Task> {
     Ok(read_task(conn, room, number)?.ok_or(ApiError::NoSuchTask)?)
 }
 
+/// `WrongStage` once the task is `Done` or `Rejected`.
+fn require_open(task: &Task) -> R<()> {
+    if matches!(task.stage, Stage::Done | Stage::Rejected) {
+        return Err(ApiError::WrongStage(task.stage).into());
+    }
+    Ok(())
+}
+
 fn append_note(
     conn: &Connection,
     room: &RoomId,
@@ -812,10 +820,7 @@ pub fn edit_task(
     plan: &str,
     now: u64,
 ) -> R<Task> {
-    let task = require_task(conn, room, number)?;
-    if matches!(task.stage, Stage::Done | Stage::Rejected) {
-        return Err(ApiError::WrongStage(task.stage).into());
-    }
+    require_open(&require_task(conn, room, number)?)?;
     conn.execute(
         "UPDATE tasks SET title = ?3, body = ?4, plan = ?5, updated_ms = ?6
          WHERE room = ?1 AND number = ?2",
@@ -840,10 +845,7 @@ pub fn set_waits(
     waits: &[u64],
     now: u64,
 ) -> R<Task> {
-    let task = require_task(conn, room, number)?;
-    if matches!(task.stage, Stage::Done | Stage::Rejected) {
-        return Err(ApiError::WrongStage(task.stage).into());
-    }
+    require_open(&require_task(conn, room, number)?)?;
     write_waits(conn, room, number, waits)?;
     touch(conn, room, number, now)?;
     require_task(conn, room, number)
