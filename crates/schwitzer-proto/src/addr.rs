@@ -69,8 +69,6 @@ pub enum AddrParseError {
     Token,
 }
 
-pub type KeyParseError = AddrParseError;
-
 const SERVER_SCHEME: &str = "weida://";
 const KEY_SCHEME: &str = "schwitzer://";
 
@@ -143,7 +141,7 @@ impl fmt::Debug for RoomKey {
 }
 
 impl FromStr for RoomKey {
-    type Err = KeyParseError;
+    type Err = AddrParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim();

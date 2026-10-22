@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use serde::{Serialize, de::DeserializeOwned};
 
-pub use addr::{AddrParseError, KeyParseError, RoomKey, ServerAddr};
+pub use addr::{AddrParseError, RoomKey, ServerAddr};
 pub use events::{Event, Subscribe};
 pub use frame::{FrameError, encode_frame, read_frame};
 pub use ids::{ClaimToken, IdParseError, MemberId, RoomId, RoomToken};
