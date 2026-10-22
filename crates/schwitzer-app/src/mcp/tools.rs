@@ -410,7 +410,8 @@ fn task_row(task: &Task, members: &[Member], projects: &[Project], tasks: &[Task
     })
 }
 
-/// A task with body, plan and notes; `waits_for` lists only what `tasks` has not done yet.
+/// A task with body, plan and notes: its `list_tasks` row and more. `waits_for` lists only what
+/// `tasks` has not done yet.
 fn task_json(task: &Task, members: &[Member], projects: &[Project], tasks: &[Task]) -> Value {
     let notes: Vec<Value> = task
         .notes
@@ -424,21 +425,14 @@ fn task_json(task: &Task, members: &[Member], projects: &[Project], tasks: &[Tas
             })
         })
         .collect();
-    json!({
-        "number": task.number,
-        "title": task.title,
-        "project": project_name(projects, task.project),
-        "body": task.body,
-        "plan": task.plan,
-        "stage": stage_of(task).name(),
-        "priority": priority_name(task.priority),
-        "author": logic::member_name(members, &task.author),
-        "created_ms": task.created_ms,
-        "updated_ms": task.updated_ms,
-        "claim": task.claim.as_ref().map(|c| claim_json(c, members)),
-        "notes": notes,
-        "waits_for": task.open_waits(tasks),
-    })
+    let mut full = task_row(task, members, projects, tasks);
+    full["body"] = json!(task.body);
+    full["plan"] = json!(task.plan);
+    full["author"] = json!(logic::member_name(members, &task.author));
+    full["created_ms"] = json!(task.created_ms);
+    full["updated_ms"] = json!(task.updated_ms);
+    full["notes"] = json!(notes);
+    full
 }
 
 /// A room as one row of `list_rooms`.
