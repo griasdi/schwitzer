@@ -158,25 +158,23 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             let title = text("title", &title, caps::TITLE, true)?;
             let body = text("body", &body, caps::BODY, false)?;
             let waits_for = waits(waits_for)?;
-            task_reply(
-                mutate(state, caller, room, move |conn, now| {
-                    let task = store::create_task(
-                        conn,
-                        &room,
-                        &caller,
-                        project,
-                        Stage::Proposed,
-                        &title,
-                        &body,
-                        now,
-                    )?;
-                    if waits_for.is_empty() {
-                        return Ok(Some(task));
-                    }
-                    store::set_waits(conn, &room, task.number, &waits_for, now).map(Some)
-                })
-                .await,
-            )
+            mutate(state, caller, room, move |conn, now| {
+                let task = store::create_task(
+                    conn,
+                    &room,
+                    &caller,
+                    project,
+                    Stage::Proposed,
+                    &title,
+                    &body,
+                    now,
+                )?;
+                if waits_for.is_empty() {
+                    return Ok(task);
+                }
+                store::set_waits(conn, &room, task.number, &waits_for, now)
+            })
+            .await
         }
         Request::AddIdea {
             room,
@@ -186,22 +184,19 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
         } => {
             let title = text("title", &title, caps::TITLE, true)?;
             let body = text("body", &body, caps::BODY, false)?;
-            task_reply(
-                mutate(state, caller, room, move |conn, now| {
-                    store::create_task(
-                        conn,
-                        &room,
-                        &caller,
-                        project,
-                        Stage::Idea,
-                        &title,
-                        &body,
-                        now,
-                    )
-                    .map(Some)
-                })
-                .await,
-            )
+            mutate(state, caller, room, move |conn, now| {
+                store::create_task(
+                    conn,
+                    &room,
+                    &caller,
+                    project,
+                    Stage::Idea,
+                    &title,
+                    &body,
+                    now,
+                )
+            })
+            .await
         }
         Request::ProposeIdea {
             room,
@@ -213,12 +208,10 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             let title = text("title", &title, caps::TITLE, true)?;
             let body = text("body", &body, caps::BODY, false)?;
             let waits_for = waits(waits_for)?;
-            task_reply(
-                mutate(state, caller, room, move |conn, now| {
-                    store::propose_idea(conn, &room, task, &title, &body, &waits_for, now).map(Some)
-                })
-                .await,
-            )
+            mutate(state, caller, room, move |conn, now| {
+                store::propose_idea(conn, &room, task, &title, &body, &waits_for, now)
+            })
+            .await
         }
         Request::EditTask {
             room,
@@ -230,33 +223,31 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             let title = text("title", &title, caps::TITLE, true)?;
             let body = text("body", &body, caps::BODY, false)?;
             let plan = text("plan", &plan, caps::PLAN, false)?;
-            task_reply(
-                mutate(state, caller, room, move |conn, now| {
-                    store::edit_task(conn, &room, task, &title, &body, &plan, now).map(Some)
-                })
-                .await,
-            )
+            mutate(state, caller, room, move |conn, now| {
+                store::edit_task(conn, &room, task, &title, &body, &plan, now)
+            })
+            .await
         }
         Request::SetPriority {
             room,
             task,
             priority,
-        } => task_reply(
+        } => {
             mutate(state, caller, room, move |conn, now| {
-                store::set_priority(conn, &room, task, priority, now).map(Some)
+                store::set_priority(conn, &room, task, priority, now)
             })
-            .await,
-        ),
+            .await
+        }
         Request::Decide {
             room,
             task,
             decision,
-        } => task_reply(
+        } => {
             mutate(state, caller, room, move |conn, now| {
-                store::decide(conn, &room, task, decision, now).map(Some)
+                store::decide(conn, &room, task, decision, now)
             })
-            .await,
-        ),
+            .await
+        }
         Request::Claim {
             room,
             work,
@@ -265,38 +256,31 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             agent,
         } => {
             let agent = text("agent", &agent, caps::AGENT_LABEL, false)?;
-            let claimed = mutate(state, caller, room, move |conn, now| {
+            mutate_claim(state, caller, room, move |conn, now| {
                 store::claim(conn, &room, &caller, work, project, task, &agent, now)
             })
-            .await?;
-            Ok(Response::Claimed(claimed))
+            .await
         }
         Request::SubmitPlan { room, task, plan } => {
             let plan = text("plan", &plan, caps::PLAN, false)?;
-            task_reply(
-                mutate(state, caller, room, move |conn, now| {
-                    store::submit_plan(conn, &room, &caller, task, &plan, now).map(Some)
-                })
-                .await,
-            )
+            mutate(state, caller, room, move |conn, now| {
+                store::submit_plan(conn, &room, &caller, task, &plan, now)
+            })
+            .await
         }
         Request::Finish { room, task, note } => {
             let note = text("note", &note, caps::NOTE, false)?;
-            task_reply(
-                mutate(state, caller, room, move |conn, now| {
-                    store::finish(conn, &room, &caller, task, &note, now).map(Some)
-                })
-                .await,
-            )
+            mutate(state, caller, room, move |conn, now| {
+                store::finish(conn, &room, &caller, task, &note, now)
+            })
+            .await
         }
         Request::Unclaim { room, task, note } => {
             let note = text("note", &note, caps::NOTE, false)?;
-            task_reply(
-                mutate(state, caller, room, move |conn, now| {
-                    store::unclaim(conn, &room, &caller, task, &note, now).map(Some)
-                })
-                .await,
-            )
+            mutate(state, caller, room, move |conn, now| {
+                store::unclaim(conn, &room, &caller, task, &note, now)
+            })
+            .await
         }
         Request::AddNote {
             room,
@@ -310,13 +294,10 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
                     .filter(|label| !label.is_empty()),
                 None => None,
             };
-            task_reply(
-                mutate(state, caller, room, move |conn, now| {
-                    store::add_note(conn, &room, &caller, task, &note, agent.as_deref(), now)
-                        .map(Some)
-                })
-                .await,
-            )
+            mutate(state, caller, room, move |conn, now| {
+                store::add_note(conn, &room, &caller, task, &note, agent.as_deref(), now)
+            })
+            .await
         }
         Request::PublishSessions { room, sessions } => {
             publish_sessions(state, caller, room, sessions).await
@@ -343,12 +324,12 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             room,
             task,
             project,
-        } => task_reply(
+        } => {
             mutate(state, caller, room, move |conn, now| {
-                store::move_task(conn, &room, task, project, now).map(Some)
+                store::move_task(conn, &room, task, project, now)
             })
-            .await,
-        ),
+            .await
+        }
         Request::DeleteProject { room, project } => {
             delete_project(state, caller, room, project).await
         }
@@ -358,36 +339,55 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             waits_for,
         } => {
             let waits_for = waits(waits_for)?;
-            task_reply(
-                mutate(state, caller, room, move |conn, now| {
-                    store::set_waits(conn, &room, task, &waits_for, now).map(Some)
-                })
-                .await,
-            )
+            mutate(state, caller, room, move |conn, now| {
+                store::set_waits(conn, &room, task, &waits_for, now)
+            })
+            .await
         }
     }
 }
 
-fn task_reply(result: Result<Option<Task>, ApiError>) -> Reply {
-    match result? {
-        Some(task) => Ok(Response::Task(task)),
-        None => Err(ApiError::Internal),
-    }
+/// Runs a task mutation in one transaction as a member of `room`, publishes
+/// the resulting task to the room's members and replies with it.
+async fn mutate<F>(state: &State, caller: MemberId, room: RoomId, f: F) -> Reply
+where
+    F: FnOnce(&Connection, u64) -> R<Task> + Send + 'static,
+{
+    let st = state.clone();
+    let task = state
+        .store
+        .run(move |conn| {
+            let tx = conn.transaction()?;
+            store::require_member(&tx, &room, &caller)?;
+            let task = f(&tx, now_ms())?;
+            crate::require_task_fits(&task)?;
+            st.require_room_fits(&tx, &room)?;
+            let members = store::room_member_ids(&tx, &room)?;
+            tx.commit()?;
+            st.hub.publish(
+                &members,
+                &Event::Task {
+                    room,
+                    task: task.clone(),
+                },
+            );
+            Ok(task)
+        })
+        .await?;
+    Ok(Response::Task(task))
 }
 
-/// Runs a task mutation in one transaction as a member of `room`, then
-/// publishes the resulting task to the room's members.
-async fn mutate<F>(
+/// Claims a task in one transaction as a member of `room`. A claim that finds
+/// no free task changes nothing and publishes nothing; otherwise the task goes
+/// to the room's members.
+async fn mutate_claim(
     state: &State,
     caller: MemberId,
     room: RoomId,
-    f: F,
-) -> Result<Option<Task>, ApiError>
-where
-    F: FnOnce(&Connection, u64) -> R<Option<Task>> + Send + 'static,
-{
+    f: impl FnOnce(&Connection, u64) -> R<Option<Task>> + Send + 'static,
+) -> Reply {
     let st = state.clone();
-    state
+    let claimed = state
         .store
         .run(move |conn| {
             let tx = conn.transaction()?;
@@ -410,7 +410,8 @@ where
             }
             Ok(task)
         })
-        .await
+        .await?;
+    Ok(Response::Claimed(claimed))
 }
 
 /// Runs a project mutation in one transaction as a member of `room`, then
