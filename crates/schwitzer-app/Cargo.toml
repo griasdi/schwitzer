@@ -64,4 +64,4 @@ ico.workspace = true
 icns.workspace = true
 
 [build-dependencies]
-winresource = "0.1"
+winresource.workspace = true
