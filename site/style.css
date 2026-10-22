@@ -534,7 +534,9 @@ html { scrollbar-color: var(--line-strong) var(--ground); }
 }
 .stepper button:hover { background: var(--hover); color: var(--text); }
 .stepper button[aria-current="step"] { background: var(--selected); color: var(--ink); font-weight: 600; }
-.stage-caption { font: 500 15px/1.35 var(--font); min-width: 0; }
+.stage-caption { display: grid; min-width: 0; font: 500 15px/1.35 var(--font); }
+.stage-caption > p { grid-area: 1 / 1; align-self: center; }
+.stage-caption-sizer { visibility: hidden; }
 .stage-ctl { display: flex; align-items: center; gap: 12px; color: var(--muted); font: 500 12px/1.3 var(--font); }
 .stage-ctl .btn { height: 28px; font-size: 13px; }
 

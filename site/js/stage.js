@@ -174,6 +174,15 @@ const roomNode = grid.querySelector(".room-node");
 const roomLamp = roomNode.querySelector(".lamp");
 const roomLog = roomNode.querySelector(".room-log");
 const caption = document.getElementById("stage-caption");
+// The caption box is as tall as its longest text, so switching steps never moves the page.
+for (const text of new Set([
+  caption.textContent,
+  ...STEPS.slice(1).flatMap((s) => [s.caption, ...s.ops.filter((op) => op[0] === "wait").map((op) => op[2])]),
+])) {
+  const sizer = el("p", "stage-caption-sizer", text);
+  sizer.setAttribute("aria-hidden", "true");
+  caption.parentElement.append(sizer);
+}
 const stepper = document.getElementById("stepper");
 const toggle = document.getElementById("stage-toggle");
 const terms = { mara: document.querySelector("#term-mara .term-body"), teo: document.querySelector("#term-teo .term-body") };
