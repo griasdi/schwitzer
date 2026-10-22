@@ -177,6 +177,7 @@ pub enum Message {
     ChooseFolder(FolderFor),
     /// The folder dialog closed; `None` when cancelled.
     FolderChosen(FolderFor, Option<PathBuf>),
+    /// Unlinks repo `index` of the selected project.
     RemoveRepo(usize),
     /// Index into the selected project's repos.
     InstallPlugin(usize),
@@ -240,7 +241,6 @@ pub enum Message {
     ResumeFocus(bool),
 }
 
-/// Whether a server answers, with the reason when it does not.
 /// A Markdown text of the open task that a copy button puts on the clipboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskText {
@@ -251,6 +251,7 @@ pub enum TaskText {
     Note(usize),
 }
 
+/// Whether a server answers, with the reason when it does not.
 #[derive(Debug, Clone, Default)]
 struct ServerStatus {
     online: bool,
@@ -2002,7 +2003,7 @@ impl App {
     }
 
     /// Ends the first-start page: the projects folders and the entered WSL distros are saved
-    /// from now on, starting with the list on the page (`Some(vec![])` when it is empty).
+    /// from now on, starting with the list on the page.
     fn confirm_projects_dirs(&mut self) {
         self.first_start = false;
         self.page = Page::Main;
