@@ -34,6 +34,9 @@ pub struct Settings {
     pub auto_install_updates: bool,
     /// Whether the app restarts by itself once an update is installed.
     pub auto_restart_updates: bool,
+    /// Whether a system notification tells this member that one of their agents handed in a
+    /// plan or finished a build.
+    pub notify_hand_ins: bool,
     /// Per project (key `<room id hex>/<project id>`), the local repositories linked to it;
     /// omp sessions in them are shared with the project's room.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -65,6 +68,7 @@ impl Default for Settings {
             auto_update_plugins: true,
             auto_install_updates: true,
             auto_restart_updates: true,
+            notify_hand_ins: false,
             repos: BTreeMap::new(),
             chosen_projects: BTreeMap::new(),
             projects_dirs: None,
@@ -326,6 +330,7 @@ mod tests {
         assert!(settings.auto_update_plugins);
         assert!(settings.auto_install_updates);
         assert!(settings.auto_restart_updates);
+        assert!(!settings.notify_hand_ins);
     }
 
     #[test]
@@ -340,6 +345,7 @@ mod tests {
             auto_update_plugins: false,
             auto_install_updates: false,
             auto_restart_updates: false,
+            notify_hand_ins: true,
             repos: BTreeMap::from([(
                 format!("{}/1", "ab".repeat(32)),
                 vec![PathBuf::from("/code/x")],

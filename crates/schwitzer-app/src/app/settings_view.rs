@@ -579,6 +579,7 @@ fn agents(app: &App) -> Element<'_, Message> {
         .style(theme::text_muted)
         .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
         plugins(app),
+        notifications(app),
     ]
     .spacing(SP_3)
     .into()
@@ -623,6 +624,25 @@ fn plugins(app: &App) -> Element<'_, Message> {
         muted(
             "Rewrites an out-of-date plugin as soon as this app sees it. omp loads the new one \
              when it starts next."
+        ),
+    ]
+    .spacing(SP_2)
+    .into()
+}
+
+/// The switch for system notifications about this member's agents.
+fn notifications(app: &App) -> Element<'_, Message> {
+    column![
+        on_off(
+            "Notify when my agent hands in",
+            "notify-on",
+            "notify-off",
+            app.settings.notify_hand_ins,
+            Message::NotifyHandIns,
+        ),
+        muted(
+            "A system notification when one of your agents hands in a plan or finishes a \
+             build, in any of your rooms."
         ),
     ]
     .spacing(SP_2)

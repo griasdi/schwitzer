@@ -102,6 +102,39 @@ pub fn approved_between(old: &RoomState, new: &RoomState) -> Vec<u64> {
         .collect()
 }
 
+/// The decisions that wait for a human in `state`, over the projects in `projects` (those this
+/// member linked a repo to): proposals to accept and finished plans to approve.
+pub fn waiting_decisions(state: &RoomState, projects: &[u64]) -> usize {
+    state
+        .tasks
+        .iter()
+        .filter(|t| projects.contains(&t.project))
+        .filter(|t| t.stage == Stage::Proposed || approvable(t))
+        .count()
+}
+
+/// The tasks `member`'s agents handed in between `old` and `new`: a plan claim of `member` in
+/// `old` that is `Planned` in `new` (`Work::Plan`), a build claim of `member` in `old` that is
+/// `Done` in `new` (`Work::Build`). Ordered by task number.
+pub fn hand_ins<'a>(
+    old: &RoomState,
+    new: &'a RoomState,
+    member: &MemberId,
+) -> Vec<(Work, &'a Task)> {
+    new.tasks
+        .iter()
+        .filter_map(|t| {
+            let before = old.tasks.iter().find(|o| o.number == t.number)?;
+            let claim = before.claim.as_ref().filter(|c| c.member == *member)?;
+            match (claim.work, t.stage) {
+                (Work::Plan, Stage::Planned) => Some((Work::Plan, t)),
+                (Work::Build, Stage::Done) => Some((Work::Build, t)),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 /// Whether `task`, seen approved at `approved_ms` (local time), still waits for its build
 /// claim within [`HANDOFF_MS`]: the app shows Approve busy instead of Pick meanwhile.
 pub fn handing_off(task: &Task, approved_ms: Option<u64>, now_ms: u64) -> bool {
@@ -721,6 +754,52 @@ mod tests {
             task(4, Stage::Ready, None),
         ]);
         assert_eq!(approved_between(&old, &new), [1]);
+    }
+
+    #[test]
+    fn waiting_decisions_counts_proposals_and_plans_of_linked_projects() {
+        let mut planned = task(2, Stage::Planned, None);
+        planned.plan = "plan".to_owned();
+        let mut other = task(6, Stage::Proposed, None);
+        other.project = 2;
+        let state = room(vec![
+            task(1, Stage::Proposed, None),
+            planned,
+            task(3, Stage::Planned, None),
+            task(4, Stage::Accepted, None),
+            task(5, Stage::Idea, None),
+            other,
+        ]);
+        assert_eq!(waiting_decisions(&state, &[1]), 2);
+        assert_eq!(waiting_decisions(&state, &[]), 0);
+        assert_eq!(waiting_decisions(&state, &[1, 2]), 3);
+    }
+
+    #[test]
+    fn hand_ins_report_own_plan_and_build_claims_only() {
+        let token = ClaimToken([7; 16]);
+        let mut foreign = claim(Work::Plan, token);
+        foreign.member = member(2);
+        let old = room(vec![
+            task(1, Stage::Accepted, Some(claim(Work::Plan, token))),
+            task(2, Stage::Ready, Some(claim(Work::Build, token))),
+            task(3, Stage::Accepted, Some(foreign)),
+            task(4, Stage::Accepted, Some(claim(Work::Plan, token))),
+        ]);
+        let new = room(vec![
+            task(1, Stage::Planned, None),
+            task(2, Stage::Done, None),
+            task(3, Stage::Planned, None),
+            task(4, Stage::Accepted, None),
+        ]);
+        let numbers = |ins: Vec<(Work, &Task)>| -> Vec<(Work, u64)> {
+            ins.into_iter().map(|(w, t)| (w, t.number)).collect()
+        };
+        assert_eq!(
+            numbers(hand_ins(&old, &new, &member(1))),
+            [(Work::Plan, 1), (Work::Build, 2)]
+        );
+        assert!(hand_ins(&new, &new, &member(1)).is_empty());
     }
 
     #[test]

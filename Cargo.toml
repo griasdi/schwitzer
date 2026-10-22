@@ -56,5 +56,6 @@ flate2 = "1"
 close_fds = "0.3"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 resvg = { version = "0.45", default-features = false }
+notify-rust = "4.18"
 ico = "0.5"
 icns = "0.5"

@@ -42,6 +42,7 @@ use crate::mcp::{self, McpStatus};
 use crate::omp_plugin::{self, PluginState};
 use crate::sessions::{self, LocalSession};
 use crate::settings::{self, Settings};
+use crate::system_notify;
 use crate::theme::{self, SP_2};
 use crate::update::{self, UpdateState};
 use crate::wsl;
@@ -168,6 +169,7 @@ pub enum Message {
     UpdatePlugin(usize),
     UpdateAllPlugins,
     AutoUpdatePlugins(bool),
+    NotifyHandIns(bool),
 
     ProposalTitle(String),
     ProposalBody(text_editor::Action),
@@ -555,9 +557,19 @@ impl App {
     }
 
     pub fn title(&self) -> String {
-        match self.selected_state() {
-            Some(state) => format!("{} · Schwitzer", state.name),
-            None => "Schwitzer".to_owned(),
+        let Some(state) = self.selected_state() else {
+            return "Schwitzer".to_owned();
+        };
+        let linked: Vec<u64> = self
+            .settings
+            .room_project_repos(&state.id)
+            .into_iter()
+            .filter(|(_, repos)| !repos.is_empty())
+            .map(|(project, _)| project)
+            .collect();
+        match logic::waiting_decisions(state, &linked) {
+            0 => format!("{} · Schwitzer", state.name),
+            n => format!("({n}) {} · Schwitzer", state.name),
         }
     }
 
@@ -1181,6 +1193,11 @@ impl App {
                     self.auto_failed.clear();
                     self.check_plugins();
                 }
+                Task::none()
+            }
+            Message::NotifyHandIns(on) => {
+                self.settings.notify_hand_ins = on;
+                self.save_settings();
                 Task::none()
             }
 
@@ -2217,6 +2234,9 @@ impl App {
                 if self.settings.forget_deleted_projects(&id, &state.projects) {
                     self.save_settings();
                 }
+                let me = self.client.member();
+                let notify = self.settings.notify_hand_ins;
+                let mut shown_notices: Vec<Task<Message>> = Vec::new();
                 match self
                     .rooms
                     .iter_mut()
@@ -2227,6 +2247,18 @@ impl App {
                             let now = now_ms();
                             for n in logic::approved_between(old, &state) {
                                 self.handoffs.insert((id, n), now);
+                            }
+                            if notify {
+                                for (work, task) in logic::hand_ins(old, &state, &me) {
+                                    let summary = match work {
+                                        Work::Plan => format!("Plan handed in · {}", state.name),
+                                        Work::Build => format!("Build finished · {}", state.name),
+                                    };
+                                    let body = format!("#{} {}", task.number, task.title);
+                                    shown_notices.push(
+                                        Task::future(system_notify::show(summary, body)).discard(),
+                                    );
+                                }
                             }
                         }
                         entry.1 = Some(*state);
@@ -2239,7 +2271,7 @@ impl App {
                 if self.selected.is_none() {
                     self.select(Some(id));
                 }
-                self.publish()
+                Task::batch(shown_notices.into_iter().chain([self.publish()]))
             }
             ClientEvent::RoomRemoved(_) => {
                 // A removed room may take the announcement the update followed with it.

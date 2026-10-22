@@ -15,6 +15,7 @@ mod mcp;
 mod omp_plugin;
 mod sessions;
 mod settings;
+mod system_notify;
 mod theme;
 mod update;
 mod wsl;

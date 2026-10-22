@@ -1,5 +1,5 @@
 {
-  "lock": "39b7efb192c642cbfe2bfaa2b85fb2e2b2c1ca9520c70719a3a6ef01e5e6af94",
+  "lock": "eb6778c5560886a8120defb8654a5b50a4777269a690e2f94db6b5dd5797b525",
   "licenses": [
     {
       "id": "Apache-2.0",
@@ -1181,6 +1181,11 @@
           "source": "https://crates.io/crates/libm/0.2.16"
         },
         {
+          "name": "mac-notification-sys",
+          "version": "0.6.15",
+          "source": "https://crates.io/crates/mac-notification-sys/0.6.15"
+        },
+        {
           "name": "malloc_buf",
           "version": "0.0.6",
           "source": "https://crates.io/crates/malloc_buf/0.0.6"
@@ -1279,6 +1284,11 @@
           "name": "svg_fmt",
           "version": "0.4.5",
           "source": "https://crates.io/crates/svg_fmt/0.4.5"
+        },
+        {
+          "name": "tauri-winrt-notification",
+          "version": "0.8.1",
+          "source": "https://crates.io/crates/tauri-winrt-notification/0.8.1"
         },
         {
           "name": "weida",
@@ -1409,6 +1419,11 @@
           "name": "windows-threading",
           "version": "0.2.1",
           "source": "https://crates.io/crates/windows-threading/0.2.1"
+        },
+        {
+          "name": "windows-version",
+          "version": "0.1.7",
+          "source": "https://crates.io/crates/windows-version/0.1.7"
         },
         {
           "name": "windows_x86_64_gnu",
@@ -2799,6 +2814,18 @@
           "name": "nix",
           "version": "0.31.3",
           "source": "https://crates.io/crates/nix/0.31.3"
+        }
+      ]
+    },
+    {
+      "id": "MIT",
+      "name": "MIT License",
+      "text": "MIT License\n\nCopyright (c) 2017 Hendrik Sollich\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
+      "crates": [
+        {
+          "name": "notify-rust",
+          "version": "4.18.2",
+          "source": "https://crates.io/crates/notify-rust/4.18.2"
         }
       ]
     },
