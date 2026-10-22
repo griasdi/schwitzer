@@ -2,9 +2,7 @@
 
 use std::fmt;
 
-use iced::widget::{
-    Row, Space, column, container, markdown, pick_list, row, text, text_editor, text_input,
-};
+use iced::widget::{Row, Space, column, container, markdown, row, text, text_editor};
 use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task, caps};
 
@@ -138,13 +136,13 @@ pub fn new_task(app: &App, idea: bool, list_height: f32) -> Element<'_, Message>
         column![
             row![
                 lamp(if idea { Lamp::Idea } else { Lamp::New }),
-                text_input(title_hint, &app.forms.proposal_title)
-                    .id("proposal-title")
-                    .on_input(Message::ProposalTitle)
-                    .on_submit(Message::Propose)
-                    .padding(SP_2)
-                    .size(TS_14)
-                    .style(theme::input),
+                widgets::input(
+                    "proposal-title",
+                    title_hint,
+                    &app.forms.proposal_title,
+                    Message::ProposalTitle,
+                    Message::Propose,
+                ),
             ]
             .spacing(SP_2)
             .align_y(Alignment::Center),
@@ -254,13 +252,13 @@ fn details<'a>(app: &'a App, task: &'a Task, list_height: f32) -> Option<Element
         return Some(
             column![
                 fold_head("fold-proposal", true, line(), None),
-                text_input("Title", &draft.title)
-                    .id("task-title")
-                    .on_input(Message::EditTitle)
-                    .on_submit(Message::SaveTask)
-                    .padding(SP_2)
-                    .size(TS_14)
-                    .style(theme::input),
+                widgets::input(
+                    "task-title",
+                    "Title",
+                    &draft.title,
+                    Message::EditTitle,
+                    Message::SaveTask,
+                ),
                 text_editor(&draft.body)
                     .id("task-body")
                     .placeholder("Details")
@@ -547,15 +545,11 @@ fn project<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     row![
         heading("Project").width(Length::Fill),
         container(
-            pick_list(choices, selected, |choice| match choice {
+            widgets::picker(choices, selected, |choice| match choice {
                 ProjectChoice::Project { id, .. } => Message::MoveTask(id),
                 ProjectChoice::New => Message::Noop,
             })
-            .text_size(TS_14)
-            .font(SEMIBOLD)
-            .padding([SP_1, SP_2])
-            .style(theme::picker)
-            .menu_style(theme::picker_menu),
+            .font(SEMIBOLD),
         )
         .id("task-project"),
     ]
@@ -603,12 +597,8 @@ fn waits<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     if !choices.is_empty() {
         head = head.push(
             container(
-                pick_list(choices, None::<WaitChoice>, |c| Message::AddWait(c.number))
-                    .placeholder("Add task…")
-                    .text_size(TS_14)
-                    .padding([SP_1, SP_2])
-                    .style(theme::picker)
-                    .menu_style(theme::picker_menu),
+                widgets::picker(choices, None::<WaitChoice>, |c| Message::AddWait(c.number))
+                    .placeholder("Add task…"),
             )
             .id("task-waits-add"),
         );
@@ -690,13 +680,13 @@ fn notes<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, 
     let entered = !app.forms.note.trim().is_empty();
     col.push(
         row![
-            text_input("Add a note", &app.forms.note)
-                .id("note-input")
-                .on_input(Message::NoteInput)
-                .on_submit(Message::AddNote)
-                .padding(SP_2)
-                .size(TS_14)
-                .style(theme::input),
+            widgets::input(
+                "note-input",
+                "Add a note",
+                &app.forms.note,
+                Message::NoteInput,
+                Message::AddNote,
+            ),
             text_button(
                 "add-note",
                 "Add",

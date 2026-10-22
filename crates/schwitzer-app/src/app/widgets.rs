@@ -3,7 +3,7 @@
 //! iced 0.14 buttons carry no id, so a button that has to be addressed (by tests, by the
 //! headless control) sits in a container that has one.
 
-use iced::widget::{Space, button, container, row, svg, text, text_input, tooltip};
+use iced::widget::{Space, button, container, pick_list, row, svg, text, text_input, tooltip};
 use iced::{Alignment, Element, Length, Theme};
 use schwitzer_proto::{Priority, Stage, Task};
 
@@ -27,6 +27,22 @@ pub fn input<'a>(
         .padding(SP_2)
         .size(TS_14)
         .style(theme::input)
+}
+
+/// A pick list in the app's look. Callers add the placeholder and the font.
+pub fn picker<'a, T>(
+    choices: Vec<T>,
+    selected: Option<T>,
+    on_select: impl Fn(T) -> Message + 'a,
+) -> pick_list::PickList<'a, T, Vec<T>, T, Message>
+where
+    T: ToString + PartialEq + Clone + 'a,
+{
+    pick_list(choices, selected, on_select)
+        .text_size(TS_14)
+        .padding([SP_1, SP_2])
+        .style(theme::picker)
+        .menu_style(theme::picker_menu)
 }
 
 /// A button with a widget id. `on_press: None` shows it disabled. The button itself has no

@@ -2,16 +2,16 @@
 
 use std::fmt;
 
-use iced::widget::{Row, Space, container, pick_list, row, text};
+use iced::widget::{Row, Space, container, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::RoomId;
 
 use super::icons::{Icon, Tone, icon};
 use super::logic;
-use super::widgets::{bar_icon_button, bar_tip, dot, id_button, member_tag, muted, with_tip};
+use super::widgets::{self, bar_icon_button, bar_tip, dot, id_button, member_tag, muted, with_tip};
 use super::{App, Message};
 use crate::mcp::McpStatus;
-use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, TS_12, TS_14};
+use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, TS_12};
 
 /// A room as the switcher lists it.
 #[derive(Debug, Clone)]
@@ -77,12 +77,8 @@ pub fn header(app: &App) -> Element<'_, Message> {
         muted("No room").into()
     } else {
         container(
-            pick_list(choices, selected, |c: RoomChoice| Message::SelectRoom(c.id))
-                .text_size(TS_14)
-                .font(SEMIBOLD)
-                .padding([SP_1, SP_2])
-                .style(theme::picker)
-                .menu_style(theme::picker_menu),
+            widgets::picker(choices, selected, |c: RoomChoice| Message::SelectRoom(c.id))
+                .font(SEMIBOLD),
         )
         .id("room-picker")
         .into()
@@ -119,16 +115,12 @@ pub fn header(app: &App) -> Element<'_, Message> {
         let selected = app.selected_project().map(ProjectChoice::of);
         bar = bar.push(
             container(
-                pick_list(choices, selected, |choice| match choice {
+                widgets::picker(choices, selected, |choice| match choice {
                     ProjectChoice::Project { id, .. } => Message::SelectProject(id),
                     ProjectChoice::New => Message::OpenNewProject,
                 })
                 .placeholder("Project")
-                .text_size(TS_14)
-                .font(SEMIBOLD)
-                .padding([SP_1, SP_2])
-                .style(theme::picker)
-                .menu_style(theme::picker_menu),
+                .font(SEMIBOLD),
             )
             .id("project-picker"),
         );
