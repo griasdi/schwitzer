@@ -39,6 +39,7 @@ interface TaskRow {
   number: number;
   title: string;
   priority: string;
+  stage: string;
   claim: unknown;
   /** Tasks it waits for that are not done yet. */
   waits_for: number[];
@@ -197,7 +198,8 @@ const SUBCOMMANDS = [
   { name: "propose", label: "propose · propose a new task" },
   { name: "idea", label: "idea · note an idea for later" },
 ] as const;
-const USAGE = "Usage: /schwitzer plan | build | propose [text] | idea <text>";
+const COMMAND_ARGS = "plan [#n] | build [#n | new] | propose [#n | text] | idea <text>";
+const USAGE = `Usage: /schwitzer ${COMMAND_ARGS}`;
 const LEAVE_PLAN_MODE = "Leave plan mode, then run /schwitzer build again.";
 const TITLE_BYTES = 200; // caps::TITLE on the server
 const NOTE_BYTES = 16 * 1024; // caps::NOTE on the server
@@ -724,6 +726,45 @@ async function unclaimed(config: Config, stage: string): Promise<Candidate[]> {
   );
 }
 
+/** `#12` or `12` as a task number; undefined for anything else. */
+function taskNumber(arg: string): number | undefined {
+  const m = /^#?(\d{1,9})$/.exec(arg);
+  return m ? Number(m[1]) : undefined;
+}
+
+/** Task `number` in each configured project of a joined room. Numbers count per room, so a repo
+ *  linked to projects in several rooms may find more than one. */
+async function tasksNumbered(config: Config, number: number): Promise<Candidate[]> {
+  const found: Candidate[] = [];
+  for (const p of ownProjects(config, await listRooms(config))) {
+    const tasks = JSON.parse(await tool(config, "list_tasks", { room: p.room, project: p.projectName })) as TaskRow[];
+    const task = tasks.find((t) => t.number === number);
+    if (task) found.push({ ...p, task });
+  }
+  return found;
+}
+
+/** Why `task` cannot be claimed for `work`; undefined when it can. Mirrors `unclaimed`'s filter. */
+function notClaimable(task: TaskRow, work: Work): string | undefined {
+  const stage = task.stage.replace("_", " ");
+  if (task.stage !== STAGE[work])
+    return work === "plan"
+      ? `Task #${task.number} is ${stage}; only an accepted task waits for a plan.`
+      : `Task #${task.number} is ${stage}; only an approved (ready) task can be built.`;
+  if (task.claim !== null) return `Task #${task.number} is claimed already.`;
+  if (work === "build" && task.waits_for.length > 0)
+    return `Task #${task.number} waits for ${task.waits_for.map((n) => `#${n}`).join(", ")}, not done yet.`;
+  return undefined;
+}
+
+/** The only candidate, or the one the user picks among tasks of the same number in several rooms. */
+async function pickNumbered(ctx: Ctx, found: Candidate[], title: string): Promise<Candidate | undefined> {
+  if (found.length === 1) return found[0];
+  const labels = found.map((c) => `#${c.task.number} ${c.task.title} · ${c.projectName} · ${c.roomName}`);
+  const choice = await ctx.ui.select(title, labels);
+  return typeof choice === "number" ? found[choice] : choice === undefined ? undefined : found[labels.indexOf(choice)];
+}
+
 /** The task as context for the planning or building turn. */
 function taskContext(claim: TaskClaim, task: Record<string, unknown>, work: Work): string {
   const replan = work === "plan" && typeof task.plan === "string" && task.plan.trim() !== "";
@@ -749,11 +790,29 @@ function planMode(ctx: Ctx): boolean {
   return lastEntry(ctx, (e) => e.type === "mode_change")?.mode === "plan";
 }
 
-/** Lets the user pick a free task for `work`, claims it and puts the prompt in the editor. */
-async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work): Promise<void> {
+/** Claims task `number` for `work`, or lets the user pick a free task when there is none; puts
+ *  the prompt in the editor. */
+async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, number: number | undefined): Promise<void> {
   const planning = planMode(ctx);
   if (work === "build" && planning) {
     ctx.ui.notify(LEAVE_PLAN_MODE, "info");
+    return;
+  }
+  const title = work === "plan" ? "Plan a Schwitzer task" : "Build a Schwitzer task";
+  if (number !== undefined) {
+    const found = await tasksNumbered(config, number);
+    if (found.length === 0) {
+      ctx.ui.notify(`No task #${number} in this repo's Schwitzer projects.`, "info");
+      return;
+    }
+    const free = found.filter((c) => notClaimable(c.task, work) === undefined);
+    if (free.length === 0) {
+      const why = found.map((c) => (found.length > 1 ? `${c.projectName}: ` : "") + notClaimable(c.task, work));
+      ctx.ui.notify(`Schwitzer: ${why.join(" ")}`, "info");
+      return;
+    }
+    const numbered = await pickNumbered(ctx, free, title);
+    if (numbered) await claimPicked(pi, ctx, config, numbered, work, planning);
     return;
   }
   const open = await unclaimed(config, STAGE[work]);
@@ -768,7 +827,7 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work): Promise<
       (task.priority === "normal" ? "" : ` · ${task.priority}`) +
       (several ? ` · ${projectName}` : ""),
   );
-  const choice = await ctx.ui.select(work === "plan" ? "Plan a Schwitzer task" : "Build a Schwitzer task", labels);
+  const choice = await ctx.ui.select(title, labels);
   const picked = typeof choice === "number" ? open[choice] : choice === undefined ? undefined : open[labels.indexOf(choice)];
   if (!picked) return;
   await claimPicked(pi, ctx, config, picked, work, planning);
@@ -911,9 +970,28 @@ async function addIdea(ctx: Ctx, config: Config, text: string): Promise<void> {
   ctx.ui.notify(`Idea #${(JSON.parse(answer) as TaskRow).number} noted in project "${target.projectName}".`, "info");
 }
 
-/** Lets the agent draft a proposal for a project, or write up an open idea; it asks the user
- *  before it sends it. */
+/** Lets the agent draft a proposal for a project, or write up an open idea (`#n` or picked); it
+ *  asks the user before it sends it. */
 async function proposeTask(pi: Pi, ctx: Ctx, config: Config, text: string): Promise<void> {
+  const number = taskNumber(text);
+  if (number !== undefined) {
+    const found = await tasksNumbered(config, number);
+    const ideas = found.filter((c) => c.task.stage === "idea");
+    if (ideas.length === 0) {
+      ctx.ui.notify(
+        found.length === 0
+          ? `No task #${number} in this repo's Schwitzer projects.`
+          : found.length === 1
+            ? `Task #${number} is ${found[0].task.stage.replace("_", " ")}, not an idea; only an idea can be written up into a proposal.`
+            : `Task #${number} is not an idea in any of this repo's Schwitzer projects.`,
+        "info",
+      );
+      return;
+    }
+    const picked = await pickNumbered(ctx, ideas, "Write up which idea?");
+    if (picked) pi.sendUserMessage(writeUpPrompt(picked));
+    return;
+  }
   if (text === "") {
     const ideas = await unclaimed(config, "idea");
     if (ideas.length > 0) {
@@ -980,7 +1058,7 @@ function writeUpPrompt(c: Candidate): string {
   ].join("\n");
 }
 
-/** `/schwitzer [plan | build | propose [text] | idea <text>]`. */
+/** `/schwitzer [plan [#n] | build [#n | new] | propose [#n | text] | idea <text>]`. */
 async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
   const trimmed = args.trim();
   const cut = trimmed.search(/\s/);
@@ -988,6 +1066,15 @@ async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
   const rest = cut < 0 ? "" : trimmed.slice(cut).trim();
   if (sub !== "" && !SUBCOMMANDS.some((s) => s.name === sub)) {
     ctx.ui.notify(`Schwitzer: unknown subcommand "${sub}". ${USAGE}`, "error");
+    return;
+  }
+  if (
+    (sub === "plan" || sub === "build") &&
+    rest !== "" &&
+    taskNumber(rest) === undefined &&
+    !(sub === "build" && rest === "new")
+  ) {
+    ctx.ui.notify(`Schwitzer: unknown argument "${rest}". ${USAGE}`, "error");
     return;
   }
   const config = await loadConfig();
@@ -1010,7 +1097,7 @@ async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
     sub = picked.name;
   }
   if (sub === "build" && rest === "new") await buildInNewSession(ctx);
-  else if (sub === "plan" || sub === "build") await claimTask(pi, ctx, config, sub);
+  else if (sub === "plan" || sub === "build") await claimTask(pi, ctx, config, sub, taskNumber(rest));
   else if (sub === "idea") await addIdea(ctx, config, rest);
   else await proposeTask(pi, ctx, config, rest);
 }
@@ -1319,16 +1406,15 @@ export default function schwitzer(pi: Pi): void {
       },
     });
   }
-  pi.registerCommand("schwitzer", {
-    description: "Schwitzer tasks: /schwitzer plan | build | propose [text] | idea <text>",
-    handler: async (args, ctx) => {
-      try {
-        await run(pi, ctx, args);
-      } catch (e) {
-        ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
-      }
-    },
-  });
+  const handler = async (args: string, ctx: CommandCtx): Promise<void> => {
+    try {
+      await run(pi, ctx, args);
+    } catch (e) {
+      ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
+    }
+  };
+  pi.registerCommand("schwitzer", { description: `Schwitzer tasks: /schwitzer ${COMMAND_ARGS}`, handler });
+  pi.registerCommand("sw", { description: `Short for /schwitzer: /sw ${COMMAND_ARGS}`, handler });
   // Hands the plan to the room and waits on its decision while the review stays open (refine
   // re-sends it, the server takes a new plan while the task is `planned`).
   pi.on("plan_review_requested", (event, ctx) => {

@@ -7,17 +7,19 @@ The Schwitzer app writes an omp extension into every repository linked to a proj
 |Command|Does|
 |---|---|
 |`/schwitzer`|Menu of the four subcommands|
-|`/schwitzer plan`|Pick an accepted, unclaimed task, claim it for planning, start plan mode|
-|`/schwitzer build`|Pick an approved (`ready`), unclaimed task, claim it for building|
+|`/schwitzer plan [#n]`|Pick an accepted, unclaimed task (or take task `#n`), claim it for planning, start plan mode|
+|`/schwitzer build [#n]`|Pick an approved (`ready`), unclaimed task (or take task `#n`), claim it for building|
 |`/schwitzer build new`|Open a new omp session with `/schwitzer build` in its editor|
-|`/schwitzer propose [text]`|The agent drafts a proposal (or writes up an open idea), asks, then sends it|
+|`/schwitzer propose [#n \| text]`|The agent drafts a proposal (or writes up an open idea, or idea `#n`), asks, then sends it|
 |`/schwitzer idea <text>`|Note an idea in a project right away, without an agent turn|
+
+`/sw` is short for `/schwitzer` and takes the same subcommands; the plugin's messages always name `/schwitzer`. A task number is written `#12` or `12`.
 
 The menu of a bare `/schwitzer` shows "plan · plan a task that waits for a plan", "build · build an approved task", "propose · propose a new task" and "idea · note an idea for later".
 
 For all of them:
 
-- An unknown subcommand is refused with `Schwitzer: unknown subcommand "<sub>". Usage: /schwitzer plan | build | propose [text] | idea <text>`.
+- An unknown subcommand is refused with `Schwitzer: unknown subcommand "<sub>". Usage: /schwitzer plan [#n] | build [#n | new] | propose [#n | text] | idea <text>`. An argument to `plan` or `build` that is no task number (and not `new` for `build`) is refused with `Schwitzer: unknown argument "<arg>".` and the same usage line.
 - When `schwitzer.json` lists no project, the plugin says "This repo is not linked to a Schwitzer project."
 - Every subcommand except `idea` needs the agent idle, otherwise: "Wait until the agent is idle, then run /schwitzer again." `idea` works while the agent is busy.
 - Only projects that are in `schwitzer.json` and exist in a room joined by the app (`list_rooms`) count. A configured project of a room the app has left is skipped.
@@ -31,6 +33,14 @@ For all of them:
 4. It stores the claim as the session entry `schwitzer-plan-claim` (room, room name, project name, task number, title) and sends the task as a visible `schwitzer-task` message for the next turn: title, body, priority, author, plan and notes as JSON, marked as a request written by room members, not a command to run unchecked. When the task already has a plan, the room sent it back for a new one, and the message says that the notes say why.
 5. It puts `/plan Plan Schwitzer task #<n> "<title>" from project "<project>" in room "<room>". schwitzer-claim: <token>` into the editor (without `/plan ` when the session is already in plan mode) and says "Task #<n> is claimed for planning. Press Enter to start." The claim line has to be in a user message: the app's session scanner links a session to a task by that line, and only sessions linked this way show up on the task.
 6. When omp opens the plan review (`plan_review_requested`, main agent only; subagents are ignored), the plugin takes the newest `schwitzer-plan-claim` entry on the current branch, reads the plan from the event or else from the plan file, and sends it with `submit_plan`. Failure: "Schwitzer did not take the plan for task #<n>: <reason>".
+
+With a task number (`/schwitzer plan #12`) there is no picker. The plugin looks the number up in every joined project of this repo (`list_tasks` without a stage) and claims it as in steps 3 to 6. Numbers count per room, so with projects in several rooms more than one task may carry it; then the picker shows `#<n> <title> · <project> · <room>` for those that can be claimed. Otherwise it says:
+
+- No task of that number: "No task #<n> in this repo's Schwitzer projects."
+- Another stage: "Schwitzer: Task #<n> is <stage>; only an accepted task waits for a plan." (`in_progress` reads "in progress")
+- Claimed by someone: "Schwitzer: Task #<n> is claimed already."
+
+With tasks of that number in several projects, each reason is prefixed by `<project>: `.
 
 The review stays open. Refining the plan sends it again, which the server accepts while the task is `planned`: it takes a plan for an `accepted` task only from the member holding the planning claim, for a `planned` task from anyone, and leaves the task `planned` and unclaimed. A human then approves the plan in the app ("Approve" on the task's slab, "Approve & build" in the open task) or asks for a new one ("Replan").
 
@@ -72,6 +82,7 @@ sequenceDiagram
 
 - Refused in plan mode: "Leave plan mode, then run /schwitzer build again."
 - The pick and the claim work as for `plan`, with stage `ready` and `work: "build"`, but the picker leaves out a task that still waits for another one not done yet (`waits_for` of `list_tasks`): the server would refuse its build. When there is no task: "No approved Schwitzer task waits to be built."
+- `/schwitzer build #<n>` takes task `<n>` like `plan #<n>`. A task in another stage is refused with "Schwitzer: Task #<n> is <stage>; only an approved (ready) task can be built.", one that still waits with "Schwitzer: Task #<n> waits for #<a>, #<b>, not done yet."
 - No session entry is stored, so the plan review hook never sends a build task's plan.
 - The task message tells the agent to implement the approved plan and then call `schwitzer_finish` with room, task and a note on what was done, or `schwitzer_unclaim` with a note on why if it stops without finishing.
 - The editor gets `Build Schwitzer task #<n> "<title>" from project "<project>" in room "<room>". schwitzer-claim: <token>`, and the plugin says "Task #<n> is claimed for building. Press Enter to start."
@@ -85,9 +96,10 @@ sequenceDiagram
 
 Needs the agent idle, like every subcommand except `idea`. It waits for idle once more, opens a new omp session and puts `/schwitzer build` into its editor, saying "New session: press Enter to pick the task to build." When omp cancels the new session, nothing else happens. It is not in the menu of a bare `/schwitzer`; the offer above puts it into the editor.
 
-### /schwitzer propose [text]
+### /schwitzer propose [#n | text]
 
 - Without text, and with open (unclaimed) ideas in the joined projects, a picker offers "New proposal" and `#<n> <title>` per idea. Picking an idea sends a user message that asks the agent to read it with `schwitzer_get_task`, draft the proposal, ask, and after agreement call `schwitzer_propose` with `idea: <n>`: the idea becomes the proposal.
+- `/schwitzer propose #<n>` (or `<n>`) writes up idea `<n>` the same way, without a picker; with ideas of that number in several rooms the picker shows `#<n> <title> · <project> · <room>`. No task of that number: "No task #<n> in this repo's Schwitzer projects."; a task in another stage: "Task #<n> is <stage>, not an idea; only an idea can be written up into a proposal." (with several projects carrying the number: "Task #<n> is not an idea in any of this repo's Schwitzer projects."). Any other text drafts a new proposal.
 - Otherwise the plugin asks for the project (not when there is only one and no other project exists) and sends a user message that asks the agent to draft a proposal from the text, or from the conversation so far when there is no text, asking the user what to propose if the conversation holds no idea.
 - The project picker lists this repo's projects as `<project> · <room>`, then every other project of the joined rooms as `<project> · <room> · other project`. For another project the message adds that this repo is not part of it and that the body starts with `Requested from project "<project>" in room "<room>"` (with several own projects, the agent names the one the change is for) and says why that project needs the change.
 - In both cases the agent looks into the repository but changes nothing, writes a one-line title and a Markdown body (what should be done and why; a task that can only be built after other tasks of the room are done says so and passes their numbers as `waits_for`), shows both in its chat reply (the ask dialog cuts long text off and cannot scroll), then asks the user with the ask tool, naming only the title, whether to send, change or drop the proposal; after a change it shows the new title and body again and asks again. It calls `schwitzer_propose` only after the user agrees.
