@@ -13,13 +13,54 @@ static ARMED: AtomicBool = AtomicBool::new(false);
 static LOST: AtomicBool = AtomicBool::new(false);
 
 /// Whether a wgpu device took the probe and will report its loss.
-pub fn armed() -> bool {
+fn armed() -> bool {
     ARMED.load(Ordering::Acquire)
 }
 
 /// Whether the window's graphics device was lost.
-pub fn lost() -> bool {
+fn lost() -> bool {
     LOST.load(Ordering::Acquire)
+}
+
+/// How long after start the view carries the device-lost probe when no wgpu device took it
+/// (tiny-skia).
+const PROBE_MS: u64 = 5_000;
+/// A process restarts for a lost graphics device only after running this long: at most one
+/// such restart per 10 s if the new device is lost again right away.
+const RESTART_UPTIME_MS: u64 = 10_000;
+
+/// When to show the probe and when to restart for a lost device, by this process's age.
+#[derive(Debug)]
+pub struct Watch {
+    started_ms: u64,
+    /// Whether the restart is under way.
+    restarting: bool,
+}
+
+impl Watch {
+    /// A watch for a process that started at `now_ms`.
+    pub fn new(now_ms: u64) -> Self {
+        Self {
+            started_ms: now_ms,
+            restarting: false,
+        }
+    }
+
+    /// Whether the view carries the probe at `now_ms`: no device took it yet and the process
+    /// is young.
+    pub fn probe_wanted(&self, now_ms: u64) -> bool {
+        !armed() && now_ms < self.started_ms + PROBE_MS
+    }
+
+    /// Whether the app restarts now: the device was lost, no restart is under way and the
+    /// process has run long enough. `true` at most once; the caller starts the restart.
+    pub fn restart_due(&mut self, now_ms: u64) -> bool {
+        if lost() && !self.restarting && now_ms >= self.started_ms + RESTART_UPTIME_MS {
+            self.restarting = true;
+            return true;
+        }
+        false
+    }
 }
 
 /// An invisible 1×1 shader at the window's top left corner, which draws nothing: the first

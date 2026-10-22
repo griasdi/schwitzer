@@ -54,12 +54,6 @@ const PICK_AGENT: &str = "omp";
 const NOTICE_MS: u64 = 5_000;
 /// How often the omp plugins in the shared repos are compared with this app's.
 const PLUGIN_CHECK_MS: u64 = 5_000;
-/// How long after start the view carries the device-lost probe when no wgpu device took it
-/// (tiny-skia).
-const GPU_PROBE_MS: u64 = 5_000;
-/// A process restarts for a lost graphics device only after running this long: at most one
-/// such restart per 10 s if the new device is lost again right away.
-const GPU_RESTART_UPTIME_MS: u64 = 10_000;
 
 /// Everything the user and the outside world can make the app do.
 #[derive(Debug, Clone)]
@@ -485,10 +479,8 @@ pub struct App {
     /// What to focus or reveal after a restart for an update, once it shows.
     resume_focus: Option<PendingFocus>,
     now_ms: u64,
-    /// When this process started.
-    started_ms: u64,
-    /// Whether the restart for a lost graphics device is under way.
-    gpu_restarting: bool,
+    /// The graphics device-lost rule: when the probe is shown and when to restart.
+    gpu: gpu::Watch,
 }
 
 impl App {
@@ -597,8 +589,7 @@ impl App {
             releases: HashMap::new(),
             resume_focus: None,
             now_ms: now,
-            started_ms: now,
-            gpu_restarting: false,
+            gpu: gpu::Watch::new(now),
         };
         app.read_project_dirs();
         if update::ENABLED
@@ -703,7 +694,7 @@ impl App {
         // The probe is a layer above the window, so dropping it changes neither the layout nor
         // the widget tree below it (no widget loses its state).
         let mut root = stack![window].width(Length::Fill).height(Length::Fill);
-        if !gpu::armed() && self.now_ms < self.started_ms + GPU_PROBE_MS {
+        if self.gpu.probe_wanted(self.now_ms) {
             root = root.push(gpu::probe());
         }
         root.into()
@@ -908,11 +899,7 @@ impl App {
                     self.read_project_dirs();
                 }
                 let focus = self.pending_focus();
-                if gpu::lost()
-                    && !self.gpu_restarting
-                    && self.now_ms >= self.started_ms + GPU_RESTART_UPTIME_MS
-                {
-                    self.gpu_restarting = true;
+                if self.gpu.restart_due(self.now_ms) {
                     tracing::warn!("restarting: the graphics device was lost");
                     return Task::batch([focus, restart_task()]);
                 }
