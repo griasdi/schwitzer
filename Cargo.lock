@@ -4060,7 +4060,6 @@ dependencies = [
  "blake3",
  "close_fds",
  "directories",
- "flate2",
  "futures",
  "hex",
  "iced",
@@ -4075,18 +4074,17 @@ dependencies = [
  "rmcp",
  "schwitzer-client",
  "schwitzer-proto",
+ "schwitzer-release",
  "semver",
  "serde",
  "serde_json",
  "sha2",
- "tar",
  "tempfile",
  "tokio",
  "tokio-util",
  "toml",
  "tracing",
  "tracing-subscriber",
- "ureq",
  "winresource",
  "zip",
 ]
@@ -4119,24 +4117,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "schwitzer-release"
+version = "0.2.1"
+dependencies = [
+ "flate2",
+ "hex",
+ "semver",
+ "serde",
+ "sha2",
+ "tar",
+ "tempfile",
+ "ureq",
+]
+
+[[package]]
 name = "schwitzer-server"
 version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
- "flate2",
- "hex",
  "rusqlite",
  "schwitzer-proto",
+ "schwitzer-release",
  "semver",
  "serde",
  "serde_json",
- "sha2",
- "tar",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "ureq",
  "weida",
 ]
 

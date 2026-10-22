@@ -6,17 +6,18 @@ use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
 use schwitzer_proto::Event;
+use schwitzer_release::Asset;
 use serde::Deserialize;
 use tokio::sync::oneshot;
 use tokio::time::MissedTickBehavior;
 
-use crate::State;
-use crate::update::{self, AutoUpdate};
+use crate::update::AutoUpdate;
+use crate::{State, USER_AGENT};
 
-/// GitHub API URL of the schwitzer release list.
-pub const RELEASES_URL: &str = "https://api.github.com/repos/griasdi/schwitzer/releases";
 const CHECK_INTERVAL: Duration = Duration::from_secs(120);
 const MAX_JSON: u64 = 4 << 20;
+/// How long a version whose install failed is left alone before it is tried again.
+const RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
 /// Releases asked for per check; the newest stable one is among them.
 const PER_PAGE: &str = "10";
 
@@ -28,14 +29,14 @@ struct Listed {
     #[serde(default)]
     prerelease: bool,
     #[serde(default)]
-    assets: Vec<update::Asset>,
+    assets: Vec<Asset>,
 }
 
 /// A stable release on GitHub and its downloads.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Stable {
     pub version: semver::Version,
-    pub assets: Vec<update::Asset>,
+    pub assets: Vec<Asset>,
 }
 
 /// The newest stable release in GitHub's release list `json`. Tags that are no version are
@@ -47,40 +48,31 @@ pub(crate) fn newest_stable(json: &[u8]) -> Result<Option<Stable>, String> {
         .into_iter()
         .filter(|r| !r.draft && !r.prerelease)
         .filter_map(|r| {
-            let tag = r.tag_name.as_str();
-            let version = tag
-                .strip_prefix('v')
-                .unwrap_or(tag)
-                .parse::<semver::Version>()
-                .ok()?;
+            let version = schwitzer_release::parse_tag(&r.tag_name)?;
             Some(Stable {
                 version,
                 assets: r.assets,
             })
         })
-        .filter(|s| s.version.pre.is_empty())
+        .filter(|s| schwitzer_release::is_stable(&s.version))
         .max_by(|a, b| a.version.cmp(&b.version)))
 }
 
+/// This build's version.
+fn current() -> semver::Version {
+    env!("CARGO_PKG_VERSION")
+        .parse()
+        .expect("CARGO_PKG_VERSION is semver")
+}
+
 fn fetch(url: &str) -> Result<Option<Stable>, String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(30)))
-        .user_agent(format!("schwitzer-server/{}", env!("CARGO_PKG_VERSION")))
-        .build()
-        .into();
-    let mut response = agent
-        .get(url)
-        .query("per_page", PER_PAGE)
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .call()
-        .map_err(|e| format!("GitHub: {e}"))?;
-    let json = response
-        .body_mut()
-        .with_config()
-        .limit(MAX_JSON)
-        .read_to_vec()
-        .map_err(|e| format!("GitHub: {e}"))?;
+    let json = schwitzer_release::api_get(
+        USER_AGENT,
+        Duration::from_secs(30),
+        url,
+        &[("per_page", PER_PAGE)],
+        MAX_JSON,
+    )?;
     newest_stable(&json)
 }
 
@@ -89,7 +81,7 @@ fn fetch(url: &str) -> Result<Option<Stable>, String> {
 ///
 /// With `update`, a release newer than this server is installed over the program file and its
 /// version sent on the channel; the task then idles until the server shuts down. A failed install
-/// of a version is retried after [`update::RETRY_AFTER`].
+/// of a version is retried after [`RETRY_AFTER`].
 pub(crate) async fn watch(
     state: State,
     url: String,
@@ -138,15 +130,16 @@ pub(crate) async fn watch(
         };
         let retry_later = failed
             .as_ref()
-            .is_some_and(|(v, at)| *v == version && at.elapsed() < update::RETRY_AFTER);
-        if version <= update::current() || retry_later {
+            .is_some_and(|(v, at)| *v == version && at.elapsed() < RETRY_AFTER);
+        if version <= current() || retry_later {
             continue;
         }
         tracing::info!("installing server release {version}");
         let updater = updater.clone();
-        let installed = tokio::task::spawn_blocking(move || updater.install(&stable))
-            .await
-            .unwrap_or_else(|e| Err(format!("update worker stopped: {e}")));
+        let installed =
+            tokio::task::spawn_blocking(move || updater.install(&stable.version, &stable.assets))
+                .await
+                .unwrap_or_else(|e| Err(format!("update worker stopped: {e}")));
         match installed {
             Ok(()) => {
                 if let Some((_, tx)) = update.take() {

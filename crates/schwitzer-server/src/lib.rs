@@ -29,8 +29,10 @@ mod update;
 use hub::{Hub, Sessions};
 use store::{R, Store};
 
-pub use release::RELEASES_URL;
 pub use update::AutoUpdate;
+
+/// The server's user agent towards GitHub.
+const USER_AGENT: &str = concat!("schwitzer-server/", env!("CARGO_PKG_VERSION"));
 
 /// How the server is run.
 #[derive(Debug, Clone)]

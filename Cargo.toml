@@ -22,6 +22,7 @@ debug = false
 schwitzer-proto = { path = "crates/schwitzer-proto" }
 schwitzer-server = { path = "crates/schwitzer-server" }
 schwitzer-client = { path = "crates/schwitzer-client" }
+schwitzer-release = { path = "crates/schwitzer-release" }
 # Exact: weida is alpha and its wire protocol may break within 0.x.
 weida = { git = "https://github.com/tuco86/weida.git", rev = "8e29fcb681fd36cd4ae668c991391a0f3d098519" }
 iced = { version = "0.14", features = ["advanced", "tokio", "markdown", "svg", "selector"] }

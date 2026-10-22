@@ -6,15 +6,17 @@
 //! Only builds with the `self-update` feature use it ([`ENABLED`]); the module is compiled and
 //! tested in every build.
 
-use std::ffi::{OsStr, OsString};
-use std::io::{self, Read};
+use std::ffi::OsString;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 use futures::channel::oneshot;
+#[cfg(unix)]
+use schwitzer_release::replace;
+use schwitzer_release::{ApiError, Asset, PLATFORM, RELEASES_URL, sibling};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
 /// Whether this build updates itself: only the release builds from CI (`--features self-update`).
 pub const ENABLED: bool = cfg!(feature = "self-update");
@@ -22,23 +24,11 @@ pub const ENABLED: bool = cfg!(feature = "self-update");
 pub const CHECK_INTERVAL: Duration = Duration::from_secs(300);
 /// The version of this build.
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
-const RELEASES_URL: &str = "https://api.github.com/repos/griasdi/schwitzer/releases";
-/// Replaces RELEASES_URL, for a local test feed.
+/// Replaces [`RELEASES_URL`], for a local test feed.
 const URL_ENV: &str = "SCHWITZER_UPDATE_URL";
 const MAX_RELEASE_JSON: u64 = 1 << 20;
 const MAX_ARCHIVE: u64 = 256 << 20;
-/// The release asset suffix of this build's platform; `None` where no release is built.
-pub const PLATFORM: Option<&str> = if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-    Some("linux-x86_64")
-} else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
-    Some("linux-aarch64")
-} else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-    Some("macos-aarch64")
-} else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-    Some("windows-x86_64")
-} else {
-    None
-};
+const USER_AGENT: &str = concat!("schwitzer/", env!("CARGO_PKG_VERSION"));
 const ARCHIVE_EXT: &str = if cfg!(windows) { "zip" } else { "tar.gz" };
 /// The file the updater takes out of the archive, at any depth.
 const BINARY: &str = if cfg!(windows) {
@@ -139,14 +129,6 @@ struct GitHubRelease {
     assets: Vec<Asset>,
 }
 
-#[derive(Deserialize)]
-struct Asset {
-    name: String,
-    browser_download_url: String,
-    size: u64,
-    digest: Option<String>,
-}
-
 /// The name of the release asset of `version` for `platform` and `package`.
 pub fn asset_name(version: &semver::Version, platform: &str, package: Package) -> String {
     let ext = match package {
@@ -170,12 +152,9 @@ pub fn parse_release(
         return Ok(None);
     }
     let tag = latest.tag_name.as_str();
-    let version: semver::Version = tag
-        .strip_prefix('v')
-        .unwrap_or(tag)
-        .parse()
-        .map_err(|_| format!("release tag {tag} is not a version"))?;
-    if !version.pre.is_empty() || version <= *current {
+    let version = schwitzer_release::parse_tag(tag)
+        .ok_or_else(|| format!("release tag {tag} is not a version"))?;
+    if !schwitzer_release::is_stable(&version) || version <= *current {
         return Ok(None);
     }
     let name = asset_name(&version, platform, package);
@@ -184,18 +163,12 @@ pub fn parse_release(
         .into_iter()
         .find(|a| a.name == name)
         .ok_or_else(|| format!("release {tag} has no {name}"))?;
-    let mut sha256 = [0; 32];
-    asset
-        .digest
-        .as_deref()
-        .and_then(|d| d.strip_prefix("sha256:"))
-        .and_then(|h| hex::decode_to_slice(h, &mut sha256).ok())
-        .ok_or_else(|| format!("{name} has no sha256 digest"))?;
+    let download = asset.download_info()?;
     Ok(Some(Release {
         version,
-        url: asset.browser_download_url,
-        size: asset.size,
-        sha256,
+        url: download.url,
+        size: download.size,
+        sha256: download.sha256,
     }))
 }
 
@@ -214,8 +187,13 @@ pub async fn check(
 /// Downloads `release`, verifies it and puts it in place of `program`.
 pub async fn install(release: Release, program: Program) -> Result<semver::Version, String> {
     blocking(move || {
-        let bytes = download(&release)?;
-        verify(&bytes, &release)?;
+        let bytes = schwitzer_release::download(
+            USER_AGENT,
+            Duration::from_secs(600),
+            &release.url,
+            MAX_ARCHIVE,
+        )?;
+        schwitzer_release::verify(&bytes, release.size, &release.sha256)?;
         let binary = match program.package {
             Package::AppImage => bytes,
             Package::Archive => extract(&bytes)?,
@@ -263,14 +241,6 @@ fn blocking<T: Send + 'static>(
     }
 }
 
-fn agent(timeout: Duration) -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(timeout))
-        .user_agent(format!("schwitzer/{CURRENT}"))
-        .build()
-        .into()
-}
-
 fn fetch_release(
     version: Option<semver::Version>,
     platform: &str,
@@ -281,84 +251,37 @@ fn fetch_release(
         Some(v) => format!("{base}/tags/v{v}"),
         None => format!("{base}/latest"),
     };
-    let response = agent(Duration::from_secs(30))
-        .get(&url)
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .call();
-    let mut response = match response {
-        Ok(response) => response,
-        Err(ureq::Error::StatusCode(404)) => {
-            return Err(match version {
-                Some(v) => format!("release v{v} is not on GitHub"),
-                None => "no release is on GitHub".to_owned(),
-            });
-        }
-        Err(e) => return Err(format!("GitHub: {e}")),
-    };
-    let json = response
-        .body_mut()
-        .with_config()
-        .limit(MAX_RELEASE_JSON)
-        .read_to_vec()
-        .map_err(|e| format!("GitHub: {e}"))?;
+    let json = schwitzer_release::api_get(
+        USER_AGENT,
+        Duration::from_secs(30),
+        &url,
+        &[],
+        MAX_RELEASE_JSON,
+    )
+    .map_err(|e| match e {
+        ApiError::NotFound(_) => match version {
+            Some(v) => format!("release v{v} is not on GitHub"),
+            None => "no release is on GitHub".to_owned(),
+        },
+        ApiError::Failed(message) => message,
+    })?;
     parse_release(&json, &current(), platform, package)
-}
-
-fn download(release: &Release) -> Result<Vec<u8>, String> {
-    let mut response = agent(Duration::from_secs(600))
-        .get(&release.url)
-        .call()
-        .map_err(|e| format!("download failed: {e}"))?;
-    response
-        .body_mut()
-        .with_config()
-        .limit(MAX_ARCHIVE)
-        .read_to_vec()
-        .map_err(|e| format!("download failed: {e}"))
-}
-
-fn verify(bytes: &[u8], release: &Release) -> Result<(), String> {
-    let got = bytes.len() as u64;
-    if got != release.size {
-        return Err(format!(
-            "download is {got} bytes, expected {}",
-            release.size
-        ));
-    }
-    if Sha256::digest(bytes).as_slice() != release.sha256 {
-        return Err("download does not match its sha256 digest".into());
-    }
-    Ok(())
-}
-
-fn unreadable(e: impl std::fmt::Display) -> String {
-    format!("unreadable archive: {e}")
 }
 
 /// The program file in the release archive `bytes`.
 #[cfg(unix)]
 fn extract(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
-    for entry in archive.entries().map_err(unreadable)? {
-        let entry = entry.map_err(unreadable)?;
-        let is_binary = entry.header().entry_type().is_file()
-            && entry.path().map_err(unreadable)?.file_name() == Some(OsStr::new(BINARY));
-        if is_binary {
-            let mut binary = Vec::new();
-            entry
-                .take(MAX_ARCHIVE)
-                .read_to_end(&mut binary)
-                .map_err(unreadable)?;
-            return Ok(binary);
-        }
-    }
-    Err(format!("the archive holds no {BINARY}"))
+    schwitzer_release::extract_tar_gz(bytes, BINARY, MAX_ARCHIVE)
 }
 
 /// The program file in the release archive `bytes`.
 #[cfg(windows)]
 fn extract(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    use std::ffi::OsStr;
+    use std::io::Read;
+
+    use schwitzer_release::unreadable;
+
     let mut archive = zip::ZipArchive::new(io::Cursor::new(bytes)).map_err(unreadable)?;
     for index in 0..archive.len() {
         let file = archive.by_index(index).map_err(unreadable)?;
@@ -375,29 +298,6 @@ fn extract(bytes: &[u8]) -> Result<Vec<u8>, String> {
         }
     }
     Err(format!("the archive holds no {BINARY}"))
-}
-
-/// `exe` with `suffix` appended to its file name.
-fn sibling(exe: &Path, suffix: &str) -> PathBuf {
-    let mut path = exe.as_os_str().to_owned();
-    path.push(suffix);
-    PathBuf::from(path)
-}
-
-/// Writes `binary` beside `exe` and swaps it in. A rename gives a new file, so the running
-/// process keeps the old one, and macOS checks the new file's signature afresh.
-#[cfg(unix)]
-fn replace(exe: &Path, binary: &[u8]) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let new = sibling(exe, ".new");
-    let swapped = std::fs::write(&new, binary)
-        .and_then(|()| std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755)))
-        .and_then(|()| std::fs::rename(&new, exe));
-    if swapped.is_err() {
-        let _ = std::fs::remove_file(&new);
-    }
-    swapped
 }
 
 /// Writes `binary` beside `exe` and swaps it in. A running program may be renamed but not
@@ -580,46 +480,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn verify_checks_size_and_digest() {
-        let bytes = b"archive";
-        let release = Release {
-            version: v("1.0.0"),
-            url: String::new(),
-            size: bytes.len() as u64,
-            sha256: Sha256::digest(bytes).into(),
-        };
-        assert_eq!(verify(bytes, &release), Ok(()));
-        assert!(verify(b"archivx", &release).is_err());
-        assert!(verify(b"archive!", &release).is_err());
-    }
-
-    #[cfg(unix)]
-    fn tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
-        let gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        let mut builder = tar::Builder::new(gz);
-        for (path, data) in files {
-            let mut header = tar::Header::new_gnu();
-            header.set_size(data.len() as u64);
-            header.set_mode(0o755);
-            header.set_cksum();
-            builder.append_data(&mut header, path, *data).unwrap();
-        }
-        builder.into_inner().unwrap().finish().unwrap()
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn extract_finds_the_program_at_any_depth() {
-        let archive = tar_gz(&[
-            ("README", b"read me"),
-            ("Schwitzer.app/Contents/MacOS/schwitzer", b"program"),
-        ]);
-        assert_eq!(extract(&archive), Ok(b"program".to_vec()));
-        let error = extract(&tar_gz(&[("README", b"read me")])).unwrap_err();
-        assert!(error.contains(BINARY), "{error}");
-    }
-
     #[cfg(windows)]
     #[test]
     fn extract_finds_the_program_in_the_zip() {
@@ -635,6 +495,7 @@ mod tests {
         assert_eq!(extract(&archive), Ok(b"program".to_vec()));
     }
 
+    #[cfg(windows)]
     #[test]
     fn replace_swaps_the_program() {
         let dir = tempfile::tempdir().unwrap();
@@ -643,13 +504,6 @@ mod tests {
         replace(&exe, b"new").unwrap();
         assert_eq!(std::fs::read(&exe).unwrap(), b"new");
         assert!(!sibling(&exe, ".new").exists());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&exe).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o755);
-        }
-        #[cfg(windows)]
         assert_eq!(std::fs::read(sibling(&exe, ".old")).unwrap(), b"old");
     }
 }

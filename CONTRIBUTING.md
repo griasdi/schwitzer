@@ -42,6 +42,7 @@ For UI changes, also click through the affected flow in Daylight and Night (DESI
 | `crates/schwitzer-proto` | Wire types, ids, framing, room keys |
 | `crates/schwitzer-server` | Binary `schwitzer-server`: rooms in SQLite, RPC and event stream over weida (QUIC) |
 | `crates/schwitzer-client` | Client library: connection, reconnect, room state |
+| `crates/schwitzer-release` | GitHub release lookup, download, checksum check and file swap shared by the app's and the server's updater |
 | `crates/schwitzer-app` | Binary `schwitzer`: iced desktop app, MCP server for the omp plugin, omp session sharing |
 
 Conventions:

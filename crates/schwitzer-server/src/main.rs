@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use schwitzer_server::{AutoUpdate, Options, RELEASES_URL, Stop, start};
+use schwitzer_release::RELEASES_URL;
+use schwitzer_server::{AutoUpdate, Options, Stop, start};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]

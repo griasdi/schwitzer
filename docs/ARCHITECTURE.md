@@ -50,6 +50,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `RoomState`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (7), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
 |`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `release.rs`, `update.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
 |`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
+|`schwitzer-release`|what both updaters share: `RELEASES_URL`, `PLATFORM`, `Asset`/`Download` with the `sha256:` digest parsing, `parse_tag`/`is_stable`, `api_get` and `download` (bounded HTTPS), `verify`, `extract_tar_gz`, `sibling`, `replace` (Unix swap)|iced, SQLite, weida, tokio|
 |`schwitzer-app`|the `schwitzer` binary: UI, MCP server, plugin writer, session scanner, updater, WSL support|SQLite, weida: it talks to room servers only through `schwitzer-client`; the self-update speaks HTTPS to GitHub itself (§10)|
 
 ```mermaid
@@ -58,11 +59,13 @@ flowchart LR
   classDef client fill:#5aa6f5,stroke:#2f7fd6,color:#0d1310
   classDef proto fill:#3b2a6b,stroke:#e6dcff,color:#e6dcff
   classDef server fill:#16494a,stroke:#cdf5f2,color:#cdf5f2
+  classDef release fill:#6b4a1f,stroke:#ffe3b8,color:#ffe3b8
   classDef ext fill:#222d26,stroke:#627568,color:#e4eee6
   app["schwitzer-app<br/>(schwitzer binary)"]:::app
   client["schwitzer-client"]:::client
   proto["schwitzer-proto"]:::proto
   server["schwitzer-server"]:::server
+  release["schwitzer-release"]:::release
   weida["weida"]:::ext
   iced["iced 0.14"]:::ext
   mcp["rmcp + axum"]:::ext
@@ -70,12 +73,14 @@ flowchart LR
   impeccable["iced_impeccable"]:::ext
   app --> client
   app --> proto
+  app --> release
   app --> iced
   app --> mcp
   app -.->|feature remote| impeccable
   client --> proto
   client --> weida
   server --> proto
+  server --> release
   server --> weida
   server --> sqlite
   client -.->|flow test, dev only| server
@@ -235,7 +240,7 @@ Enums are stored as explicit integers (`stage_to_int`: `Proposed 0`, `Accepted 1
 
 **Release check** (`release.rs`): every 120 s it reads the release list from `--releases-url`, picks the newest stable release (no draft, no prerelease, valid semver) and sends `Event::Release` to everyone when it changes, whatever the server's own version.
 
-**Auto update** (`update.rs`, `--auto-update`, Linux x86_64 and aarch64): at startup `AutoUpdate::prepare` notes the program file and checks that its folder is writable, else the server refuses to start. When the release check sees a stable release newer than the server's own version, it takes `schwitzer-server-<version>-linux-<arch>.tar.gz` from that release's assets, downloads it (at most 64 MiB), checks size and the sha256 digest GitHub lists, swaps the binary in beside the program file and reports the version; `Server::stopped` returns `Stop::Updated`, `main` shuts the endpoints down and execs the new program with the same arguments (same PID, so systemd sees no exit). A failed install of a version is retried after 30 minutes.
+**Auto update** (`update.rs`, `--auto-update`, Linux x86_64 and aarch64): at startup `AutoUpdate::prepare` notes the program file and checks that its folder is writable, else the server refuses to start. When the release check sees a stable release newer than the server's own version, it takes `schwitzer-server-<version>-linux-<arch>.tar.gz` from that release's assets, downloads it (at most 64 MiB), checks size and the sha256 digest GitHub lists, swaps the binary in beside the program file (download, check and swap are `schwitzer-release`, shared with the app's updater) and reports the version; `Server::stopped` returns `Stop::Updated`, `main` shuts the endpoints down and execs the new program with the same arguments (same PID, so systemd sees no exit). A failed install of a version is retried after 30 minutes.
 
 **What the server holds.** Tasks, plans, notes, room and project names and member names, in plain text in its database; TLS protects them only on the wire. Shared sessions (title, model, token counts, linked task) only in memory. It never sees code, the MCP token, or sessions outside the repos a member linked.
 
@@ -515,6 +520,7 @@ flowchart TB
 ```
 
 - Asset names: `schwitzer-<version>-<platform>.<tar.gz|zip|AppImage>` for `linux-x86_64`, `linux-aarch64`, `macos-aarch64`, `windows-x86_64`, and a per-user Windows installer `…-setup.exe` (Inno Setup, `deploy/schwitzer.iss`).
+- The release API request, the download, the size and sha256 check, the `.tar.gz` member and the Unix swap are `schwitzer-release`, used by the app's `update.rs` and the server's `update.rs`; the app adds the zip, the AppImage, the Windows swap and the restart, the server the release list and the exec.
 - On Windows the running executable cannot be overwritten, so the swap goes through `.old` and `.new` files.
 - `SCHWITZER_UPDATE_URL` (app) and `--releases-url` (server) point at a local test feed. Builds without the feature `self-update` never update themselves.
 
@@ -555,15 +561,15 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |Shared session fields|`sessions.rs` (`FileState::apply`), `logic::shared_sessions`, `SessionInfo` in `model.rs` (a wire change), `app/live.rs`|
 |New setting|`settings.rs`, the topic's page in `app/settings_view/` and, if it needs one, its status line on the overview (`settings_view/mod.rs`)|
 |Colours, sizes, widget looks|DESIGN.md first, then `theme.rs`|
-|Self-update|`update.rs`, `app/updates.rs` (`App::check_update`, `App::install_update`), `app/logic.rs` (`next_check`), `app/resume.rs`, `deploy/package.sh` (asset names)|
+|Self-update|`update.rs`, `schwitzer-release/src/lib.rs` (lookup, download, check, swap shared with the server), `app/updates.rs` (`App::check_update`, `App::install_update`), `app/logic.rs` (`next_check`), `app/resume.rs`, `deploy/package.sh` (asset names)|
 |Graphics device lost|`app/gpu.rs` (a 1×1 shader layer that registers wgpu's device-lost callback), the `Message::Tick` arm in `app/mod.rs` (restart through `App::restart`)|
-|Server deployment|`deploy/deploy.sh`, `deploy/schwitzer-server.service`, `crates/schwitzer-server/src/update.rs`|
+|Server deployment|`deploy/deploy.sh`, `deploy/schwitzer-server.service`, `crates/schwitzer-server/src/update.rs`, `schwitzer-release/src/lib.rs`|
 
 ### Repository map
 
 |Path|Holds|
 |---|---|
-|`crates/`|the four crates|
+|`crates/`|the five crates|
 |`crates/schwitzer-app/omp-plugin/`|the omp plugin source and its README|
 |`crates/schwitzer-app/assets/`|fonts, Lucide icons, the logo, license data|
 |`crates/schwitzer-app/examples/`|`licenses.rs` (rewrites `third-party.json`), `icons.rs`|
