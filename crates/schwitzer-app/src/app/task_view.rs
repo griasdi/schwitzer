@@ -437,7 +437,7 @@ fn plan<'a>(
     editable: bool,
     list_height: f32,
 ) -> Element<'a, Message> {
-    let ready = !task.plan.trim().is_empty();
+    let ready = task.has_plan();
     let mut head = row![
         icon(
             Icon::Plan,

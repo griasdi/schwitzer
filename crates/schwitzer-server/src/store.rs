@@ -922,7 +922,7 @@ fn next_stage(decision: Decision, task: &Task) -> Result<Stage, ApiError> {
             Ok(Stage::Rejected)
         }
         (Decision::Approve, Stage::Planned) => {
-            if task.plan.trim().is_empty() {
+            if !task.has_plan() {
                 Err(ApiError::Invalid("plan is empty".into()))
             } else {
                 Ok(Stage::Ready)
@@ -932,7 +932,7 @@ fn next_stage(decision: Decision, task: &Task) -> Result<Stage, ApiError> {
         (Decision::Replan, Stage::Ready) if task.claim.is_none() => Ok(Stage::Accepted),
         (Decision::Reopen, Stage::Rejected | Stage::Done) => Ok(Stage::Proposed),
         (Decision::MarkPlanned, Stage::Accepted) => {
-            if task.plan.trim().is_empty() {
+            if !task.has_plan() {
                 Err(ApiError::Invalid("plan is empty".into()))
             } else {
                 Ok(Stage::Planned)

@@ -42,7 +42,7 @@ impl Group {
             (Stage::Proposed, _) => Self::Proposals,
             (Stage::Accepted | Stage::Ready, Some(_)) => Self::InProgress,
             (Stage::Ready, None) => Self::Pickable,
-            (Stage::Planned, None) if !task.plan.trim().is_empty() => Self::Pickable,
+            (Stage::Planned, None) if task.has_plan() => Self::Pickable,
             (Stage::Accepted | Stage::Planned, _) => Self::Planning,
             (Stage::Done | Stage::Rejected, _) => Self::Closed,
         }
@@ -80,7 +80,7 @@ pub fn pickable(task: &Task) -> bool {
 
 /// Whether the task has a finished plan that waits for a human's approval.
 pub fn approvable(task: &Task) -> bool {
-    task.stage == Stage::Planned && !task.plan.trim().is_empty()
+    task.stage == Stage::Planned && task.has_plan()
 }
 
 /// How long after an approval the list waits for the omp session that wrote the plan to
@@ -257,9 +257,9 @@ pub fn legal_decisions(task: &Task) -> Vec<Decision> {
     match task.stage {
         Stage::Idea => vec![Decision::Reject],
         Stage::Proposed => vec![Decision::Accept, Decision::Reject],
-        Stage::Accepted if task.plan.trim().is_empty() => vec![Decision::Reject],
+        Stage::Accepted if !task.has_plan() => vec![Decision::Reject],
         Stage::Accepted => vec![Decision::MarkPlanned, Decision::Reject],
-        Stage::Planned if task.plan.trim().is_empty() => vec![Decision::Replan, Decision::Reject],
+        Stage::Planned if !task.has_plan() => vec![Decision::Replan, Decision::Reject],
         Stage::Planned => vec![Decision::Approve, Decision::Replan, Decision::Reject],
         Stage::Ready if task.claim.is_none() => vec![Decision::Replan, Decision::MarkDone],
         Stage::Ready => vec![Decision::MarkDone],
@@ -285,7 +285,7 @@ pub fn stage_label(task: &Task) -> &'static str {
         (Stage::Proposed, _) => "Proposed",
         (Stage::Accepted, Some(Work::Plan)) => "Being planned",
         (Stage::Accepted, _) => "Accepted",
-        (Stage::Planned, _) if task.plan.trim().is_empty() => "Planned",
+        (Stage::Planned, _) if !task.has_plan() => "Planned",
         (Stage::Planned, _) => "Plan ready",
         (Stage::Ready, Some(_)) => "Building",
         (Stage::Ready, None) => "Approved",

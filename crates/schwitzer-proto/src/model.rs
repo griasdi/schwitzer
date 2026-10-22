@@ -105,6 +105,11 @@ impl Task {
             })
             .collect()
     }
+
+    /// Whether the plan has any text besides whitespace.
+    pub fn has_plan(&self) -> bool {
+        !self.plan.trim().is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
