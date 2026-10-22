@@ -252,7 +252,7 @@ fn name_key(s: &str) -> String {
         .collect()
 }
 
-/// The decisions the server accepts for `task` right now (plan §3, `Decide`), in button order.
+/// The decisions the server accepts for `task` right now (`store::next_stage` of the server), in button order.
 pub fn legal_decisions(task: &Task) -> Vec<Decision> {
     match task.stage {
         Stage::Idea => vec![Decision::Reject],
