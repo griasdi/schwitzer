@@ -19,6 +19,7 @@ pub use self::resume::Resumed;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use iced::keyboard::{self, Key, key::Named};
@@ -352,6 +353,8 @@ pub struct Placement {
 
 pub struct App {
     client: Client,
+    /// Client events from start-up until the subscription takes them.
+    client_backlog: bridge::Backlog,
     data_dir: PathBuf,
     settings: Settings,
     /// The settings as last written (or read), to save only real changes.
@@ -446,6 +449,9 @@ impl App {
         }
         let client = Client::start(&settings::identity_dir(&data_dir), settings.name.clone())
             .unwrap_or_else(|e| fatal(&format!("cannot start the network client: {e}")));
+        // Subscribed before the first `add_room`: the server loop starts emitting at once,
+        // long before iced runs the subscription.
+        let client_backlog: bridge::Backlog = Arc::new(Mutex::new(Some(client.subscribe())));
 
         let mut notices = Vec::new();
         if let Some(problem) = problem {
@@ -493,6 +499,7 @@ impl App {
             settings,
             theme: theme::for_mode(iced::theme::Mode::Dark),
             client,
+            client_backlog,
             data_dir,
             rooms,
             servers: HashMap::new(),
@@ -560,7 +567,13 @@ impl App {
 
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![
-            Subscription::run_with(ClientKey(self.client.clone()), bridge::client_events),
+            Subscription::run_with(
+                ClientKey {
+                    client: self.client.clone(),
+                    backlog: Arc::clone(&self.client_backlog),
+                },
+                bridge::client_events,
+            ),
             iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick),
             iced::system::theme_changes().map(Message::SystemMode),
             keyboard::listen().filter_map(key_message),

@@ -2,18 +2,28 @@
 //! whose results feed back into `Message`.
 
 use std::hash::{Hash, Hasher};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use futures::{SinkExt, Stream};
 use iced::Task;
-use schwitzer_client::Client;
+use schwitzer_client::{Client, ClientEvent};
+use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::app::Message;
 
+/// The client's events from start-up until the subscription first runs: subscribed
+/// before any room is added, taken by [`client_events`], so nothing the client emits
+/// while the window comes up is lost.
+pub type Backlog = Arc<Mutex<Option<broadcast::Receiver<ClientEvent>>>>;
+
 /// Identity of the client subscription: one per process, so the constant hash keeps the
 /// stream alive across view rebuilds.
 #[derive(Clone)]
-pub struct ClientKey(pub Client);
+pub struct ClientKey {
+    pub client: Client,
+    pub backlog: Backlog,
+}
 
 impl Hash for ClientKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -21,12 +31,17 @@ impl Hash for ClientKey {
     }
 }
 
-/// Stream of client events as application messages. A receiver that lags asks for a
-/// [`Message::Resync`].
+/// Stream of client events as application messages, starting with the events buffered
+/// since start-up. A receiver that lags asks for a [`Message::Resync`].
 pub fn client_events(key: &ClientKey) -> impl Stream<Item = Message> + use<> {
-    let client = key.0.clone();
+    let client = key.client.clone();
+    let backlog = key
+        .backlog
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
     iced::stream::channel(256, async move |mut out| {
-        let mut rx = client.subscribe();
+        let mut rx = backlog.unwrap_or_else(|| client.subscribe());
         loop {
             let message = match rx.recv().await {
                 Ok(event) => Message::Client(event),
