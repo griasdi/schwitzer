@@ -197,7 +197,7 @@ impl Client {
     fn gone_message(&self, room: RoomId) -> String {
         let label = lock(&self.0.rooms)
             .get(&room)
-            .map_or_else(|| room.to_hex()[..8].to_owned(), |e| e.state.name.clone());
+            .map_or_else(|| room.short(), |e| e.state.name.clone());
         format!("room {label} no longer exists")
     }
 

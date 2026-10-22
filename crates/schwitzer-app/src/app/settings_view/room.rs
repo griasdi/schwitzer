@@ -5,13 +5,13 @@ use iced::widget::{column, container, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::RoomId;
 
-use super::{confirm_row, room_label, view};
+use super::{confirm_row, view};
 use crate::app::icons::{Icon, Tone, icon};
 use crate::app::pages::{frame, section};
 use crate::app::widgets::{
     dot, heading, icon_text_button, id_button, input, muted, path_text, text_button,
 };
-use crate::app::{App, Confirm, Message};
+use crate::app::{App, Confirm, Message, logic};
 use crate::theme::{self, SP_2, SP_4, TS_14};
 
 /// The selected room; the overview when no room is selected.
@@ -20,7 +20,7 @@ pub fn room_page(app: &App) -> Element<'_, Message> {
         return view(app);
     };
     let state = app.selected_state();
-    let name = room_label(key, state);
+    let name = logic::room_label(RoomId::of(&key.token), state);
     let address = format!("{}:{}", key.server.host, key.server.port);
     let online = app.servers.get(&key.server).map(|s| s.online);
 
@@ -179,7 +179,7 @@ pub fn rooms_page(app: &App) -> Element<'_, Message> {
         let mut line = row![
             dot(online),
             column![
-                text(room_label(key, state.as_ref())).size(TS_14),
+                text(logic::room_label(id, state.as_ref())).size(TS_14),
                 muted(format!("{}:{}", key.server.host, key.server.port)),
             ]
             .spacing(2)
@@ -192,7 +192,7 @@ pub fn rooms_page(app: &App) -> Element<'_, Message> {
         }
         line = line.push(icon(Icon::ChevronRight, 16.0, Tone::Muted));
         list = list.push(id_button(
-            format!("room-{}", &id.to_hex()[..8]),
+            format!("room-{}", id.short()),
             container(line).padding([SP_2, SP_2]),
             Some(Message::OpenRoom(id)),
             theme::button_row,

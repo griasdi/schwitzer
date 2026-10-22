@@ -10,7 +10,7 @@ use iced::widget::button;
 use iced::widget::text::Wrapping;
 use iced::widget::{Space, column, container, row, text, toggler};
 use iced::{Alignment, Element, Length, Theme};
-use schwitzer_proto::{RoomId, RoomKey, RoomState};
+use schwitzer_proto::{RoomId, RoomKey};
 
 pub use machine::{folders_page, omp_page, updates_page};
 pub use project::project_page;
@@ -21,7 +21,7 @@ use super::pages::{frame, section};
 use super::widgets::{
     heading, icon_button, icon_text_button, id_button, input, muted, path_text, text_button,
 };
-use super::{App, FolderFor, Message, Page, folder_label, tilde};
+use super::{App, FolderFor, Message, Page, folder_label, logic, tilde};
 use crate::mcp::McpStatus;
 use crate::omp_plugin::PluginState;
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
@@ -181,7 +181,7 @@ fn room_slab<'a>(app: &'a App, key: &'a RoomKey) -> Element<'a, Message> {
     nav_slab(
         "settings-room",
         Icon::Users,
-        room_label(key, state),
+        logic::room_label(RoomId::of(&key.token), state),
         status,
         Message::OpenPage(Page::RoomSettings),
     )
@@ -486,14 +486,6 @@ fn confirm_row<'a>(
     .spacing(SP_2)
     .align_y(Alignment::Center)
     .into()
-}
-
-/// The room's name, or `Room <first 8 hex digits>` before its server sent it.
-fn room_label(key: &RoomKey, state: Option<&RoomState>) -> String {
-    state.map_or_else(
-        || format!("Room {}", &RoomId::of(&key.token).to_hex()[..8]),
-        |state| state.name.clone(),
-    )
 }
 
 /// "1 repo", "2 repos".

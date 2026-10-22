@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use schwitzer_proto::{
-    ClaimToken, Decision, Member, MemberId, RoomState, SessionInfo, Stage, Task, Work, caps,
+    ClaimToken, Decision, Member, MemberId, RoomId, RoomState, SessionInfo, Stage, Task, Work, caps,
 };
 use serde::{Deserialize, Serialize};
 
@@ -306,7 +306,12 @@ pub fn member_name(members: &[Member], id: &MemberId) -> String {
     members
         .iter()
         .find(|m| &m.id == id)
-        .map_or_else(|| id.to_hex()[..8].to_owned(), |m| m.name.clone())
+        .map_or_else(|| id.short(), |m| m.name.clone())
+}
+
+/// The room's name, or `Room <short id>` before its server sent it.
+pub fn room_label(id: RoomId, state: Option<&RoomState>) -> String {
+    state.map_or_else(|| format!("Room {}", id.short()), |s| s.name.clone())
 }
 
 /// Which of the six tag colours a member wears: fixed per member, the same for everyone.

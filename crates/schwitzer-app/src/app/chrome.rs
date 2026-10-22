@@ -174,7 +174,7 @@ pub fn members(app: &App) -> Option<Element<'_, Message>> {
         .map(|m| {
             // The server sends an empty name for a member that never said hello.
             let name = if m.name.is_empty() {
-                m.id.to_hex()[..8].to_owned()
+                m.id.short()
             } else {
                 m.name.clone()
             };

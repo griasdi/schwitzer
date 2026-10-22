@@ -1699,9 +1699,7 @@ impl App {
                 let id = RoomId::of(&key.token);
                 RoomChoice {
                     id,
-                    name: state
-                        .as_ref()
-                        .map_or_else(|| format!("Room {}", &id.to_hex()[..8]), |s| s.name.clone()),
+                    name: logic::room_label(id, state.as_ref()),
                 }
             })
             .collect()

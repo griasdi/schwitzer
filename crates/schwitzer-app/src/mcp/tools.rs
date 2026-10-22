@@ -18,6 +18,8 @@ use schwitzer_proto::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::app::logic;
+
 /// Longest a tool call runs; a stuck server fails the call, not the agent.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -204,16 +206,11 @@ struct RoomRef {
 }
 
 impl RoomRef {
-    /// The first eight hex digits of the id.
-    fn id8(&self) -> String {
-        id8(&self.id)
-    }
-
-    /// `name (id8)`, or the short id while the room is not loaded.
+    /// `name (short id)`, or the short id while the room is not loaded.
     fn label(&self) -> String {
         match &self.state {
-            Some(state) => format!("{} ({})", state.name, self.id8()),
-            None => self.id8(),
+            Some(state) => format!("{} ({})", state.name, self.id.short()),
+            None => self.id.short(),
         }
     }
 
@@ -222,7 +219,7 @@ impl RoomRef {
         self.state.as_ref().ok_or_else(|| {
             format!(
                 "Room {} is not loaded yet; try again in a moment.",
-                self.id8()
+                self.id.short()
             )
         })
     }
@@ -241,10 +238,6 @@ impl RoomRef {
     fn tasks(&self) -> &[Task] {
         self.state.as_ref().map_or(&[], |s| &s.tasks)
     }
-}
-
-fn id8(id: &RoomId) -> String {
-    id.to_hex()[..8].to_owned()
 }
 
 /// The room a call means: `arg` is a room name (case-insensitive, exact) or a room id prefix of
@@ -356,14 +349,6 @@ fn target_project<'a>(projects: &'a [Project], arg: Option<&str>) -> Result<&'a 
     }
 }
 
-/// The name of member `id`, or its short id when the member is not known.
-fn member_name(members: &[Member], id: &MemberId) -> String {
-    members
-        .iter()
-        .find(|m| &m.id == id)
-        .map_or_else(|| id.to_hex()[..8].to_owned(), |m| m.name.clone())
-}
-
 /// The stage a task shows: an approved task being built reads `in_progress`.
 fn stage_of(task: &Task) -> StageArg {
     match task.stage {
@@ -396,7 +381,7 @@ fn work_name(work: Work) -> &'static str {
 /// A claim without its token: the token belongs to the claiming agent alone.
 fn claim_json(claim: &Claim, members: &[Member]) -> Value {
     json!({
-        "member": member_name(members, &claim.member),
+        "member": logic::member_name(members, &claim.member),
         "agent": claim.agent,
         "work": work_name(claim.work),
         "since_ms": claim.since_ms,
@@ -423,7 +408,7 @@ fn task_json(task: &Task, members: &[Member], projects: &[Project], tasks: &[Tas
         .iter()
         .map(|n| {
             json!({
-                "author": member_name(members, &n.author),
+                "author": logic::member_name(members, &n.author),
                 "agent": n.agent,
                 "text": n.text,
                 "at_ms": n.at_ms,
@@ -438,7 +423,7 @@ fn task_json(task: &Task, members: &[Member], projects: &[Project], tasks: &[Tas
         "plan": task.plan,
         "stage": stage_of(task).name(),
         "priority": priority_name(task.priority),
-        "author": member_name(members, &task.author),
+        "author": logic::member_name(members, &task.author),
         "created_ms": task.created_ms,
         "updated_ms": task.updated_ms,
         "claim": task.claim.as_ref().map(|c| claim_json(c, members)),
@@ -451,7 +436,7 @@ fn task_json(task: &Task, members: &[Member], projects: &[Project], tasks: &[Tas
 fn room_row(room: &RoomRef, me: MemberId) -> Value {
     let Some(state) = &room.state else {
         return json!({
-            "room": room.id8(),
+            "room": room.id.short(),
             "name": null,
             "online": false,
             "members": [],
@@ -461,7 +446,7 @@ fn room_row(room: &RoomRef, me: MemberId) -> Value {
     };
     let count = |stage: StageArg| state.tasks.iter().filter(|t| stage_of(t) == stage).count();
     json!({
-        "room": room.id8(),
+        "room": room.id.short(),
         "name": state.name,
         "online": state.members.iter().any(|m| m.id == me && m.online),
         "members": state.members.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
