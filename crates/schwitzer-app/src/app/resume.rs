@@ -73,7 +73,8 @@ pub struct Resume {
     #[serde(default)]
     pub placement: Option<Placement>,
     /// On an unconfirmed first-start page: its projects folders and entered WSL distros.
-    /// `None` otherwise and in a file from a version without it.
+    /// `None` otherwise. A file from an older version has the page that lay under the
+    /// first-start page, and this field alone says it was showing.
     #[serde(default)]
     pub first_start: Option<(Vec<PathBuf>, Vec<String>)>,
 }
@@ -257,7 +258,7 @@ impl App {
                 .and_then(|id| FOCUSABLE.into_iter().find(|f| *id == Id::new(f)))
                 .map(str::to_owned),
             placement,
-            first_start: self.first_start.then(|| {
+            first_start: (self.page == Page::FirstStart).then(|| {
                 (
                     self.settings.projects_dirs.clone().unwrap_or_default(),
                     self.settings.wsl_distros.clone(),
@@ -269,7 +270,14 @@ impl App {
     /// Opens what `r` describes. The room and the open task or draft come back only when the
     /// room is still joined.
     pub(super) fn apply_resume(&mut self, r: Resume) {
-        self.page = r.page;
+        // The first-start page stays until the member confirms it; the file's page is not
+        // applied over it, and a file's `FirstStart` is no page of a process that is past it.
+        if self.page != Page::FirstStart {
+            self.page = match r.page {
+                Page::FirstStart => Page::Main,
+                page => page,
+            };
+        }
         self.sessions_open = r.sessions_open;
         self.members_open = r.members_open;
         self.collapsed = r.collapsed.into_iter().collect();
@@ -287,7 +295,7 @@ impl App {
             self.plan_draft = r.plan_draft.as_ref().map(Text::content);
             self.sync_project_form();
         }
-        if self.first_start
+        if self.page == Page::FirstStart
             && let Some((dirs, distros)) = r.first_start
         {
             self.settings.projects_dirs = Some(dirs);

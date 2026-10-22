@@ -261,7 +261,7 @@ stateDiagram-v2
 
 ## 8. Desktop app
 
-The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` holds the state, `Message` is everything that can happen, `update` changes the state and returns tasks, `view` draws it. Pages are `Page::{Main, Settings, Licenses}` and the settings topics `Page::{RoomSettings, ProjectSettings, Rooms, Omp, ProjectsFolders, Updates}`; `Page::parent` is where Back goes (a topic to Settings, Settings to Main), and `App::open_page` opens a page at its top. A danger action on a settings page waits in `App::confirm` until the member confirms it in place. A task opens in place in the list (`Expanded::{Task, New}`).
+The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` holds the state, `Message` is everything that can happen, `update` changes the state and returns tasks, `view` draws it. Pages are `Page::{Main, FirstStart, Settings, Licenses}` and the settings topics `Page::{RoomSettings, ProjectSettings, Rooms, Omp, ProjectsFolders, Updates}`; `Page::parent` is where Back goes (a topic to Settings, Settings to Main), and `App::open_page` opens a page at its top. `Page::FirstStart` (no projects folders in `settings.toml` yet) leaves only through its confirmation: `open_page` ignores it, Back confirms, and until then `save_settings` keeps the folders off disk. A danger action on a settings page waits in `App::confirm` until the member confirms it in place. A task opens in place in the list (`Expanded::{Task, New}`).
 
 |File (`app/`)|Shows|
 |---|---|

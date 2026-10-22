@@ -260,6 +260,11 @@ struct ServerStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Page {
     Main,
+    /// Choosing the projects folders: `settings.toml` had no projects folders yet. Until the
+    /// member confirms them, `save_settings` leaves `projects_dirs` and `wsl_distros` on disk
+    /// as they were, so the page comes back on the next start. Nothing but the confirmation
+    /// leaves it.
+    FirstStart,
     /// The overview of the settings by scope, each topic opening its own page.
     Settings,
     /// About Schwitzer: its license and the open source licenses, opened from Settings.
@@ -282,7 +287,7 @@ impl Page {
     /// The page Back returns to.
     fn parent(self) -> Option<Page> {
         match self {
-            Page::Main => None,
+            Page::Main | Page::FirstStart => None,
             Page::Settings => Some(Page::Main),
             _ => Some(Page::Settings),
         }
@@ -424,10 +429,6 @@ pub struct App {
     /// The subfolders of the projects folder, for suggestions; read outside `view`.
     project_dirs: Vec<PathBuf>,
     page: Page,
-    /// Whether the first-start page shows: `settings.toml` had no projects folders yet. Until
-    /// the member confirms them, `save_settings` leaves `projects_dirs` and `wsl_distros` on
-    /// disk as they were, so the page comes back on the next start.
-    first_start: bool,
     /// The unfolded entry of the Licenses page.
     license_open: Option<usize>,
     /// The task or draft open in place in the list.
@@ -565,8 +566,11 @@ impl App {
             rooms,
             servers: HashMap::new(),
             selected,
-            page: Page::Main,
-            first_start,
+            page: if first_start {
+                Page::FirstStart
+            } else {
+                Page::Main
+            },
             license_open: None,
             expanded: None,
             confirm: None,
@@ -670,26 +674,23 @@ impl App {
         if let Some(banner) = &self.banner {
             page = page.push(container(widgets::banner(banner)).padding(SP_2));
         }
-        let body: Element<'_, Message> = if self.first_start {
-            settings_view::first_start(self)
-        } else {
-            match self.page {
-                Page::Main => {
-                    let mut main = column![chrome::header(self), widgets::hrule()];
-                    if let Some(members) = chrome::members(self) {
-                        main = main.push(members).push(widgets::hrule());
-                    }
-                    main.push(self.main()).into()
+        let body: Element<'_, Message> = match self.page {
+            Page::FirstStart => settings_view::first_start(self),
+            Page::Main => {
+                let mut main = column![chrome::header(self), widgets::hrule()];
+                if let Some(members) = chrome::members(self) {
+                    main = main.push(members).push(widgets::hrule());
                 }
-                Page::Settings => settings_view::view(self),
-                Page::Licenses => licenses_view::view(self),
-                Page::RoomSettings => settings_view::room_page(self),
-                Page::ProjectSettings => settings_view::project_page(self),
-                Page::Rooms => settings_view::rooms_page(self),
-                Page::Omp => settings_view::omp_page(self),
-                Page::ProjectsFolders => settings_view::folders_page(self),
-                Page::Updates => settings_view::updates_page(self),
+                main.push(self.main()).into()
             }
+            Page::Settings => settings_view::view(self),
+            Page::Licenses => licenses_view::view(self),
+            Page::RoomSettings => settings_view::room_page(self),
+            Page::ProjectSettings => settings_view::project_page(self),
+            Page::Rooms => settings_view::rooms_page(self),
+            Page::Omp => settings_view::omp_page(self),
+            Page::ProjectsFolders => settings_view::folders_page(self),
+            Page::Updates => settings_view::updates_page(self),
         };
         let window = container(
             page.push(container(body).height(Length::Fill))
@@ -1007,7 +1008,10 @@ impl App {
             }
 
             Message::OpenNewTask { idea } => {
-                if self.selected_project().is_none() || self.project_repos().is_empty() {
+                if self.page == Page::FirstStart
+                    || self.selected_project().is_none()
+                    || self.project_repos().is_empty()
+                {
                     return Task::none();
                 }
                 if self.page != Page::Main {
@@ -1058,6 +1062,9 @@ impl App {
                 }) else {
                     return Task::none();
                 };
+                if self.page == Page::FirstStart {
+                    return Task::none();
+                }
                 if self.choose_project(room, project) {
                     self.sync_project_form();
                 }
@@ -1080,7 +1087,7 @@ impl App {
                 reveal("open-task")
             }
             Message::Back => {
-                if self.first_start {
+                if self.page == Page::FirstStart {
                     self.confirm_projects_dirs();
                     return Task::none();
                 }
@@ -1326,7 +1333,7 @@ impl App {
                     Ok(Response::Project(project)) => {
                         self.forms.new_project.clear();
                         self.choose_project(room, project.id);
-                        if self.selected == Some(room) {
+                        if self.selected == Some(room) && self.page != Page::FirstStart {
                             self.page = Page::Main;
                             self.expanded = None;
                             self.reset_drafts();
@@ -1719,8 +1726,11 @@ impl App {
     }
 
     /// Opens `page` at its top. Drafts and a pending confirmation stay only when it is open
-    /// already.
+    /// already. The first-start page stays until its confirmation.
     fn open_page(&mut self, page: Page) -> Task<Message> {
+        if self.page == Page::FirstStart {
+            return Task::none();
+        }
         if self.page != page {
             self.reset_drafts();
             self.confirm = None;
@@ -1976,7 +1986,6 @@ impl App {
     /// Ends the first-start page: the projects folders and the entered WSL distros are saved
     /// from now on, starting with the list on the page.
     fn confirm_projects_dirs(&mut self) {
-        self.first_start = false;
         self.page = Page::Main;
         self.save_settings();
     }
@@ -2391,7 +2400,7 @@ impl App {
     /// the projects folders and the entered WSL distros are held back.
     fn save_settings(&mut self) {
         // On the first-start page the folders wait for the member's confirmation.
-        let on_disk = if self.first_start {
+        let on_disk = if self.page == Page::FirstStart {
             Cow::Owned(Settings {
                 projects_dirs: self.saved.projects_dirs.clone(),
                 wsl_distros: self.saved.wsl_distros.clone(),
