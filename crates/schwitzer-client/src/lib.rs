@@ -220,10 +220,8 @@ impl Client {
     /// Sends `req` to the server `room` lives on and waits for the reply, for up to
     /// `SESSION_WAIT` for a connection and then `RPC_TIMEOUT` for the answer.
     pub async fn request(&self, room: RoomId, req: Request) -> Result<Response, ClientError> {
-        let server = lock(&self.0.keys)
-            .iter()
-            .find(|key| RoomId::of(&key.token) == room)
-            .map(|key| key.server.clone())
+        let server = server_of(&lock(&self.0.keys), room)
+            .cloned()
             .ok_or(ClientError::Api(ApiError::NoSuchRoom))?;
         self.connection(&server)?.rpc(&req).await
     }
@@ -292,10 +290,7 @@ impl Client {
     pub fn forget_room(&self, room: RoomId) {
         let (key_gone, idle) = {
             let mut keys = lock(&self.0.keys);
-            let server = keys
-                .iter()
-                .find(|key| RoomId::of(&key.token) == room)
-                .map(|key| key.server.clone());
+            let server = server_of(&keys, room).cloned();
             keys.retain(|key| RoomId::of(&key.token) != room);
             let key_gone = server.is_some();
             let idle = server.filter(|server| !keys.iter().any(|key| key.server == *server));
@@ -312,6 +307,13 @@ impl Client {
             self.emit(ClientEvent::RoomRemoved(room));
         }
     }
+}
+
+/// The server the kept room `room` lives on; `None` when no key of `keys` is that room's.
+fn server_of(keys: &[RoomKey], room: RoomId) -> Option<&ServerAddr> {
+    keys.iter()
+        .find(|key| RoomId::of(&key.token) == room)
+        .map(|key| &key.server)
 }
 
 fn unexpected(response: &Response) -> ClientError {
