@@ -206,6 +206,52 @@ impl Settings {
         self.commit_trailers.contains(&repo_key(room, project))
     }
 
+    /// Links `path` to `project` of `room`, unless it is linked already.
+    pub fn link_repo(&mut self, room: &RoomId, project: u64, path: PathBuf) {
+        let repos = self.repos.entry(repo_key(room, project)).or_default();
+        if !repos.contains(&path) {
+            repos.push(path);
+        }
+    }
+
+    /// Unlinks the repo at `index` of [`Settings::project_repos`] from `project` of `room`; an
+    /// index past the end unlinks nothing. A project left without repos has no entry.
+    pub fn unlink_repo(&mut self, room: &RoomId, project: u64, index: usize) {
+        let key = repo_key(room, project);
+        if let Some(repos) = self.repos.get_mut(&key) {
+            if index < repos.len() {
+                repos.remove(index);
+            }
+            if repos.is_empty() {
+                self.repos.remove(&key);
+            }
+        }
+    }
+
+    /// Sets whether builds of `project` in `room` need the commit trailer.
+    pub fn set_commit_trailer(&mut self, room: &RoomId, project: u64, on: bool) {
+        let key = repo_key(room, project);
+        if on {
+            self.commit_trailers.insert(key);
+        } else {
+            self.commit_trailers.remove(&key);
+        }
+    }
+
+    /// Sets the room keys, in the order given, to those of `rooms` (id and key) and forgets
+    /// the repos linked to, the commit trailer switch of, and the project choice of, every room
+    /// not in `rooms`.
+    pub fn retain_rooms(&mut self, rooms: impl IntoIterator<Item = (RoomId, String)>) {
+        let (joined, keys): (Vec<RoomId>, Vec<String>) = rooms.into_iter().unzip();
+        let hexes: BTreeSet<String> = joined.iter().map(RoomId::to_hex).collect();
+        let joined_key =
+            |key: &str| parse_repo_key(key).is_some_and(|(room, _)| hexes.contains(room));
+        self.rooms = keys;
+        self.repos.retain(|key, _| joined_key(key));
+        self.commit_trailers.retain(|key| joined_key(key));
+        self.chosen_projects.retain(|room, _| joined.contains(room));
+    }
+
     /// The projects of `room` with linked repos, and those repos, ordered by project id.
     pub fn room_project_repos(&self, room: &RoomId) -> Vec<(u64, &[PathBuf])> {
         let hex = room.to_hex();
@@ -507,5 +553,29 @@ mod tests {
         );
         assert!(settings.chosen_projects.is_empty());
         assert!(!settings.forget_deleted_projects(&a, &projects));
+    }
+
+    #[test]
+    fn leaving_a_room_forgets_its_repos_trailers_and_choice() {
+        let (a, b) = (RoomId([1; 32]), RoomId([2; 32]));
+        let mut settings = Settings::default();
+        for room in [&a, &b] {
+            settings.link_repo(room, 1, PathBuf::from("/app"));
+            settings.set_commit_trailer(room, 1, true);
+            settings.chosen_projects.insert(*room, 1);
+        }
+        settings.link_repo(&b, 1, PathBuf::from("/app"));
+        settings
+            .repos
+            .insert("junk".to_owned(), vec![PathBuf::from("/x")]);
+        settings.retain_rooms([(b, "schwitzer://b".to_owned())]);
+        assert_eq!(settings.rooms, ["schwitzer://b"]);
+        assert_eq!(
+            settings.repos.keys().cloned().collect::<Vec<_>>(),
+            [repo_key(&b, 1)]
+        );
+        assert_eq!(settings.project_repos(&b, 1), [PathBuf::from("/app")]);
+        assert!(settings.commit_trailer(&b, 1) && !settings.commit_trailer(&a, 1));
+        assert_eq!(settings.chosen_projects, BTreeMap::from([(b, 1)]));
     }
 }

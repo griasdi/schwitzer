@@ -1252,15 +1252,7 @@ impl App {
                 let (Some(room), Some(project)) = (self.selected, self.selected_project()) else {
                     return Task::none();
                 };
-                let key = settings::repo_key(&room, project.id);
-                if let Some(repos) = self.settings.repos.get_mut(&key) {
-                    if index < repos.len() {
-                        repos.remove(index);
-                    }
-                    if repos.is_empty() {
-                        self.settings.repos.remove(&key);
-                    }
-                }
+                self.settings.unlink_repo(&room, project.id, index);
                 self.save_settings();
                 self.publish()
             }
@@ -1297,12 +1289,7 @@ impl App {
                 if let (Some(room), Some(project)) =
                     (self.selected, self.selected_project().map(|p| p.id))
                 {
-                    let key = settings::repo_key(&room, project);
-                    if on {
-                        self.settings.commit_trailers.insert(key);
-                    } else {
-                        self.settings.commit_trailers.remove(&key);
-                    }
+                    self.settings.set_commit_trailer(&room, project, on);
                     self.save_settings();
                     self.write_plugin_configs(&room, project);
                 }
@@ -2017,14 +2004,7 @@ impl App {
             self.banner = Some(format!("Not a folder on this machine: {}", path.display()));
             return None;
         }
-        let repos = self
-            .settings
-            .repos
-            .entry(settings::repo_key(&room, project))
-            .or_default();
-        if !repos.contains(&path) {
-            repos.push(path);
-        }
+        self.settings.link_repo(&room, project, path);
         self.save_settings();
         Some(self.publish())
     }
@@ -2506,22 +2486,11 @@ impl App {
             let first = self.rooms.first().map(|(key, _)| RoomId::of(&key.token));
             self.select(first);
         }
-        self.settings.rooms = self.rooms.iter().map(|(key, _)| key.to_string()).collect();
-        let joined: HashSet<String> = self
-            .rooms
-            .iter()
-            .map(|(key, _)| RoomId::of(&key.token).to_hex())
-            .collect();
-        self.settings.repos.retain(|key, _| {
-            settings::parse_repo_key(key).is_some_and(|(room, _)| joined.contains(room))
-        });
-        self.settings.commit_trailers.retain(|key| {
-            settings::parse_repo_key(key).is_some_and(|(room, _)| joined.contains(room))
-        });
-        let rooms = &self.rooms;
-        self.settings
-            .chosen_projects
-            .retain(|room, _| rooms.iter().any(|(key, _)| RoomId::of(&key.token) == *room));
+        self.settings.retain_rooms(
+            self.rooms
+                .iter()
+                .map(|(key, _)| (RoomId::of(&key.token), key.to_string())),
+        );
         self.save_settings();
     }
 
