@@ -154,7 +154,7 @@ weida is a QUIC framework with mutual TLS; Schwitzer pins it to an exact revisio
 
 The client holds one `Requester` per endpoint, so two QUIC connections per server (`conn.rs`).
 
-`Request` has 21 variants:
+`Request` has 22 variants:
 
 |Group|Variants|
 |---|---|
@@ -178,6 +178,7 @@ The client holds one `Requester` per endpoint, so two QUIC connections per serve
 |`--public-host`|`127.0.0.1`; must be the name clients dial|
 |`--data-dir`|`./schwitzer-data`|
 |`--releases-url`|`https://api.github.com/repos/griasdi/schwitzer/releases`|
+|`--auto-update`|off; installs new stable releases and restarts in place (see Auto update below)|
 
 stdout carries only the `server url: weida://sha256:…@host:port` line; logs go to stderr.
 
@@ -320,6 +321,8 @@ flowchart LR
 |`projects_dirs`|folders whose subfolders are matched against project names|
 |`wsl_distros`|WSL distros whose default projects folders were entered|
 |`auto_update_plugins`, `auto_install_updates`, `auto_restart_updates`|all three default `true`|
+|`notify_hand_ins`|system notification when one of the member's agents hands in a plan or finishes a build; default `false`|
+|`commit_trailers`|`"<room id hex>/<project id>"` set: projects whose builds by the member's agents put `Schwitzer-Task: #<n>` into every commit; default empty|
 
 A bad `settings.toml` loads as defaults with a notice and is not overwritten until the next save.
 
@@ -382,7 +385,7 @@ The plugin turns failures into one line: "no MCP token in <dir>; start the Schwi
 |`submit_plan`|`room?`, `task`, `plan`|`SubmitPlan`|
 |`finish`|`room?`, `task`, `note`|`Finish`|
 |`unclaim`|`room?`, `task`, `note`|`Unclaim`|
-|`add_note`|`room?`, `task`, `text`|`AddNote`|
+|`add_note`|`room?`, `task`, `text`, `agent?`|`AddNote`|
 
 `room` may be left out when the app has joined one room; otherwise it matches a room name or at least 4 hex digits of the room id. The plugin registers each tool as `schwitzer_<name>`, with approval tier `read` for `list_rooms`, `list_tasks` and `get_task` and `write` for the rest. **There is no accept, reject, approve, replan or reopen tool, and none for `EditTask`, `SetPriority`, `MoveTask`, `SetWaits`, projects or rooms.**
 
