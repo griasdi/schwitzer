@@ -4153,11 +4153,9 @@ name = "schwitzer-server"
 version = "0.2.1"
 dependencies = [
  "anyhow",
- "blake3",
  "clap",
  "flate2",
  "hex",
- "rand 0.8.8",
  "rusqlite",
  "schwitzer-proto",
  "semver",
