@@ -205,7 +205,7 @@ pub fn members(app: &App) -> Option<Element<'_, Message>> {
     )
 }
 
-/// The status bar: my name, server and omp connection.
+/// The status bar: my name, server and agent port.
 pub fn status_bar(app: &App) -> Element<'_, Message> {
     let server = app.selected_server_online();
     let server_label = match server {
@@ -214,14 +214,14 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
         None => "connecting",
     };
     let server_tip = app.selected_server_tip();
-    let (omp_state, omp_tip) = match &app.mcp {
-        None => (None, "omp connection starting".to_owned()),
-        Some(McpStatus::Listening { url }) => (Some(true), format!("omp connection: {url}")),
+    let (port_state, port_tip) = match &app.mcp {
+        None => (None, "Agent port starting".to_owned()),
+        Some(McpStatus::Listening { url }) => (Some(true), format!("Agent port: {url}")),
         Some(McpStatus::PortInUse) => (
             Some(false),
-            format!("omp connection: port {} is in use", app.settings.mcp_port),
+            format!("Agent port {} is in use", app.settings.mcp_port),
         ),
-        Some(McpStatus::Failed(e)) => (Some(false), format!("omp connection: {e}")),
+        Some(McpStatus::Failed(e)) => (Some(false), format!("Agent port: {e}")),
     };
     let mut bar = row![
         text(&app.settings.name).size(TS_12).font(SEMIBOLD),
@@ -240,10 +240,10 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
         ));
     }
     bar = bar.push(with_tip(
-        row![dot(omp_state), muted("omp")]
+        row![dot(port_state), muted("agent port")]
             .spacing(SP_1)
             .align_y(Alignment::Center),
-        omp_tip,
+        port_tip,
     ));
     container(bar)
         .padding([SP_1, SP_2])

@@ -262,7 +262,7 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 
 |File (`app/`)|Shows|
 |---|---|
-|`chrome.rs`|the header bar (room picker), the members row, the status bar (name, server, omp connection)|
+|`chrome.rs`|the header bar (room picker), the members row, the status bar (name, server, agent port)|
 |`list.rs`|the task list in its groups|
 |`task_view.rs`|an opened task, the new-task form, the decision buttons|
 |`live.rs`|the live agent sessions of the open project|
