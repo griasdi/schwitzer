@@ -576,7 +576,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |`crates/schwitzer-app/tests/fixtures/`|omp session logs for the scanner tests|
 |`deploy/`|deploy, release, changelog and packaging scripts, the systemd unit, the installer script|
 |`design/logo/`|the logo and its concepts|
-|`docs/`|this document and its diagrams|
+|`docs/`|this document, its diagrams and the consolidation run logs (`docs/consolidations/`)|
 |`site/`|the product site|
 |`.github/workflows/`|CI, release and site workflows|
 |`.impeccable/`|state of the design skill|
