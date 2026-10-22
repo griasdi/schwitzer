@@ -358,7 +358,7 @@ A bad `settings.toml` loads as defaults with a notice and is not overwritten unt
    |`.omp/plugins/omp-plugins.lock.json`|entry `schwitzer` with the app's version|
 
 3. omp loads it as a project plugin the next time it starts in that repo.
-4. Every 5 s the app compares each installed plugin with what it would write: the three plugin files byte for byte, the lock entry's version, and no legacy `schwitzer` server in `.omp/mcp.json`. The result is `Current` or `Outdated`; with `auto_update_plugins` an outdated plugin is rewritten at once.
+4. Every 5 s the app compares each installed plugin with what it would write: the three plugin files byte for byte and the lock entry's version. The result is `Current` or `Outdated`; with `auto_update_plugins` an outdated plugin is rewritten at once.
 5. When the linked repos change, every installed plugin is rewritten (its `projects` and `other_repos` change), and a repo with no project left loses the plugin. A deleted project takes its repo links and its place in `chosen_projects` with it on every member's machine.
 
 A repo inside WSL gets Linux paths in `schwitzer.json` (`wsl::path_for`), because omp runs inside the distro.

@@ -149,15 +149,14 @@ The app writes these files into the repo:
 
 - omp started in the repo loads it as a project-scope plugin. A new version takes effect when omp starts next.
 - Install writes nothing when the lock file exists but is not an omp lock file. JSON files are written through a temporary file and a rename.
-- Older app versions put a `schwitzer` server with the token into `.omp/mcp.json`; install and uninstall remove it, and a repo that still has it counts as out of date.
 - Plugin files whose content has not changed are not rewritten, so they keep their mtime.
 
 ## Keeping it current
 
 - Settings, the project's page, per linked repo: the status "omp plugin installed", "omp plugin out of date" or "No omp plugin", and buttons to install, remove or update the plugin in that repo.
-- At start and every 5 s the app compares each installed plugin with what it would write: the three plugin files, the version in the lock entry, and that `.omp/mcp.json` holds no `schwitzer` server. Any difference marks it out of date, for example after an app update or a new MCP port.
+- At start and every 5 s the app compares each installed plugin with what it would write: the three plugin files and the version in the lock entry. Any difference marks it out of date, for example after an app update or a new MCP port.
 - Settings, the omp page, "omp plugin": a summary, "Update all", and the "Update automatically" switch (`auto_update_plugins` in `settings.toml`, on by default). With it on, an out-of-date plugin is rewritten as soon as the app sees it. A repo whose automatic update failed shows the error in the banner and is not retried until its plugin changes state, the user updates it by hand, or auto-update is switched on again.
-- When the linked repos change, the app rewrites every installed plugin, so that `schwitzer.json` lists the right projects and other repos, whether auto-update is on or not. From a repo no project is linked to any more it removes the plugin: the plugin directory, its entries in the lock file (`plugins` and `settings`) and the `schwitzer` server in `mcp.json`. A file omp would not read is left alone.
+- When the linked repos change, the app rewrites every installed plugin, so that `schwitzer.json` lists the right projects and other repos, whether auto-update is on or not. From a repo no project is linked to any more it removes the plugin: the plugin directory and its entries in the lock file (`plugins` and `settings`). A file omp would not read is left alone.
 
 ## How it talks to the app
 
