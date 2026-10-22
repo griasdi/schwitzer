@@ -27,9 +27,9 @@ Keep the app (the AppImage too) in a folder you can write to: it installs the ne
 
 ## Getting started
 
-1. Open Settings. Under "Create a room" enter a server URL (`weida://sha256:…@host:7444`) and a room name, then press "Create". Or under "Join with a key" paste a room key (`schwitzer://sha256:…/<key>`) someone shared and press "Join".
-2. Share the room key with the others in the room; the app copies it for you ("Room key copied").
-3. In Settings, link your local repositories to the room's projects. The app installs the omp plugin there, and a project's tasks show once you have linked a repo to it.
+1. Open Settings → "All rooms" (or "Join or create a room" when you are in none). Under "Create a room" enter a server URL (`weida://sha256:…@host:7444`) and a room name, then press "Create". Or under "Join a room" paste a room key (`schwitzer://sha256:…/<key>`) someone shared and press "Join".
+2. Share the room key with the others in the room: the invite icon in the header bar copies it ("Room key copied"), as does "Copy invite key" on the room's settings page.
+3. In Settings, open the project's page and link your local repositories under "Repos on this machine": press "Link" at a suggested folder, or enter a path and press "Link". The app installs the omp plugin there, and a project's tasks show once you have linked a repo to it.
 4. In such a repo, start omp and run `/schwitzer`.
 
 ## Run your own server
