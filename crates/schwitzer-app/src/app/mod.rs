@@ -503,8 +503,8 @@ impl App {
         let first_start = !unreadable && settings.projects_dirs.is_none();
         if settings.projects_dirs.is_none() {
             settings.projects_dirs = Some(
-                directories::BaseDirs::new()
-                    .map(|dirs| settings::default_projects_dirs(dirs.home_dir()))
+                settings::home_dir()
+                    .map(|home| settings::default_projects_dirs(&home))
                     .unwrap_or_default(),
             );
         }
@@ -855,7 +855,7 @@ impl App {
         } else {
             let names: Vec<String> = searched
                 .iter()
-                .map(|dir| logic::breakable_path(&folder_label(dir)))
+                .map(|dir| logic::breakable_path(&logic::folder_label(dir)))
                 .collect();
             format!("Searched in {}.", names.join(", "))
         };
@@ -1200,7 +1200,8 @@ impl App {
                 self.forms.repo = s;
                 Task::none()
             }
-            Message::AddRepo => match self.link_repo(expand_home(self.forms.repo.trim())) {
+            Message::AddRepo => match self.link_repo(settings::expand_home(self.forms.repo.trim()))
+            {
                 Some(task) => {
                     self.forms.repo.clear();
                     task
@@ -1220,15 +1221,13 @@ impl App {
                         self.forms.new_projects_dir.trim(),
                     ),
                 };
-                let typed = expand_home(typed);
+                let typed = settings::expand_home(typed);
                 let start = if typed.is_dir() {
                     Some(typed)
                 } else {
                     match for_ {
                         FolderFor::Repo => self.searched_dirs().first().map(|p| p.to_path_buf()),
-                        FolderFor::ProjectsDir => {
-                            directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf())
-                        }
+                        FolderFor::ProjectsDir => settings::home_dir(),
                     }
                 };
                 Task::perform(choose_folder(title, start), move |path| {
@@ -1442,7 +1441,7 @@ impl App {
                 if input.is_empty() {
                     return Task::none();
                 }
-                if self.add_projects_dir(expand_home(input)) {
+                if self.add_projects_dir(settings::expand_home(input)) {
                     self.forms.new_projects_dir.clear();
                 }
                 Task::none()
@@ -1805,7 +1804,7 @@ impl App {
         };
         let in_wsl = self.wsl.iter().flat_map(|d| {
             d.homes.iter().map(|home| sessions::SessionsDir {
-                path: home.join(".omp").join("agent").join("sessions"),
+                path: settings::omp_sessions_dir_in(home),
                 distro: Some(d.name.clone()),
             })
         });
@@ -1971,11 +1970,13 @@ impl App {
     /// Adds `path` to the projects folders; `false` when it is not a folder on this machine
     /// (with a banner). A folder already listed counts as added.
     fn add_projects_dir(&mut self, path: PathBuf) -> bool {
-        let path = wsl::canonical(path);
-        if !path.is_absolute() || !path.is_dir() {
-            self.banner = Some(format!("Not a folder on this machine: {}", path.display()));
-            return false;
-        }
+        let path = match logic::existing_folder(path) {
+            Ok(path) => path,
+            Err(banner) => {
+                self.banner = Some(banner);
+                return false;
+            }
+        };
         let dirs = self.settings.projects_dirs.get_or_insert_with(Vec::new);
         if dirs.contains(&path) {
             return true;
@@ -1997,13 +1998,15 @@ impl App {
 
     /// Links `path` to the selected project; `None` when nothing was linked.
     fn link_repo(&mut self, path: PathBuf) -> Option<Task<Message>> {
-        let path = wsl::canonical(path);
         let room = self.selected?;
         let project = self.selected_project()?.id;
-        if !path.is_absolute() || !path.is_dir() {
-            self.banner = Some(format!("Not a folder on this machine: {}", path.display()));
-            return None;
-        }
+        let path = match logic::existing_folder(path) {
+            Ok(path) => path,
+            Err(banner) => {
+                self.banner = Some(banner);
+                return None;
+            }
+        };
         self.settings.link_repo(&room, project, path);
         self.save_settings();
         Some(self.publish())
@@ -2920,38 +2923,6 @@ async fn choose_folder(title: &'static str, start: Option<PathBuf>) -> Option<Pa
         dialog = dialog.set_directory(start);
     }
     dialog.pick_folder().await.map(|f| f.path().to_path_buf())
-}
-
-/// `~/x` as a path under the home directory; anything else as given.
-fn expand_home(path: &str) -> PathBuf {
-    match path.strip_prefix("~/") {
-        Some(rest) => directories::BaseDirs::new()
-            .map_or_else(|| PathBuf::from(path), |dirs| dirs.home_dir().join(rest)),
-        None => Path::new(path).to_path_buf(),
-    }
-}
-
-/// `path` with the home directory shown as `~`.
-fn tilde(path: &Path) -> String {
-    let rest = directories::BaseDirs::new().and_then(|dirs| {
-        path.strip_prefix(dirs.home_dir())
-            .ok()
-            .map(Path::to_path_buf)
-    });
-    match rest {
-        Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
-        Some(rest) => format!("~/{}", rest.display()),
-        None => path.display().to_string(),
-    }
-}
-
-/// `path` as the member knows it: a folder in a WSL distro as its Linux path with the
-/// distro, `/home/felix/code (Ubuntu)`; anything else with the home directory as `~`.
-fn folder_label(path: &Path) -> String {
-    match wsl::to_linux(path) {
-        Some((distro, linux)) => format!("{linux} ({distro})"),
-        None => tilde(path),
-    }
 }
 
 /// The banner text for a plugin update that failed.

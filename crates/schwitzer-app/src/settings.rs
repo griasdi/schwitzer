@@ -106,6 +106,34 @@ mod room_map {
     }
 }
 
+/// The home directory of the current user.
+pub fn home_dir() -> Option<PathBuf> {
+    directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
+}
+
+/// `~/x` as a path under the home directory; anything else as given.
+pub fn expand_home(path: &str) -> PathBuf {
+    match (path.strip_prefix("~/"), home_dir()) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => PathBuf::from(path),
+    }
+}
+
+/// `path` with the home directory shown as `~`.
+pub fn tilde(path: &Path) -> String {
+    let rest = home_dir().and_then(|home| path.strip_prefix(home).ok().map(Path::to_path_buf));
+    match rest {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
+/// Where omp keeps its session files under the home directory `home`.
+pub fn omp_sessions_dir_in(home: &Path) -> PathBuf {
+    home.join(".omp").join("agent").join("sessions")
+}
+
 /// The folders `code`, `projects` and `work` under `home` that exist, in that order.
 pub fn default_projects_dirs(home: &Path) -> Vec<PathBuf> {
     ["code", "projects", "work"]
@@ -351,10 +379,7 @@ fn default_name() -> String {
 }
 
 fn default_sessions_dir() -> PathBuf {
-    directories::BaseDirs::new().map_or_else(
-        || PathBuf::from(".omp/agent/sessions"),
-        |dirs| dirs.home_dir().join(".omp/agent/sessions"),
-    )
+    omp_sessions_dir_in(&home_dir().unwrap_or_default())
 }
 
 #[cfg(test)]

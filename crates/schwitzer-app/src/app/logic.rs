@@ -9,6 +9,7 @@ use schwitzer_proto::{
 use serde::{Deserialize, Serialize};
 
 use crate::sessions::LocalSession;
+use crate::{settings, wsl};
 
 /// A local session counts as idle when its files were last written this long ago.
 pub const IDLE_AFTER_MS: u64 = 2 * 60 * 1000;
@@ -447,6 +448,26 @@ pub fn breakable_path(path: &str) -> String {
         previous = Some(c);
     }
     out
+}
+
+/// `path` as the member knows it: a folder in a WSL distro as its Linux path with the
+/// distro, `/home/felix/code (Ubuntu)`; anything else with the home directory as `~`.
+pub fn folder_label(path: &Path) -> String {
+    match wsl::to_linux(path) {
+        Some((distro, linux)) => format!("{linux} ({distro})"),
+        None => settings::tilde(path),
+    }
+}
+
+/// `path` in its canonical spelling (see [`wsl::canonical`]), or the banner text when it is
+/// not an absolute path of a folder on this machine.
+pub fn existing_folder(path: PathBuf) -> Result<PathBuf, String> {
+    let path = wsl::canonical(path);
+    if path.is_absolute() && path.is_dir() {
+        Ok(path)
+    } else {
+        Err(format!("Not a folder on this machine: {}", path.display()))
+    }
 }
 
 /// A token count: `812`, `1.2k`, `12.3k`, `1.2M`.

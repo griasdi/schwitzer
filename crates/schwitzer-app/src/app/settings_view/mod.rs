@@ -17,12 +17,14 @@ pub use project::project_page;
 pub use room::{room_page, rooms_page};
 
 use super::icons::{Icon, Tone, icon};
+use super::logic::{self, folder_label};
 use super::pages::{frame, section};
 use super::widgets::{
     heading, icon_button, icon_text_button, id_button, input, muted, path_text, text_button,
 };
-use super::{App, FolderFor, Message, Page, folder_label, logic, tilde};
+use super::{App, FolderFor, Message, Page};
 use crate::omp_plugin::count_outdated;
+use crate::settings::tilde;
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 use crate::update::{self, UpdateState};
 use crate::wsl;
