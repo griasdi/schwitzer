@@ -371,13 +371,13 @@ function noteArgs(z: Zod): ZodType {
   });
 }
 
-export async function loadConfig(): Promise<Config> {
+async function loadConfig(): Promise<Config> {
   return JSON.parse(await Bun.file(join(import.meta.dir, "schwitzer.json")).text()) as Config;
 }
 
 /** One tool call on the app's MCP server: initialize, initialized, tools/call, then the
  *  session is closed. The token is read per call, so a rotated token needs no restart. */
-export async function callTool(
+async function callTool(
   config: Config,
   name: string,
   args: Record<string, unknown>,
