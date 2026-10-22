@@ -119,6 +119,10 @@ pub enum Message {
     ToggleSessions,
     /// Folds or unfolds the member list under the header bar.
     ToggleMembers,
+    /// Folds or unfolds the Proposal block of the open task.
+    ToggleProposal,
+    /// Folds or unfolds the Plan block of the open task.
+    TogglePlan,
 
     SelectRoom(RoomId),
     ServerUrl(String),
@@ -433,6 +437,10 @@ pub struct App {
     sessions_open: bool,
     /// Whether the member list under the header bar is unfolded.
     members_open: bool,
+    /// Whether the open task's Proposal block is folded; every task opens unfolded.
+    proposal_folded: bool,
+    /// Whether the open task's Plan block is folded; every task opens unfolded.
+    plan_folded: bool,
     /// The task whose pick is under way.
     picking: Option<u64>,
     /// Tasks seen approved (Planned → Ready, unclaimed), with the local time, while the
@@ -564,6 +572,8 @@ impl App {
             collapsed: HashSet::from([Group::Closed]),
             sessions_open: true,
             members_open: false,
+            proposal_folded: false,
+            plan_folded: false,
             picking: None,
             handoffs: HashMap::new(),
             folder_dialog: false,
@@ -1104,6 +1114,14 @@ impl App {
                 self.members_open = !self.members_open;
                 Task::none()
             }
+            Message::ToggleProposal => {
+                self.proposal_folded = !self.proposal_folded;
+                Task::none()
+            }
+            Message::TogglePlan => {
+                self.plan_folded = !self.plan_folded;
+                Task::none()
+            }
 
             Message::SelectRoom(id) => {
                 self.select(Some(id));
@@ -1500,6 +1518,7 @@ impl App {
             }
 
             Message::EditTask => {
+                self.proposal_folded = false;
                 if let Some((_, task)) = self.open() {
                     self.task_draft = Some(TaskDraft {
                         title: task.title.clone(),
@@ -1552,6 +1571,7 @@ impl App {
                 Task::none()
             }
             Message::EditPlan => {
+                self.plan_folded = false;
                 if let Some((_, task)) = self.open() {
                     self.plan_draft = Some(text_editor::Content::with_text(&task.plan));
                 }
@@ -2516,9 +2536,13 @@ impl App {
         }
     }
 
+    /// Drops the open task's drafts and unfolds its Proposal and Plan: the next task opens with
+    /// both shown.
     fn reset_drafts(&mut self) {
         self.task_draft = None;
         self.plan_draft = None;
+        self.proposal_folded = false;
+        self.plan_folded = false;
         self.forms.note.clear();
     }
 

@@ -3,7 +3,7 @@
 use std::fmt;
 
 use iced::widget::{
-    Space, column, container, markdown, pick_list, row, text, text_editor, text_input,
+    Row, Space, column, container, markdown, pick_list, row, text, text_editor, text_input,
 };
 use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task};
@@ -20,7 +20,8 @@ use super::{App, Message, TaskText, sticky};
 use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 
 /// Task `task` open in place: the slab's two lines as a head that closes it again, then
-/// details, people, decisions, plan, priority, project, waits and notes.
+/// the proposal, people, decisions, plan, priority, project, waits and notes; proposal and
+/// plan fold.
 pub fn view<'a>(
     app: &'a App,
     state: &'a RoomState,
@@ -188,8 +189,49 @@ pub fn new_task(app: &App, idea: bool, list_height: f32) -> Element<'_, Message>
     .into()
 }
 
-/// The task's details, or the form that edits its title and details.
+/// The head of a foldable block of the open task: a flat 32 px button with a chevron before
+/// `line`. Icon buttons in `line` take the press before the head. `toggle: None` (while the
+/// block's editor is open) shows it unfolded and inert.
+fn fold_head<'a>(
+    id: &'static str,
+    open: bool,
+    line: Row<'a, Message>,
+    toggle: Option<Message>,
+) -> Element<'a, Message> {
+    let chevron = if open {
+        Icon::ChevronDown
+    } else {
+        Icon::ChevronRight
+    };
+    id_button(
+        id,
+        container(
+            row![icon(chevron, 14.0, Tone::Muted), line]
+                .spacing(SP_2)
+                .align_y(Alignment::Center),
+        )
+        .padding([0.0, SP_1])
+        .height(32)
+        .align_y(Alignment::Center),
+        toggle,
+        theme::button_header,
+        Length::Fill,
+    )
+}
+
+/// The task's proposal under a fold head, or the form that edits its title and details.
 fn details<'a>(app: &'a App, task: &'a Task, list_height: f32) -> Option<Element<'a, Message>> {
+    let line = || {
+        row![
+            heading(if task.stage == Stage::Idea {
+                "Idea"
+            } else {
+                "Proposal"
+            }),
+            Space::new().width(Length::Fill),
+        ]
+        .align_y(Alignment::Center)
+    };
     if let Some(draft) = &app.task_draft {
         let idea = task.stage == Stage::Idea;
         let titled = !draft.title.trim().is_empty();
@@ -223,6 +265,7 @@ fn details<'a>(app: &'a App, task: &'a Task, list_height: f32) -> Option<Element
         }
         return Some(
             column![
+                fold_head("fold-proposal", true, line(), None),
                 text_input("Title", &draft.title)
                     .id("task-title")
                     .on_input(Message::EditTitle)
@@ -245,7 +288,21 @@ fn details<'a>(app: &'a App, task: &'a Task, list_height: f32) -> Option<Element
             .into(),
         );
     }
-    (!task.body.is_empty()).then(|| rich(app, &app.open_md.body))
+    if task.body.is_empty() {
+        return None;
+    }
+    let open = !app.proposal_folded;
+    let mut col = column![fold_head(
+        "fold-proposal",
+        open,
+        line(),
+        Some(Message::ToggleProposal)
+    )]
+    .spacing(SP_2);
+    if open {
+        col = col.push(rich(app, &app.open_md.body));
+    }
+    Some(col.into())
 }
 
 /// Task text as Markdown; a click on a link opens it.
@@ -412,10 +469,31 @@ fn plan<'a>(
             theme::button_ghost,
         ));
     }
-    let mut col = column![head].spacing(SP_2);
-    if let Some(draft) = &app.plan_draft {
-        return container(
-            col.push(
+    let Some(draft) = &app.plan_draft else {
+        let open = !app.plan_folded;
+        let col = column![fold_head(
+            "fold-plan",
+            open,
+            head,
+            Some(Message::TogglePlan)
+        )]
+        .spacing(SP_2);
+        if !open {
+            return col.into();
+        }
+        return if ready {
+            col.push(rich(app, &app.open_md.plan))
+        } else {
+            col.push(muted(
+                "No plan yet. Once the task is accepted, an agent claims it and writes one.",
+            ))
+        }
+        .into();
+    };
+    container(
+        column![fold_head("fold-plan", true, head, None)]
+            .spacing(SP_2)
+            .push(
                 text_editor(draft)
                     .id("plan-editor")
                     .placeholder("Markdown")
@@ -444,18 +522,9 @@ fn plan<'a>(
                 ]
                 .spacing(SP_2),
             ),
-        )
-        .id("plan")
-        .into();
-    }
-    if ready {
-        col = col.push(rich(app, &app.open_md.plan));
-    } else {
-        col = col.push(muted(
-            "No plan yet. Once the task is accepted, an agent claims it and writes one.",
-        ));
-    }
-    col.into()
+    )
+    .id("plan")
+    .into()
 }
 
 fn priority(task: &Task) -> Element<'_, Message> {

@@ -57,6 +57,12 @@ pub struct Resume {
     /// `false` in a file from a version without it.
     #[serde(default)]
     pub members_open: bool,
+    /// `false` in a file from a version without it.
+    #[serde(default)]
+    pub proposal_folded: bool,
+    /// `false` in a file from a version without it.
+    #[serde(default)]
+    pub plan_folded: bool,
     pub forms: FormsSnapshot,
     pub task_draft: Option<(String, Text)>,
     pub plan_draft: Option<Text>,
@@ -240,6 +246,8 @@ impl App {
             collapsed: self.collapsed.iter().copied().collect(),
             sessions_open: self.sessions_open,
             members_open: self.members_open,
+            proposal_folded: self.proposal_folded,
+            plan_folded: self.plan_folded,
             forms: FormsSnapshot {
                 server_url: forms.server_url.clone(),
                 room_name: forms.room_name.clone(),
@@ -288,6 +296,8 @@ impl App {
             // Not `select`, which drops the drafts.
             self.selected = Some(room);
             self.expanded = r.expanded;
+            self.proposal_folded = r.proposal_folded;
+            self.plan_folded = r.plan_folded;
             self.task_draft = r.task_draft.map(|(title, body)| TaskDraft {
                 title,
                 body: body.content(),
@@ -356,6 +366,8 @@ mod tests {
             collapsed: vec![Group::Closed],
             sessions_open: false,
             members_open: true,
+            proposal_folded: true,
+            plan_folded: true,
             forms: FormsSnapshot {
                 server_url: "weida://x".to_owned(),
                 room_name: String::new(),
@@ -410,6 +422,8 @@ mod tests {
         let fields = old.as_object_mut().unwrap();
         fields.remove("placement");
         fields.remove("members_open");
+        fields.remove("proposal_folded");
+        fields.remove("plan_folded");
         fields.remove("first_start");
         fields.insert("chosen_projects".to_owned(), serde_json::json!([]));
         fields["forms"].as_object_mut().unwrap().remove("mcp_port");
@@ -420,6 +434,8 @@ mod tests {
                 placement: None,
                 first_start: None,
                 members_open: false,
+                proposal_folded: false,
+                plan_folded: false,
                 forms: FormsSnapshot {
                     mcp_port: None,
                     ..resume(now).forms
