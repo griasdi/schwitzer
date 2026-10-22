@@ -322,12 +322,15 @@ pub enum FolderFor {
 }
 
 /// The inputs of the settings page, the draft of a new task and the note field of the open
-/// task.
+/// task. `resume.json` stores it as it is.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Forms {
     server_url: String,
     room_name: String,
     room_key: String,
     name: String,
+    /// Empty in a file from a version without it: the restart keeps the saved port.
+    #[serde(default)]
     mcp_port: String,
     repo: String,
     new_project: String,
@@ -335,6 +338,7 @@ struct Forms {
     project_name: String,
     new_projects_dir: String,
     proposal_title: String,
+    #[serde(with = "resume::editor")]
     proposal_body: text_editor::Content,
     note: String,
 }

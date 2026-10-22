@@ -12,7 +12,7 @@ use schwitzer_proto::{RoomId, now_ms};
 use serde::{Deserialize, Serialize};
 
 use super::logic::Group;
-use super::{App, Expanded, Page, PendingFocus, Placement, TaskDraft};
+use super::{App, Expanded, Forms, Page, PendingFocus, Placement, TaskDraft};
 use crate::update;
 
 /// The file in the data directory; written just before the restart, removed when read.
@@ -44,7 +44,8 @@ pub const FOCUSABLE: [&str; 15] = [
 pub const EDITORS: [&str; 3] = ["proposal-body", "task-body", "plan-editor"];
 
 /// What the window showed when the app restarted for an update: the new process opens there.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct Resume {
     /// The version that wrote the file; the new process says "Updated to …" when it differs.
     pub from_version: String,
@@ -63,7 +64,7 @@ pub struct Resume {
     /// `false` in a file from a version without it.
     #[serde(default)]
     pub plan_folded: bool,
-    pub forms: FormsSnapshot,
+    pub forms: Forms,
     pub task_draft: Option<(String, Text)>,
     pub plan_draft: Option<Text>,
     /// Widget id of the focused input, one of [`FOCUSABLE`].
@@ -75,25 +76,6 @@ pub struct Resume {
     /// `None` otherwise and in a file from a version without it.
     #[serde(default)]
     pub first_start: Option<(Vec<PathBuf>, Vec<String>)>,
-}
-
-/// Every `Forms` string field by its name, `proposal_body` as [`Text`].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FormsSnapshot {
-    pub server_url: String,
-    pub room_name: String,
-    pub room_key: String,
-    pub name: String,
-    /// `None` in a file from a version without it.
-    #[serde(default)]
-    pub mcp_port: Option<String>,
-    pub repo: String,
-    pub new_project: String,
-    pub project_name: String,
-    pub new_projects_dir: String,
-    pub proposal_title: String,
-    pub proposal_body: Text,
-    pub note: String,
 }
 
 /// A text editor's content and cursor (`text_editor::Cursor`, byte columns).
@@ -141,6 +123,26 @@ fn clamp(content: &text_editor::Content, line: usize, column: usize) -> Position
         text.len()
     };
     Position { line, column }
+}
+
+/// A text editor's content in a serde field as [`Text`]: `#[serde(with = "resume::editor")]`.
+pub mod editor {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::{Text, text_editor};
+
+    pub fn serialize<S: Serializer>(
+        content: &text_editor::Content,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        Text::of(content).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<text_editor::Content, D::Error> {
+        Ok(Text::deserialize(deserializer)?.content())
+    }
 }
 
 /// Writes `resume` into `dir` through a temporary file and a rename.
@@ -234,7 +236,6 @@ impl Resumed {
 impl App {
     /// What the window shows now; `focus` is the focused widget.
     pub(super) fn snapshot(&self, focus: Option<&Id>, placement: Option<Placement>) -> Resume {
-        let forms = &self.forms;
         Resume {
             from_version: update::CURRENT.to_owned(),
             written_ms: now_ms(),
@@ -246,20 +247,7 @@ impl App {
             members_open: self.members_open,
             proposal_folded: self.proposal_folded,
             plan_folded: self.plan_folded,
-            forms: FormsSnapshot {
-                server_url: forms.server_url.clone(),
-                room_name: forms.room_name.clone(),
-                room_key: forms.room_key.clone(),
-                name: forms.name.clone(),
-                mcp_port: Some(forms.mcp_port.clone()),
-                repo: forms.repo.clone(),
-                new_project: forms.new_project.clone(),
-                project_name: forms.project_name.clone(),
-                new_projects_dir: forms.new_projects_dir.clone(),
-                proposal_title: forms.proposal_title.clone(),
-                proposal_body: Text::of(&forms.proposal_body),
-                note: forms.note.clone(),
-            },
+            forms: self.forms.clone(),
             task_draft: self
                 .task_draft
                 .as_ref()
@@ -306,21 +294,11 @@ impl App {
             self.settings.wsl_distros = distros;
             self.read_project_dirs();
         }
-        let forms = r.forms;
-        self.forms.server_url = forms.server_url;
-        self.forms.room_name = forms.room_name;
-        self.forms.room_key = forms.room_key;
-        self.forms.name = forms.name;
-        if let Some(port) = forms.mcp_port {
-            self.forms.mcp_port = port;
+        let mut forms = r.forms;
+        if forms.mcp_port.is_empty() {
+            forms.mcp_port = std::mem::take(&mut self.forms.mcp_port);
         }
-        self.forms.repo = forms.repo;
-        self.forms.new_project = forms.new_project;
-        self.forms.project_name = forms.project_name;
-        self.forms.new_projects_dir = forms.new_projects_dir;
-        self.forms.proposal_title = forms.proposal_title;
-        self.forms.proposal_body = forms.proposal_body.content();
-        self.forms.note = forms.note;
+        self.forms = forms;
         if r.from_version != update::CURRENT {
             self.notify(&format!("Updated to {}", update::CURRENT));
         }
@@ -339,6 +317,13 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `Forms` has no `PartialEq` (an editor content has none): compare what is written.
+    impl PartialEq for Forms {
+        fn eq(&self, other: &Self) -> bool {
+            serde_json::to_value(self).unwrap() == serde_json::to_value(other).unwrap()
+        }
+    }
 
     fn text(text: &str, line: usize, column: usize, selection: Option<(usize, usize)>) -> Text {
         Text {
@@ -362,18 +347,18 @@ mod tests {
             members_open: true,
             proposal_folded: true,
             plan_folded: true,
-            forms: FormsSnapshot {
+            forms: Forms {
                 server_url: "weida://x".to_owned(),
                 room_name: String::new(),
                 room_key: String::new(),
                 name: "alice".to_owned(),
-                mcp_port: Some("13401".to_owned()),
+                mcp_port: "13401".to_owned(),
                 repo: String::new(),
                 new_project: String::new(),
                 project_name: "smoke".to_owned(),
                 new_projects_dir: String::new(),
                 proposal_title: "Restart test".to_owned(),
-                proposal_body: text("hello\nworld", 1, 2, None),
+                proposal_body: text("hello\nworld", 1, 2, None).content(),
                 note: "half a note".to_owned(),
             },
             task_draft: Some(("Title".to_owned(), text("body", 0, 4, Some((0, 1))))),
@@ -430,8 +415,8 @@ mod tests {
                 members_open: false,
                 proposal_folded: false,
                 plan_folded: false,
-                forms: FormsSnapshot {
-                    mcp_port: None,
+                forms: Forms {
+                    mcp_port: String::new(),
                     ..resume(now).forms
                 },
                 ..resume(now)
