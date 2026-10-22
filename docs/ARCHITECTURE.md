@@ -47,7 +47,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 
 |Crate|Owns|Must not know about|
 |---|---|---|
-|`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `RoomState`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (6), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
+|`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `RoomState`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (7), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
 |`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `release.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
 |`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
 |`schwitzer-app`|the `schwitzer` binary: UI, MCP server, plugin writer, session scanner, updater, WSL support|SQLite, weida: it reaches the network only through `schwitzer-client`|
@@ -124,6 +124,8 @@ stateDiagram-v2
 
 **Claims.** `Request::Claim {work, project?, task?, agent}` takes from `Accepted` for `Work::Plan` and from `Ready` for `Work::Build`. With a task number it fails with `WrongStage` or `Claimed`; without one it takes the first unclaimed task `ORDER BY priority, number LIMIT 1` (high priority first, then the oldest), optionally within one project, and answers `Claimed(None)` when nothing is free. Selection and update run in one transaction. A claim does not expire; Reject, SubmitPlan, Finish and Unclaim clear it. Any member may unclaim any claim, so a stuck one can be freed.
 
+**Waits.** `Task::waits_for` holds the numbers of tasks of the same room a task waits for (at most `caps::WAITS_FOR`, 32). `Propose` and `ProposeIdea` take an initial list (`ProposeIdea` adds it to the idea's), `SetWaits` replaces it while the task is neither `Done` nor `Rejected`; a task never waits for itself, for a number the room lacks, or for a task that already waits for it, directly or through others. A build claim without a number skips a task while one of them is not `Done`; with its number it fails with `ApiError::Waiting(n)`, naming the lowest such task. Plan claims ignore the list. `Task::open_waits` gives the client side the same rule: the slab says "waits for #n", Pick stays disabled, and the MCP task JSON's `waits_for` lists only those.
+
 **One stage, four names.** The server knows seven stages; the app and the MCP tools split some of them by claim and plan:
 
 |Stage + claim|App group (`logic::Group`)|App label (`stage_label`)|Lamp (`lamp_kind`)|MCP stage (`StageArg`)|
@@ -158,7 +160,7 @@ The client holds one `Requester` per endpoint, so two QUIC connections per serve
 |---|---|
 |session|`Hello`, `SetName`|
 |rooms|`CreateRoom`, `JoinRoom`, `LeaveRoom`|
-|tasks|`Propose`, `AddIdea`, `ProposeIdea`, `EditTask`, `SetPriority`, `MoveTask`, `AddNote`|
+|tasks|`Propose`, `AddIdea`, `ProposeIdea`, `EditTask`, `SetPriority`, `MoveTask`, `AddNote`, `SetWaits`|
 |decisions|`Decide`|
 |work|`Claim`, `SubmitPlan`, `Finish`, `Unclaim`|
 |projects|`CreateProject`, `RenameProject`, `DeleteProject` (only a project without tasks in any stage; its id is never given again)|
@@ -216,7 +218,7 @@ sequenceDiagram
 - Room and task size (`lib.rs`): a room snapshot (`Event::Room`) stays under `ROOM_BYTES = MAX_EVENT_FRAME − 64 KiB`, a task under `TASK_BYTES = MAX_RPC_BYTES − 16`, so the snapshot and the task reply always fit their frames. Every task mutation (`mutate`) checks both, a project mutation, a first `JoinRoom` and a non-empty `PublishSessions` check the room, inside the transaction, so a refusal rolls back. The 64 KiB headroom covers name changes, which are not checked. Refusals: `the room is full: its tasks, notes, members and sessions must stay under 4 MiB`, `the task is full: with its notes it must stay under 1 MiB`. The server has no delete; a full room still takes edits that shorten bodies or plans.
 - Rooms per member (`rpc.rs`): `MAX_ROOMS_PER_MEMBER = 50` memberships; `CreateRoom` and a first `JoinRoom` above it are refused with `you are in 50 rooms already; leave one to create or join another`. Leaving frees a slot; the left room stays on disk.
 
-**Store** (`store.rs`): SQLite in WAL mode with `synchronous=NORMAL`, one connection behind a mutex, used from `spawn_blocking`. `SCHEMA_VERSION = 2` sits in `PRAGMA user_version`: 0 creates the schema, 1 migrates (`MIGRATE_1`), any other version is refused.
+**Store** (`store.rs`): SQLite in WAL mode with `synchronous=NORMAL`, one connection behind a mutex, used from `spawn_blocking`. `SCHEMA_VERSION = 3` sits in `PRAGMA user_version`: 0 creates the schema, 1 and 2 migrate in one transaction (`MIGRATE_1` for 1, then `MIGRATE_2`), any other version is refused.
 
 |Table|Holds|
 |---|---|
@@ -226,6 +228,7 @@ sequenceDiagram
 |`members`|room, member, joined time|
 |`tasks`|everything of a task, the claim in `claim_*` columns|
 |`notes`|per task, in insertion order|
+|`waits`|room, task number, the number of a task it waits for|
 
 Enums are stored as explicit integers (`stage_to_int`: `Proposed 0`, `Accepted 1`, `Planned 2`, `Ready 3`, `Done 4`, `Rejected 5`, `Idea 6`), never as their postcard encoding.
 
@@ -371,7 +374,7 @@ The plugin turns failures into one line: "no MCP token in <dir>; start the Schwi
 |`list_rooms`|none|joined rooms with members, projects and task counts, from the cached state; no request|
 |`list_tasks`|`room?`, `stage?`, `project?`|the tasks, from the cached state|
 |`get_task`|`room?`, `task`|one task in full, from the cached state|
-|`propose`|`room?`, `project?`, `title`, `body`, `idea?`|`Propose`, or `ProposeIdea` with `idea`|
+|`propose`|`room?`, `project?`, `title`, `body`, `idea?`, `waits_for?`|`Propose`, or `ProposeIdea` with `idea`|
 |`add_idea`|`room?`, `project?`, `title`, `body?`|`AddIdea`|
 |`claim`|`room?`, `work: plan\|build`, `task?`, `project?`, `agent`|`Claim`; answers `schwitzer-claim: <token>`, the next step and the task JSON, or "No free task."|
 |`submit_plan`|`room?`, `task`, `plan`|`SubmitPlan`|
@@ -379,7 +382,7 @@ The plugin turns failures into one line: "no MCP token in <dir>; start the Schwi
 |`unclaim`|`room?`, `task`, `note`|`Unclaim`|
 |`add_note`|`room?`, `task`, `text`|`AddNote`|
 
-`room` may be left out when the app has joined one room; otherwise it matches a room name or at least 4 hex digits of the room id. The plugin registers each tool as `schwitzer_<name>`, with approval tier `read` for `list_rooms`, `list_tasks` and `get_task` and `write` for the rest. **There is no accept, reject, approve, replan or reopen tool, and none for `EditTask`, `SetPriority`, `MoveTask`, projects or rooms.**
+`room` may be left out when the app has joined one room; otherwise it matches a room name or at least 4 hex digits of the room id. The plugin registers each tool as `schwitzer_<name>`, with approval tier `read` for `list_rooms`, `list_tasks` and `get_task` and `write` for the rest. **There is no accept, reject, approve, replan or reopen tool, and none for `EditTask`, `SetPriority`, `MoveTask`, `SetWaits`, projects or rooms.**
 
 ### 9.5 One task, end to end
 

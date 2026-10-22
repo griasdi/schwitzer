@@ -86,6 +86,25 @@ pub struct Task {
     pub updated_ms: u64,
     pub claim: Option<Claim>,
     pub notes: Vec<Note>,
+    /// Numbers of the tasks of the room this one waits for, ascending and without duplicates:
+    /// a build claim skips it until all of them are `Done`.
+    pub waits_for: Vec<u64>,
+}
+
+impl Task {
+    /// The numbers in `waits_for` whose task in `tasks` is not `Done`, ascending. A number
+    /// missing from `tasks` counts as not done.
+    pub fn open_waits(&self, tasks: &[Task]) -> Vec<u64> {
+        self.waits_for
+            .iter()
+            .copied()
+            .filter(|n| {
+                !tasks
+                    .iter()
+                    .any(|t| t.number == *n && t.stage == Stage::Done)
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -31,6 +31,7 @@ pub enum Request {
         project: u64,
         title: String,
         body: String,
+        waits_for: Vec<u64>,
     },
     EditTask {
         room: RoomId,
@@ -89,12 +90,14 @@ pub enum Request {
         title: String,
         body: String,
     },
-    /// Writes an `Idea` up into a proposal: new title and body, stage `Proposed`, same number.
+    /// Writes an `Idea` up into a proposal: new title and body, stage `Proposed`, same number;
+    /// `waits_for` is added to what the idea already waits for.
     ProposeIdea {
         room: RoomId,
         task: u64,
         title: String,
         body: String,
+        waits_for: Vec<u64>,
     },
     /// A new project; its name is unique in the room, ignoring case.
     CreateProject {
@@ -117,6 +120,12 @@ pub enum Request {
     DeleteProject {
         room: RoomId,
         project: u64,
+    },
+    /// Replaces the tasks a task waits for; not allowed once it is `Done` or `Rejected`.
+    SetWaits {
+        room: RoomId,
+        task: u64,
+        waits_for: Vec<u64>,
     },
 }
 
@@ -159,6 +168,8 @@ pub enum ApiError {
     ProjectExists,
     #[error("the project still has tasks; move them into another project first")]
     ProjectNotEmpty,
+    #[error("the task waits for #{0}, which is not done yet")]
+    Waiting(u64),
 }
 
 pub type Reply = Result<Response, ApiError>;

@@ -148,6 +148,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
                 project: site.id,
                 title: "new landing page".into(),
                 body: String::new(),
+                waits_for: vec![],
             },
         )
         .await
@@ -178,6 +179,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
                 project: app.id,
                 title: "tidy up".into(),
                 body: String::new(),
+                waits_for: vec![],
             },
         )
         .await
@@ -191,6 +193,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
                 project: app.id,
                 title: "fix the build".into(),
                 body: String::new(),
+                waits_for: vec![],
             },
         )
         .await
@@ -244,6 +247,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
         task: idea.number,
         title: "Sync rooms in parallel".into(),
         body: "why".into(),
+        waits_for: vec![],
     };
     let proposal = task(b.request(room, write_up.clone()).await.unwrap());
     assert_eq!(proposal.stage, Stage::Proposed);
@@ -513,6 +517,7 @@ async fn a_member_who_sends_too_fast_is_told_to_wait() {
                 project: app.id,
                 title: "tidy up".into(),
                 body: String::new(),
+                waits_for: vec![],
             },
         )
         .await
@@ -580,6 +585,7 @@ async fn a_full_room_refuses_more_and_its_snapshot_still_arrives() {
                     project: app.id,
                     title: format!("task {i}"),
                     body: String::new(),
+                    waits_for: vec![],
                 },
             )
             .await
@@ -642,6 +648,7 @@ async fn an_empty_project_is_deleted_for_every_member() {
         project,
         title: "a task".into(),
         body: String::new(),
+        waits_for: vec![],
     };
     a.request(room, propose(app.id)).await.unwrap();
     room_where(&mut rx_b, |s| {
@@ -664,6 +671,136 @@ async fn an_empty_project_is_deleted_for_every_member() {
         api_error(b.request(room, propose(old.id)).await),
         ApiError::NoSuchProject
     );
+
+    a.shutdown();
+    b.shutdown();
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_task_that_waits_is_built_after_its_prerequisite() {
+    let data = TempDir::new().unwrap();
+    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
+    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
+    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
+    let mut rx_b = b.subscribe();
+
+    let key = a
+        .create_room(server.addr.clone(), "crew".into())
+        .await
+        .unwrap();
+    let room = RoomId::of(&key.token);
+    assert_eq!(b.join_room(key).await.unwrap(), room);
+    let app = project(
+        a.request(
+            room,
+            Request::CreateProject {
+                room,
+                name: "app".into(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let propose = |title: &str, waits_for: Vec<u64>| Request::Propose {
+        room,
+        project: app.id,
+        title: title.into(),
+        body: String::new(),
+        waits_for,
+    };
+    let base = task(a.request(room, propose("base", vec![])).await.unwrap());
+    let top = task(
+        a.request(room, propose("top", vec![base.number]))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(top.waits_for, [base.number]);
+    let other = task(a.request(room, propose("other", vec![])).await.unwrap());
+    for n in [base.number, top.number, other.number] {
+        let decide = |decision| Request::Decide {
+            room,
+            task: n,
+            decision,
+        };
+        a.request(room, decide(Decision::Accept)).await.unwrap();
+        let claim = Request::Claim {
+            room,
+            work: Work::Plan,
+            project: None,
+            task: Some(n),
+            agent: "planner".into(),
+        };
+        claimed(a.request(room, claim).await.unwrap());
+        let plan = Request::SubmitPlan {
+            room,
+            task: n,
+            plan: "do it".into(),
+        };
+        a.request(room, plan).await.unwrap();
+        a.request(room, decide(Decision::Approve)).await.unwrap();
+    }
+    let state = room_where(&mut rx_b, |s| {
+        s.tasks.len() == 3 && s.tasks.iter().all(|t| t.stage == Stage::Ready)
+    })
+    .await;
+    let seen = state.tasks.iter().find(|t| t.number == top.number).unwrap();
+    assert_eq!(seen.waits_for, [base.number]);
+
+    let build = |task: Option<u64>| Request::Claim {
+        room,
+        work: Work::Build,
+        project: None,
+        task,
+        agent: "builder".into(),
+    };
+    // `top` waits for `base`, so the next free builds are `base` and `other`, then none.
+    assert_eq!(
+        claimed(a.request(room, build(None)).await.unwrap()).number,
+        base.number
+    );
+    assert_eq!(
+        claimed(a.request(room, build(None)).await.unwrap()).number,
+        other.number
+    );
+    assert_eq!(
+        a.request(room, build(None)).await.unwrap(),
+        Response::Claimed(None)
+    );
+    assert_eq!(
+        api_error(a.request(room, build(Some(top.number))).await),
+        ApiError::Waiting(base.number)
+    );
+    let finish = Request::Finish {
+        room,
+        task: base.number,
+        note: "built".into(),
+    };
+    a.request(room, finish).await.unwrap();
+    assert_eq!(
+        claimed(a.request(room, build(None)).await.unwrap()).number,
+        top.number
+    );
+
+    let set_waits = |task: u64, waits_for: Vec<u64>| Request::SetWaits {
+        room,
+        task,
+        waits_for,
+    };
+    let other_waits = task(
+        a.request(room, set_waits(other.number, vec![top.number]))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(other_waits.waits_for, [top.number]);
+    match api_error(
+        a.request(room, set_waits(top.number, vec![other.number]))
+            .await,
+    ) {
+        ApiError::Invalid(text) => assert!(text.contains("already waits for"), "{text}"),
+        other => panic!("expected Invalid, got {other:?}"),
+    }
 
     a.shutdown();
     b.shutdown();

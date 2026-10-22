@@ -70,7 +70,7 @@ sequenceDiagram
 ### /schwitzer build
 
 - Refused in plan mode: "Leave plan mode, then run /schwitzer build again."
-- The pick and the claim work as for `plan`, with stage `ready` and `work: "build"`. When there is no task: "No approved Schwitzer task waits to be built."
+- The pick and the claim work as for `plan`, with stage `ready` and `work: "build"`, but the picker leaves out a task that still waits for another one not done yet (`waits_for` of `list_tasks`): the server would refuse its build. When there is no task: "No approved Schwitzer task waits to be built."
 - No session entry is stored, so the plan review hook never sends a build task's plan.
 - The task message tells the agent to implement the approved plan and then call `schwitzer_finish` with room, task and a note on what was done, or `schwitzer_unclaim` with a note on why if it stops without finishing.
 - The editor gets `Build Schwitzer task #<n> "<title>" from project "<project>" in room "<room>". schwitzer-claim: <token>`, and the plugin says "Task #<n> is claimed for building. Press Enter to start."
@@ -80,7 +80,7 @@ sequenceDiagram
 - Without text, and with open (unclaimed) ideas in the joined projects, a picker offers "New proposal" and `#<n> <title>` per idea. Picking an idea sends a user message that asks the agent to read it with `schwitzer_get_task`, draft the proposal, ask, and after agreement call `schwitzer_propose` with `idea: <n>`: the idea becomes the proposal.
 - Otherwise the plugin asks for the project (not when there is only one and no other project exists) and sends a user message that asks the agent to draft a proposal from the text, or from the conversation so far when there is no text, asking the user what to propose if the conversation holds no idea.
 - The project picker lists this repo's projects as `<project> · <room>`, then every other project of the joined rooms as `<project> · <room> · other project`. For another project the message adds that this repo is not part of it and that the body starts with `Requested from project "<project>" in room "<room>"` (with several own projects, the agent names the one the change is for) and says why that project needs the change.
-- In both cases the agent looks into the repository but changes nothing, writes a one-line title and a Markdown body (what should be done and why), shows both in its chat reply (the ask dialog cuts long text off and cannot scroll), then asks the user with the ask tool, naming only the title, whether to send, change or drop the proposal; after a change it shows the new title and body again and asks again. It calls `schwitzer_propose` only after the user agrees.
+- In both cases the agent looks into the repository but changes nothing, writes a one-line title and a Markdown body (what should be done and why; a task that can only be built after other tasks of the room are done says so and passes their numbers as `waits_for`), shows both in its chat reply (the ask dialog cuts long text off and cannot scroll), then asks the user with the ask tool, naming only the title, whether to send, change or drop the proposal; after a change it shows the new title and body again and asks again. It calls `schwitzer_propose` only after the user agrees.
 - When the app has joined none of the configured projects' rooms: "The Schwitzer app has not joined a room with a project this repo is linked to."
 
 ### /schwitzer idea &lt;text&gt;
@@ -104,7 +104,7 @@ An agent in one repo may need a change in another Schwitzer project, for example
 |`schwitzer_list_rooms`|The joined rooms with members, projects and task counts|
 |`schwitzer_list_tasks`|The tasks of a room or of one of its projects, optionally of one stage|
 |`schwitzer_get_task`|One task in full: body, plan, claim, notes|
-|`schwitzer_propose`|Propose a task, or write up an idea into a proposal|
+|`schwitzer_propose`|Propose a task, or write up an idea into a proposal; `waits_for` names tasks that must be done before it is built|
 |`schwitzer_add_idea`|Note an idea|
 |`schwitzer_claim`|Claim a task for planning or building|
 |`schwitzer_submit_plan`|Hand in the plan for a planning claim|

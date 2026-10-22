@@ -114,6 +114,10 @@ struct ProposeArgs {
     /// number. Omit it for a new task.
     #[serde(default)]
     idea: Option<u64>,
+    /// Numbers of tasks in the same room that must be done before this one can be claimed for
+    /// building, for example `[12]`. With `idea`, they are added to what the idea already waits for.
+    #[serde(default)]
+    waits_for: Vec<u64>,
 }
 
 /// Arguments of `add_idea`.
@@ -142,7 +146,8 @@ struct ClaimArgs {
     /// "plan" claims an accepted task to write its plan; "build" claims an approved task to
     /// implement it.
     work: WorkArg,
-    /// Task number; omitted, the next free task of that kind is claimed.
+    /// Task number; omitted, the next free task of that kind is claimed. A build skips, and
+    /// refuses, a task that waits for one not done yet.
     #[serde(default)]
     task: Option<u64>,
     /// Only tasks of this project (name or number) when `task` is omitted.
@@ -230,6 +235,11 @@ impl RoomRef {
     /// The room's projects; empty while the room is not loaded.
     fn projects(&self) -> &[Project] {
         self.state.as_ref().map_or(&[], |s| &s.projects)
+    }
+
+    /// The room's tasks; empty while the room is not loaded.
+    fn tasks(&self) -> &[Task] {
+        self.state.as_ref().map_or(&[], |s| &s.tasks)
     }
 }
 
@@ -393,8 +403,8 @@ fn claim_json(claim: &Claim, members: &[Member]) -> Value {
     })
 }
 
-/// A task as one row of `list_tasks`.
-fn task_row(task: &Task, members: &[Member], projects: &[Project]) -> Value {
+/// A task as one row of `list_tasks`; `waits_for` lists only what `tasks` has not done yet.
+fn task_row(task: &Task, members: &[Member], projects: &[Project], tasks: &[Task]) -> Value {
     json!({
         "number": task.number,
         "title": task.title,
@@ -402,11 +412,12 @@ fn task_row(task: &Task, members: &[Member], projects: &[Project]) -> Value {
         "stage": stage_of(task).name(),
         "priority": priority_name(task.priority),
         "claim": task.claim.as_ref().map(|c| claim_json(c, members)),
+        "waits_for": task.open_waits(tasks),
     })
 }
 
-/// A task with body, plan and notes.
-fn task_json(task: &Task, members: &[Member], projects: &[Project]) -> Value {
+/// A task with body, plan and notes; `waits_for` lists only what `tasks` has not done yet.
+fn task_json(task: &Task, members: &[Member], projects: &[Project], tasks: &[Task]) -> Value {
     let notes: Vec<Value> = task
         .notes
         .iter()
@@ -432,6 +443,7 @@ fn task_json(task: &Task, members: &[Member], projects: &[Project]) -> Value {
         "updated_ms": task.updated_ms,
         "claim": task.claim.as_ref().map(|c| claim_json(c, members)),
         "notes": notes,
+        "waits_for": task.open_waits(tasks),
     })
 }
 
@@ -471,7 +483,12 @@ fn room_row(room: &RoomRef, me: MemberId) -> Value {
 
 /// The answer of `claim` for a claimed `task`: the marker line the agent echoes into its session
 /// log, what to do next, then the task.
-fn claim_text(task: &Task, members: &[Member], projects: &[Project]) -> Result<String, String> {
+fn claim_text(
+    task: &Task,
+    members: &[Member],
+    projects: &[Project],
+    tasks: &[Task],
+) -> Result<String, String> {
     let claim = task
         .claim
         .as_ref()
@@ -483,7 +500,7 @@ fn claim_text(task: &Task, members: &[Member], projects: &[Project]) -> Result<S
     Ok(format!(
         "schwitzer-claim: {}\n{next}\n{}",
         claim.token,
-        pretty(&task_json(task, members, projects))?
+        pretty(&task_json(task, members, projects, tasks))?
     ))
 }
 
@@ -567,7 +584,12 @@ impl Tools {
         let room = self.room(arg.as_deref())?;
         let request = request(&room)?;
         let task = self.task_request(&room, request).await?;
-        pretty(&task_json(&task, room.members(), room.projects()))
+        pretty(&task_json(
+            &task,
+            room.members(),
+            room.projects(),
+            room.tasks(),
+        ))
     }
 }
 
@@ -586,7 +608,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "List the tasks of a room, or of one of its projects: number, title, project, stage, priority and who claims it. Stages: idea (a rough sketch, not proposed yet), proposed, accepted, planned, ready (approved, nobody builds it yet), in_progress, done, rejected."
+        description = "List the tasks of a room, or of one of its projects: number, title, project, stage, priority, who claims it and the tasks it still waits for (`waits_for`: not done yet, so it cannot be built before). Stages: idea (a rough sketch, not proposed yet), proposed, accepted, planned, ready (approved, nobody builds it yet), in_progress, done, rejected."
     )]
     async fn list_tasks(&self, Parameters(args): Parameters<ListTasksArgs>) -> CallToolResult {
         Self::bounded(async {
@@ -606,7 +628,7 @@ impl Tools {
                 .iter()
                 .filter(|t| args.stage.is_none_or(|s| stage_of(t) == s))
                 .filter(|t| project.is_none_or(|id| t.project == id))
-                .map(|t| task_row(t, &state.members, &state.projects))
+                .map(|t| task_row(t, &state.members, &state.projects, &state.tasks))
                 .collect();
             pretty(&Value::Array(rows))
         })
@@ -625,7 +647,12 @@ impl Tools {
                 .iter()
                 .find(|t| t.number == args.task)
                 .ok_or_else(|| schwitzer_proto::ApiError::NoSuchTask.to_string())?;
-            pretty(&task_json(task, &state.members, &state.projects))
+            pretty(&task_json(
+                task,
+                &state.members,
+                &state.projects,
+                &state.tasks,
+            ))
         })
         .await
     }
@@ -641,12 +668,14 @@ impl Tools {
                     task,
                     title: args.title,
                     body: args.body,
+                    waits_for: args.waits_for,
                 },
                 None => Request::Propose {
                     room: room.id,
                     project: target_project(&room.loaded()?.projects, args.project.as_deref())?.id,
                     title: args.title,
                     body: args.body,
+                    waits_for: args.waits_for,
                 },
             })
         }))
@@ -698,7 +727,9 @@ impl Tools {
                 .await
                 .map_err(|e| e.to_string())?;
             match response {
-                Response::Claimed(Some(task)) => claim_text(&task, room.members(), room.projects()),
+                Response::Claimed(Some(task)) => {
+                    claim_text(&task, room.members(), room.projects(), room.tasks())
+                }
                 Response::Claimed(None) => Ok("No free task.".into()),
                 _ => Err(unexpected()),
             }
@@ -818,6 +849,7 @@ mod tests {
                 text: "hello".into(),
                 at_ms: 3,
             }],
+            waits_for: Vec::new(),
         }
     }
 
@@ -925,12 +957,12 @@ mod tests {
         assert_eq!(stage_of(&building), StageArg::InProgress);
         assert_eq!(stage_of(&task(2, Stage::Ready, None)), StageArg::Ready);
         assert_eq!(stage_of(&task(3, Stage::Idea, None)), StageArg::Idea);
-        let row = task_row(&building, &members, &projects);
+        let row = task_row(&building, &members, &projects, &[]);
         assert_eq!(row["project"], "app");
         assert_eq!(row["stage"], "in_progress");
         assert_eq!(row["claim"]["member"], "bob");
         assert!(!row.to_string().contains("abab"));
-        let full = task_json(&building, &members, &projects);
+        let full = task_json(&building, &members, &projects, &[]);
         assert_eq!(full["project"], "app");
         assert_eq!(full["author"], "alice");
         assert_eq!(full["notes"][0]["author"], "bob");
@@ -971,6 +1003,7 @@ mod tests {
             &task(1, Stage::Accepted, Some(claim(Work::Plan))),
             &members,
             &projects,
+            &[],
         )
         .unwrap();
         let mut lines = text.lines();
@@ -987,6 +1020,7 @@ mod tests {
             &task(1, Stage::Ready, Some(claim(Work::Build))),
             &members,
             &projects,
+            &[],
         )
         .unwrap();
         assert!(
@@ -994,7 +1028,7 @@ mod tests {
                 "Implement the approved plan, then call finish (or unclaim if you stop)."
             )
         );
-        assert!(claim_text(&task(1, Stage::Ready, None), &members, &projects).is_err());
+        assert!(claim_text(&task(1, Stage::Ready, None), &members, &projects, &[]).is_err());
     }
 
     #[test]

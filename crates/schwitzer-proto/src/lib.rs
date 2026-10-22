@@ -20,7 +20,7 @@ pub use model::{
 };
 pub use rpc::{ApiError, Reply, Request, Response};
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 pub const PATH_RPC: &str = "/rpc";
 pub const PATH_EVENTS: &str = "/events";
@@ -43,6 +43,8 @@ pub mod caps {
     pub const SESSION_TITLE: usize = 200;
     /// Projects one published session may name.
     pub const SESSION_PROJECTS: usize = 64;
+    /// Tasks one task may wait for.
+    pub const WAITS_FOR: usize = 32;
 }
 
 /// Error of the postcard helpers.

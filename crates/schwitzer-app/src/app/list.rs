@@ -3,7 +3,7 @@
 
 use iced::widget::{Space, column, container, responsive, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{Decision, Project, RoomId, RoomState, Stage, Task};
+use schwitzer_proto::{Decision, Project, RoomState, Stage, Task};
 
 use super::icons::{Icon, Tone, icon};
 use super::logic::{self, Group};
@@ -140,7 +140,8 @@ fn group_header<'a>(group: Group, count: usize, open: bool) -> Element<'a, Messa
     )
 }
 
-/// The two lines of a slab: lamp and title, then number, stage, priority and the worker's tag.
+/// The two lines of a slab: lamp and title, then number, stage, priority, the tasks it still
+/// waits for, and the worker's tag.
 pub fn summary<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     let mut meta = row![
         text(format!("#{}", task.number))
@@ -153,6 +154,10 @@ pub fn summary<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message>
     .align_y(Alignment::Center);
     if let Some(priority) = priority_pill(task.priority) {
         meta = meta.push(priority);
+    }
+    let open = task.open_waits(&state.tasks);
+    if logic::editable(task) && !open.is_empty() {
+        meta = meta.push(muted(logic::waits_label(&open)));
     }
     meta = meta.push(Space::new().width(Length::Fill));
     if let Some(claim) = &task.claim {
@@ -186,7 +191,7 @@ fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
     let mut line = row![summary(state, task)]
         .spacing(SP_3)
         .align_y(Alignment::Center);
-    if let Some(action) = next_step(app, state.id, task) {
+    if let Some(action) = next_step(app, state, task) {
         line = line.push(action);
     }
     id_button(
@@ -201,7 +206,11 @@ fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
 /// The one button a slab carries: Approve a finished plan, Pick an approved one, Accept a
 /// proposal, or Unclaim your own claim. The button takes the press before the slab does.
 /// Right after an approval Approve stays, busy, while the planning session claims the build.
-fn next_step<'a>(app: &'a App, room: RoomId, task: &'a Task) -> Option<Element<'a, Message>> {
+fn next_step<'a>(
+    app: &'a App,
+    state: &'a RoomState,
+    task: &'a Task,
+) -> Option<Element<'a, Message>> {
     let n = task.number;
     if logic::approvable(task) {
         return Some(with_tip(
@@ -216,7 +225,7 @@ fn next_step<'a>(app: &'a App, room: RoomId, task: &'a Task) -> Option<Element<'
             "Approve the plan; an omp session waiting on its review builds it",
         ));
     }
-    if app.handing_off(room, task) {
+    if app.handing_off(state.id, task) {
         return Some(with_tip(
             icon_text_button(
                 format!("approve-{n}"),
@@ -230,6 +239,20 @@ fn next_step<'a>(app: &'a App, room: RoomId, task: &'a Task) -> Option<Element<'
         ));
     }
     if logic::pickable(task) {
+        let open = task.open_waits(&state.tasks);
+        if !open.is_empty() {
+            return Some(with_tip(
+                icon_text_button(
+                    format!("pick-{n}"),
+                    Icon::Pick,
+                    Tone::Muted,
+                    "Pick",
+                    None,
+                    theme::button_primary,
+                ),
+                format!("Not pickable yet: it {}", logic::waits_label(&open)),
+            ));
+        }
         let busy = app.picking == Some(n);
         return Some(with_tip(
             icon_text_button(

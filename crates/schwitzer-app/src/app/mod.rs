@@ -191,6 +191,8 @@ pub enum Message {
     SavePlan,
     PlanSaved(Result<Response, String>),
     SetPriority(Priority),
+    AddWait(u64),
+    RemoveWait(u64),
     Decide(u64, Decision),
     Unclaim(u64),
     NoteInput(String),
@@ -1505,6 +1507,8 @@ impl App {
                 )),
                 None => Task::none(),
             },
+            Message::AddWait(n) => self.set_waits(|w| w.push(n)),
+            Message::RemoveWait(n) => self.set_waits(|w| w.retain(|x| *x != n)),
             Message::Decide(number, decision) => match self.task_ids(number) {
                 Some((room, task)) => fire(self.request(
                     room,
@@ -2080,6 +2084,7 @@ impl App {
                 project,
                 title,
                 body,
+                waits_for: Vec::new(),
             }
         };
         call(self.request(room, req), Message::Proposed)
@@ -2097,7 +2102,7 @@ impl App {
         let Some(task) = state.tasks.iter().find(|t| t.number == number) else {
             return Task::none();
         };
-        if !logic::pickable(task) {
+        if !logic::pickable(task) || !task.open_waits(&state.tasks).is_empty() {
             return Task::none();
         }
         let (room, name) = (state.id, state.name.clone());
@@ -2139,6 +2144,29 @@ impl App {
         call(self.request(room, req), Message::TaskSaved)
     }
 
+    /// Sends the open task's waits after `edit`, when that changes them.
+    fn set_waits(&self, edit: impl FnOnce(&mut Vec<u64>)) -> Task<Message> {
+        let Some((state, task)) = self.open() else {
+            return Task::none();
+        };
+        let mut waits_for = task.waits_for.clone();
+        edit(&mut waits_for);
+        waits_for.sort_unstable();
+        waits_for.dedup();
+        if waits_for == task.waits_for {
+            return Task::none();
+        }
+        let room = state.id;
+        fire(self.request(
+            room,
+            Request::SetWaits {
+                room,
+                task: task.number,
+                waits_for,
+            },
+        ))
+    }
+
     /// Writes the open idea up into a proposal with the draft's title and body.
     fn propose_idea(&self) -> Task<Message> {
         let (Some((state, task)), Some(draft)) = (self.open(), &self.task_draft) else {
@@ -2153,6 +2181,7 @@ impl App {
             task: task.number,
             title: draft.title.clone(),
             body: draft.body.text(),
+            waits_for: Vec::new(),
         };
         call(self.request(room, req), Message::TaskSaved)
     }

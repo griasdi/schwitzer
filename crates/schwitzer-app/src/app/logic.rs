@@ -220,6 +220,12 @@ pub fn editable(task: &Task) -> bool {
     !matches!(task.stage, Stage::Done | Stage::Rejected)
 }
 
+/// "waits for #12, #14" for the slab.
+pub fn waits_label(open: &[u64]) -> String {
+    let numbers: Vec<String> = open.iter().map(|n| format!("#{n}")).collect();
+    format!("waits for {}", numbers.join(", "))
+}
+
 /// The label of a stage as shown next to a task.
 pub fn stage_label(task: &Task) -> &'static str {
     match (task.stage, task.claim.as_ref().map(|c| c.work)) {
@@ -507,6 +513,7 @@ mod tests {
             updated_ms: 0,
             claim,
             notes: Vec::new(),
+            waits_for: Vec::new(),
         }
     }
 

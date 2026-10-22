@@ -86,6 +86,19 @@ fn text(field: &str, value: &str, cap: usize, required: bool) -> Result<String, 
     Ok(value.to_owned())
 }
 
+/// Task numbers to wait for: ascending, without duplicates, at most `caps::WAITS_FOR`.
+fn waits(mut list: Vec<u64>) -> Result<Vec<u64>, ApiError> {
+    list.sort_unstable();
+    list.dedup();
+    if list.len() > caps::WAITS_FOR {
+        return Err(ApiError::Invalid(format!(
+            "a task waits for at most {} tasks",
+            caps::WAITS_FOR
+        )));
+    }
+    Ok(list)
+}
+
 /// Display metadata: trimmed and cut to `cap` bytes at a character boundary.
 fn clamp(value: &str, cap: usize) -> String {
     let value = value.trim();
@@ -145,12 +158,14 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             project,
             title,
             body,
+            waits_for,
         } => {
             let title = text("title", &title, caps::TITLE, true)?;
             let body = text("body", &body, caps::BODY, false)?;
+            let waits_for = waits(waits_for)?;
             task_reply(
                 mutate(state, caller, room, move |conn, now| {
-                    store::create_task(
+                    let task = store::create_task(
                         conn,
                         &room,
                         &caller,
@@ -159,8 +174,11 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
                         &title,
                         &body,
                         now,
-                    )
-                    .map(Some)
+                    )?;
+                    if waits_for.is_empty() {
+                        return Ok(Some(task));
+                    }
+                    store::set_waits(conn, &room, task.number, &waits_for, now).map(Some)
                 })
                 .await,
             )
@@ -195,12 +213,14 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             task,
             title,
             body,
+            waits_for,
         } => {
             let title = text("title", &title, caps::TITLE, true)?;
             let body = text("body", &body, caps::BODY, false)?;
+            let waits_for = waits(waits_for)?;
             task_reply(
                 mutate(state, caller, room, move |conn, now| {
-                    store::propose_idea(conn, &room, task, &title, &body, now).map(Some)
+                    store::propose_idea(conn, &room, task, &title, &body, &waits_for, now).map(Some)
                 })
                 .await,
             )
@@ -336,6 +356,19 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
         ),
         Request::DeleteProject { room, project } => {
             delete_project(state, caller, room, project).await
+        }
+        Request::SetWaits {
+            room,
+            task,
+            waits_for,
+        } => {
+            let waits_for = waits(waits_for)?;
+            task_reply(
+                mutate(state, caller, room, move |conn, now| {
+                    store::set_waits(conn, &room, task, &waits_for, now).map(Some)
+                })
+                .await,
+            )
         }
     }
 }

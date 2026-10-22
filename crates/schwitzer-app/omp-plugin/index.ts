@@ -37,6 +37,8 @@ interface TaskRow {
   title: string;
   priority: string;
   claim: unknown;
+  /** Tasks it waits for that are not done yet. */
+  waits_for: number[];
 }
 interface RoomRow {
   room: string;
@@ -139,6 +141,7 @@ interface Zod {
   object(shape: Record<string, ZodType>): ZodType;
   string(): ZodType;
   number(): ZodType;
+  array(item: ZodType): ZodType;
   enum(values: readonly [string, ...string[]]): ZodType;
 }
 interface Pi {
@@ -226,7 +229,7 @@ const TOOLS: ToolSpec[] = [
     name: "list_tasks",
     label: "Schwitzer tasks",
     description:
-      "List the tasks of a room, or of one of its projects: number, title, project, stage, priority and who claims it. Stages: idea (a rough sketch, not proposed yet), proposed, accepted, planned, ready (approved, nobody builds it yet), in_progress, done, rejected.",
+      "List the tasks of a room, or of one of its projects: number, title, project, stage, priority, who claims it and the tasks it still waits for (`waits_for`: not done yet, so it cannot be built before). Stages: idea (a rough sketch, not proposed yet), proposed, accepted, planned, ready (approved, nobody builds it yet), in_progress, done, rejected.",
     approval: "read",
     parameters: (z) =>
       z.object({
@@ -269,6 +272,12 @@ const TOOLS: ToolSpec[] = [
           .describe(
             "Number of an idea this proposal writes up: the idea becomes the proposal and keeps its number. Omit it for a new task.",
           ),
+        waits_for: z
+          .array(z.number().int())
+          .optional()
+          .describe(
+            "Numbers of tasks in the same room that must be done before this one can be claimed for building, for example [12]. With `idea`, they are added to what the idea already waits for.",
+          ),
       }),
   },
   {
@@ -297,7 +306,13 @@ const TOOLS: ToolSpec[] = [
         work: z
           .enum(["plan", "build"])
           .describe('"plan" claims an accepted task to write its plan; "build" claims an approved task to implement it.'),
-        task: z.number().int().optional().describe("Task number; omitted, the next free task of that kind is claimed."),
+        task: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            "Task number; omitted, the next free task of that kind is claimed. A build skips, and refuses, a task that waits for one not done yet.",
+          ),
         project: z.string().optional().describe(PROJECT_CLAIM_ARG),
         agent: z.string().describe("Name of this agent, shown to the room."),
       }),
@@ -643,13 +658,17 @@ async function crossProjectCheck(
 }
 
 /** Unclaimed tasks of the configured projects in `stage` (accepted for plan, ready for build, idea
- *  to write up), high priority first, then by number. A configured project the app no longer has
- *  joined is skipped. */
+ *  to write up), high priority first, then by number. A ready task that still waits for another
+ *  is left out: the server refuses its build. A configured project the app no longer has joined
+ *  is skipped. */
 async function unclaimed(config: Config, stage: string): Promise<Candidate[]> {
   const found: Candidate[] = [];
   for (const { room, roomName, projectName } of ownProjects(config, await listRooms(config))) {
     const tasks = JSON.parse(await tool(config, "list_tasks", { room, project: projectName, stage })) as TaskRow[];
-    for (const task of tasks) if (task.claim === null) found.push({ room, roomName, projectName, task });
+    for (const task of tasks) {
+      if (task.claim !== null || (stage === STAGE.build && task.waits_for.length > 0)) continue;
+      found.push({ room, roomName, projectName, task });
+    }
   }
   return found.sort(
     (a, b) =>
@@ -880,6 +899,7 @@ async function proposeTask(pi: Pi, ctx: Ctx, config: Config, text: string): Prom
 const DRAFT_STEPS = [
   "Look into the repository where that makes the task concrete, but change nothing and do not implement it.",
   "Write a one-line title and a Markdown body that says what should be done and why.",
+  "If it can only be built after other tasks of the room are done, say so in the body and pass their numbers as `waits_for` when you send it.",
   "Show me the title and the whole body as your reply in the chat, not inside a tool call: the ask dialog cuts long text off and cannot scroll.",
   "Then ask me with the ask tool whether to send the proposal, change it or drop it. Keep the question short: name only the title, not the body.",
   "If I want a change, show the changed title and body in the chat again and ask again.",

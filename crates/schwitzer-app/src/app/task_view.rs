@@ -1,10 +1,12 @@
 //! The element open in place in the task list: a task shown in full, or the draft of a new one.
 
+use std::fmt;
+
 use iced::widget::{
     Space, column, container, markdown, pick_list, row, text, text_editor, text_input,
 };
 use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{Decision, Priority, RoomId, RoomState, Stage, Task};
+use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task};
 
 use super::chrome::ProjectChoice;
 use super::icons::{Icon, Tone, icon};
@@ -18,7 +20,7 @@ use super::{App, Message, TaskText, sticky};
 use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 
 /// Task `task` open in place: the slab's two lines as a head that closes it again, then
-/// details, people, decisions, plan, priority and notes.
+/// details, people, decisions, plan, priority, project, waits and notes.
 pub fn view<'a>(
     app: &'a App,
     state: &'a RoomState,
@@ -74,7 +76,7 @@ pub fn view<'a>(
         body = body.push(details);
     }
     body = body.push(people(app, state, task));
-    if let Some(actions) = actions(app, state.id, task) {
+    if let Some(actions) = actions(app, state, task) {
         body = body.push(actions);
     }
     body = body
@@ -85,6 +87,9 @@ pub fn view<'a>(
         .push(hrule());
     if state.projects.len() > 1 {
         body = body.push(project(state, task)).push(hrule());
+    }
+    if editable {
+        body = body.push(waits(state, task)).push(hrule());
     }
     body = body.push(notes(app, state, task));
     container(sticky::sticky(
@@ -295,9 +300,9 @@ fn people<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a,
 /// Pick (when an approved plan waits) and the human decisions the server allows now. Right
 /// after an approval only the busy "Approve & build" shows while the planning session claims
 /// the build.
-fn actions<'a>(app: &'a App, room: RoomId, task: &'a Task) -> Option<Element<'a, Message>> {
+fn actions<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Option<Element<'a, Message>> {
     let mut row = row![].spacing(SP_2).align_y(Alignment::Center);
-    if app.handing_off(room, task) {
+    if app.handing_off(state.id, task) {
         return Some(
             row.push(text_button(
                 "approve",
@@ -326,7 +331,8 @@ fn actions<'a>(app: &'a App, room: RoomId, task: &'a Task) -> Option<Element<'a,
             Icon::Pick,
             Tone::OnPrimary,
             "Pick and copy prompt",
-            app.picking.is_none().then_some(Message::Pick(task.number)),
+            (app.picking.is_none() && task.open_waits(&state.tasks).is_empty())
+                .then_some(Message::Pick(task.number)),
             theme::button_primary,
         ));
     }
@@ -495,6 +501,85 @@ fn project<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     .spacing(SP_1)
     .align_y(Alignment::Center)
     .into()
+}
+
+/// A task the open task may wait for, as the "Waits for" picker lists it.
+#[derive(Debug, Clone, PartialEq)]
+struct WaitChoice {
+    number: u64,
+    label: String,
+}
+
+impl fmt::Display for WaitChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+/// The tasks this one waits for, each with a button that drops it, and a picker that adds one.
+fn waits<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
+    let mut choices: Vec<WaitChoice> = state
+        .tasks
+        .iter()
+        .filter(|t| {
+            t.number != task.number && logic::editable(t) && !task.waits_for.contains(&t.number)
+        })
+        .map(|t| {
+            let mut title = logic::truncate(&t.title, 40);
+            if title.len() < t.title.len() {
+                title.push('…');
+            }
+            WaitChoice {
+                number: t.number,
+                label: format!("#{} {title}", t.number),
+            }
+        })
+        .collect();
+    choices.sort_by_key(|c| c.number);
+    let mut head = row![heading("Waits for").width(Length::Fill)]
+        .spacing(SP_1)
+        .align_y(Alignment::Center);
+    if !choices.is_empty() {
+        head = head.push(
+            container(
+                pick_list(choices, None::<WaitChoice>, |c| Message::AddWait(c.number))
+                    .placeholder("Add task…")
+                    .text_size(TS_14)
+                    .padding([SP_1, SP_2])
+                    .style(theme::picker)
+                    .menu_style(theme::picker_menu),
+            )
+            .id("task-waits-add"),
+        );
+    }
+    let mut col = column![head].spacing(SP_2);
+    for &n in &task.waits_for {
+        let prereq = state.tasks.iter().find(|t| t.number == n);
+        let mut line = row![
+            text(format!("#{n}"))
+                .size(TS_12)
+                .font(MEDIUM)
+                .style(theme::text_muted),
+            text(prereq.map_or("(unknown task)", |t| t.title.as_str()))
+                .size(TS_14)
+                .width(Length::Fill),
+        ]
+        .spacing(SP_2)
+        .align_y(Alignment::Center);
+        if let Some(prereq) = prereq {
+            line = line.push(widgets::pill(logic::stage_label(prereq)));
+        }
+        line = line.push(icon_button(
+            format!("unwait-{n}"),
+            Icon::Close,
+            Tone::Muted,
+            "Stop waiting for this task",
+            Some(Message::RemoveWait(n)),
+            theme::button_ghost,
+        ));
+        col = col.push(line);
+    }
+    col.into()
 }
 
 fn notes<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {

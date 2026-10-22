@@ -4,7 +4,7 @@
 //! mutation in one transaction, which is what makes claim selection plus the
 //! update atomic.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -17,7 +17,7 @@ use schwitzer_proto::{
 };
 
 /// Version stored in `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA: &str = "
 CREATE TABLE people(member BLOB PRIMARY KEY, name TEXT NOT NULL);
@@ -36,6 +36,8 @@ CREATE TABLE tasks(room BLOB NOT NULL, number INTEGER NOT NULL, project INTEGER 
 CREATE TABLE notes(room BLOB NOT NULL, number INTEGER NOT NULL, at_ms INTEGER NOT NULL,
     author BLOB NOT NULL, agent TEXT, text TEXT NOT NULL);
 CREATE INDEX notes_by_task ON notes(room, number);
+CREATE TABLE waits(room BLOB NOT NULL, number INTEGER NOT NULL, after INTEGER NOT NULL,
+    PRIMARY KEY(room, number, after));
 ";
 
 /// From schema 1 (before projects): every room gets project 1, named like the room, holding
@@ -47,6 +49,12 @@ CREATE TABLE projects(room BLOB NOT NULL, id INTEGER NOT NULL, name TEXT NOT NUL
 INSERT INTO projects(room, id, name, created_ms) SELECT id, 1, name, created_ms FROM rooms;
 UPDATE rooms SET next_project = 2;
 ALTER TABLE tasks ADD COLUMN project INTEGER NOT NULL DEFAULT 1;
+";
+
+/// From schema 2: the tasks a task waits for.
+const MIGRATE_2: &str = "
+CREATE TABLE waits(room BLOB NOT NULL, number INTEGER NOT NULL, after INTEGER NOT NULL,
+    PRIMARY KEY(room, number, after));
 ";
 
 /// Why a store closure failed.
@@ -109,13 +117,19 @@ impl Store {
                 conn.execute_batch(SCHEMA).context("applying schema")?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            1 => {
+            1 | 2 => {
                 let tx = conn.transaction()?;
-                tx.execute_batch(MIGRATE_1)
-                    .context("migrating from schema version 1")?;
+                if version == 1 {
+                    tx.execute_batch(MIGRATE_1)
+                        .context("migrating from schema version 1")?;
+                }
+                tx.execute_batch(MIGRATE_2)
+                    .context("migrating from schema version 2")?;
                 tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
                 tx.commit()?;
-                tracing::info!("migrated the database to schema version 2 (projects)");
+                tracing::info!(
+                    "migrated the database from schema version {version} to {SCHEMA_VERSION}"
+                );
             }
             SCHEMA_VERSION => {}
             other => bail!("unsupported database schema version {other}"),
@@ -534,7 +548,7 @@ pub fn move_task(conn: &Connection, room: &RoomId, number: u64, project: u64, no
 const TASK_COLUMNS: &str = "number, title, body, plan, stage, priority, author, created_ms, \
      updated_ms, claim_member, claim_agent, claim_work, claim_since_ms, claim_token, project";
 
-/// Decodes a task row of [`TASK_COLUMNS`]; the notes are filled in by the caller.
+/// Decodes a task row of [`TASK_COLUMNS`]; the notes and waits are filled in by the caller.
 fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
     let claim_member: Option<Vec<u8>> = row.get(9)?;
     let claim = match claim_member {
@@ -571,6 +585,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         project: uns(row.get(14)?),
         claim,
         notes: Vec::new(),
+        waits_for: Vec::new(),
     })
 }
 
@@ -583,7 +598,7 @@ fn note_from_row(row: &Row<'_>) -> rusqlite::Result<Note> {
     })
 }
 
-/// One task with its notes, `None` if the room has no such number.
+/// One task with its notes and waits, `None` if the room has no such number.
 pub fn read_task(conn: &Connection, room: &RoomId, number: u64) -> R<Option<Task>> {
     let task = conn
         .query_row(
@@ -605,10 +620,17 @@ pub fn read_task(conn: &Connection, room: &RoomId, number: u64) -> R<Option<Task
             note_from_row,
         )?
         .collect::<rusqlite::Result<Vec<Note>>>()?;
+    let mut stmt =
+        conn.prepare("SELECT after FROM waits WHERE room = ?1 AND number = ?2 ORDER BY after")?;
+    task.waits_for = stmt
+        .query_map(params![room.as_bytes().as_slice(), int(number)], |r| {
+            Ok(uns(r.get(0)?))
+        })?
+        .collect::<rusqlite::Result<Vec<u64>>>()?;
     Ok(Some(task))
 }
 
-/// Every task of a room by number, notes included.
+/// Every task of a room by number, notes and waits included.
 pub fn read_tasks(conn: &Connection, room: &RoomId) -> R<Vec<Task>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {TASK_COLUMNS} FROM tasks WHERE room = ?1 ORDER BY number"
@@ -626,8 +648,18 @@ pub fn read_tasks(conn: &Connection, room: &RoomId) -> R<Vec<Task>> {
         let (number, note) = row?;
         notes.entry(number).or_default().push(note);
     }
+    let mut stmt =
+        conn.prepare("SELECT number, after FROM waits WHERE room = ?1 ORDER BY number, after")?;
+    let mut waits: HashMap<u64, Vec<u64>> = HashMap::new();
+    for row in stmt.query_map([room.as_bytes().as_slice()], |r| {
+        Ok((uns(r.get(0)?), uns(r.get(1)?)))
+    })? {
+        let (number, after) = row?;
+        waits.entry(number).or_default().push(after);
+    }
     for task in &mut tasks {
         task.notes = notes.remove(&task.number).unwrap_or_default();
+        task.waits_for = waits.remove(&task.number).unwrap_or_default();
     }
     Ok(tasks)
 }
@@ -732,18 +764,29 @@ pub fn create_task(
 }
 
 /// Writes an idea up into a proposal: new title and body, stage `Proposed`; the author stays.
+/// `waits` is added to what the idea already waits for.
 pub fn propose_idea(
     conn: &Connection,
     room: &RoomId,
     number: u64,
     title: &str,
     body: &str,
+    waits: &[u64],
     now: u64,
 ) -> R<Task> {
     let task = require_task(conn, room, number)?;
     if task.stage != Stage::Idea {
         return Err(ApiError::WrongStage(task.stage).into());
     }
+    let merged: Vec<u64> = task
+        .waits_for
+        .iter()
+        .chain(waits)
+        .copied()
+        .collect::<BTreeSet<u64>>()
+        .into_iter()
+        .collect();
+    write_waits(conn, room, number, &merged)?;
     conn.execute(
         "UPDATE tasks SET title = ?3, body = ?4, stage = ?5, updated_ms = ?6
          WHERE room = ?1 AND number = ?2",
@@ -786,6 +829,68 @@ pub fn edit_task(
         ],
     )?;
     require_task(conn, room, number)
+}
+
+/// Replaces the tasks `number` waits for; not allowed once it is `Done` or `Rejected`.
+/// `waits` is ascending and without duplicates.
+pub fn set_waits(
+    conn: &Connection,
+    room: &RoomId,
+    number: u64,
+    waits: &[u64],
+    now: u64,
+) -> R<Task> {
+    let task = require_task(conn, room, number)?;
+    if matches!(task.stage, Stage::Done | Stage::Rejected) {
+        return Err(ApiError::WrongStage(task.stage).into());
+    }
+    write_waits(conn, room, number, waits)?;
+    touch(conn, room, number, now)?;
+    require_task(conn, room, number)
+}
+
+/// Checks `waits` (ascending, without duplicates) for task `number` and replaces its waits with
+/// them: no task waits for itself, for a number the room does not have, or for a task that
+/// already waits for it, directly or through other tasks.
+fn write_waits(conn: &Connection, room: &RoomId, number: u64, waits: &[u64]) -> R<()> {
+    let room_bytes = room.as_bytes().as_slice();
+    for &after in waits {
+        if after == number {
+            return Err(ApiError::Invalid("a task cannot wait for itself".into()).into());
+        }
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE room = ?1 AND number = ?2)",
+            params![room_bytes, int(after)],
+            |r| r.get(0),
+        )?;
+        if !exists {
+            return Err(ApiError::Invalid(format!("there is no task #{after}")).into());
+        }
+        // UNION, not UNION ALL: the walk ends even if the stored waits hold a cycle.
+        let cycle: bool = conn.query_row(
+            "SELECT EXISTS(WITH RECURSIVE r(n) AS (SELECT ?2 UNION SELECT w.after FROM waits w
+                 JOIN r ON w.room = ?1 AND w.number = r.n) SELECT 1 FROM r WHERE n = ?3)",
+            params![room_bytes, int(after), int(number)],
+            |r| r.get(0),
+        )?;
+        if cycle {
+            return Err(ApiError::Invalid(format!(
+                "#{after} already waits for #{number}, directly or through other tasks"
+            ))
+            .into());
+        }
+    }
+    conn.execute(
+        "DELETE FROM waits WHERE room = ?1 AND number = ?2",
+        params![room_bytes, int(number)],
+    )?;
+    for &after in waits {
+        conn.execute(
+            "INSERT INTO waits(room, number, after) VALUES (?1, ?2, ?3)",
+            params![room_bytes, int(number), int(after)],
+        )?;
+    }
+    Ok(())
 }
 
 pub fn set_priority(
@@ -861,6 +966,7 @@ pub fn decide(
 /// Claims a task for `member`: `Plan` takes from `Accepted`, `Build` from `Ready`.
 /// Without a number the first unclaimed task by (priority, number) is taken, from
 /// `project` if given, and `None` means there is none. With a number, `project` is ignored.
+/// A build skips, or with its number refuses, a task that waits for one not `Done`.
 #[allow(clippy::too_many_arguments)]
 pub fn claim(
     conn: &Connection,
@@ -885,6 +991,22 @@ pub fn claim(
             if task.claim.is_some() {
                 return Err(ApiError::Claimed.into());
             }
+            if work == Work::Build {
+                let open: Option<i64> = conn.query_row(
+                    "SELECT MIN(w.after) FROM waits w
+                         JOIN tasks p ON p.room = w.room AND p.number = w.after
+                     WHERE w.room = ?1 AND w.number = ?2 AND p.stage != ?3",
+                    params![
+                        room.as_bytes().as_slice(),
+                        int(n),
+                        stage_to_int(Stage::Done)
+                    ],
+                    |r| r.get(0),
+                )?;
+                if let Some(open) = open {
+                    return Err(ApiError::Waiting(uns(open)).into());
+                }
+            }
             n
         }
         None => {
@@ -893,14 +1015,19 @@ pub fn claim(
             }
             let next: Option<i64> = conn
                 .query_row(
-                    "SELECT number FROM tasks
+                    "SELECT number FROM tasks t
                      WHERE room = ?1 AND stage = ?2 AND claim_member IS NULL
                          AND (?3 IS NULL OR project = ?3)
+                         AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM waits w
+                             JOIN tasks p ON p.room = w.room AND p.number = w.after
+                             WHERE w.room = t.room AND w.number = t.number AND p.stage != ?5))
                      ORDER BY priority, number LIMIT 1",
                     params![
                         room.as_bytes().as_slice(),
                         stage_to_int(target),
-                        project.map(int)
+                        project.map(int),
+                        work == Work::Build,
+                        stage_to_int(Stage::Done)
                     ],
                     |r| r.get(0),
                 )
@@ -1162,13 +1289,13 @@ mod tests {
             claim(&conn, &room, &me, Work::Plan, None, Some(n), "a", NOW),
             Err(Fail::Api(ApiError::WrongStage(Stage::Idea)))
         ));
-        let task = propose_idea(&conn, &room, n, "T2", "b2", NOW + 1).unwrap();
+        let task = propose_idea(&conn, &room, n, "T2", "b2", &[], NOW + 1).unwrap();
         assert_eq!(task.number, n);
         assert_eq!(task.stage, Stage::Proposed);
         assert_eq!((task.title.as_str(), task.body.as_str()), ("T2", "b2"));
         assert_eq!(task.author, me);
         assert!(matches!(
-            propose_idea(&conn, &room, n, "T3", "", NOW),
+            propose_idea(&conn, &room, n, "T3", "", &[], NOW),
             Err(Fail::Api(ApiError::WrongStage(Stage::Proposed)))
         ));
     }
@@ -1326,7 +1453,7 @@ mod tests {
 
     #[test]
     fn newer_schema_versions_are_refused() {
-        for version in [3, 99, -1] {
+        for version in [4, 99, -1] {
             let conn = Connection::open_in_memory().unwrap();
             conn.pragma_update(None, "user_version", version).unwrap();
             let err = Store::init(conn).err().expect("refused");
@@ -1387,11 +1514,121 @@ CREATE INDEX notes_by_task ON notes(room, number);
             }]
         );
         assert_eq!(read_task(&conn, &room, 1).unwrap().unwrap().project, 1);
+        let other = create_task(&conn, &room, &member(1), 1, Stage::Proposed, "o", "", NOW)
+            .unwrap()
+            .number;
+        assert_eq!(
+            set_waits(&conn, &room, 1, &[other], NOW).unwrap().waits_for,
+            vec![other]
+        );
         assert_eq!(create_project(&conn, &room, "web", NOW).unwrap().id, 2);
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn schema_2_gains_the_waits_table() {
+        let conn = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
+        conn.execute_batch("DROP TABLE waits; PRAGMA user_version = 2;")
+            .unwrap();
+        let conn = into_conn(Store::init(conn).unwrap());
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let room = RoomId([7; 32]);
+        let me = member(1);
+        create_room(&conn, &room, "room", &me, NOW).unwrap();
+        create_project(&conn, &room, "app", NOW).unwrap();
+        let a = task_in(&conn, &room, &me, Stage::Proposed);
+        let b = task_in(&conn, &room, &me, Stage::Proposed);
+        assert_eq!(
+            set_waits(&conn, &room, b, &[a], NOW).unwrap().waits_for,
+            vec![a]
+        );
+    }
+
+    #[test]
+    fn build_claim_skips_a_task_until_what_it_waits_for_is_done() {
+        let (conn, room, me) = setup();
+        let p = task_in(&conn, &room, &me, Stage::Ready);
+        let w = task_in(&conn, &room, &me, Stage::Ready);
+        set_waits(&conn, &room, w, &[p], NOW).unwrap();
+        let build = |n| claim(&conn, &room, &me, Work::Build, None, n, "a", NOW);
+
+        assert_eq!(build(None).unwrap().unwrap().number, p);
+        assert!(build(None).unwrap().is_none());
+        assert!(matches!(
+            build(Some(w)),
+            Err(Fail::Api(ApiError::Waiting(n))) if n == p
+        ));
+        finish(&conn, &room, &me, p, "done", NOW).unwrap();
+        assert_eq!(build(None).unwrap().unwrap().number, w);
+
+        // Planning ignores the waits.
+        let q = task_in(&conn, &room, &me, Stage::Accepted);
+        set_waits(&conn, &room, q, &[w], NOW).unwrap();
+        assert!(claim(&conn, &room, &me, Work::Plan, None, Some(q), "a", NOW).is_ok());
+    }
+
+    #[test]
+    fn waits_refuse_self_unknown_cycles_and_closed_tasks() {
+        let (conn, room, me) = setup();
+        let a = task_in(&conn, &room, &me, Stage::Proposed);
+        let b = task_in(&conn, &room, &me, Stage::Proposed);
+        let c = task_in(&conn, &room, &me, Stage::Proposed);
+        let invalid = |r: R<Task>| match r {
+            Err(Fail::Api(ApiError::Invalid(text))) => text,
+            other => panic!("expected Invalid, got {other:?}"),
+        };
+        assert_eq!(
+            invalid(set_waits(&conn, &room, a, &[a], NOW)),
+            "a task cannot wait for itself"
+        );
+        assert_eq!(
+            invalid(set_waits(&conn, &room, a, &[99], NOW)),
+            "there is no task #99"
+        );
+        set_waits(&conn, &room, a, &[b], NOW).unwrap();
+        set_waits(&conn, &room, b, &[c], NOW).unwrap();
+        assert_eq!(
+            invalid(set_waits(&conn, &room, c, &[a], NOW)),
+            format!("#{a} already waits for #{c}, directly or through other tasks")
+        );
+
+        let d = task_in(&conn, &room, &me, Stage::Proposed);
+        set_waits(&conn, &room, d, &[a, c], NOW).unwrap();
+        let tasks = read_tasks(&conn, &room).unwrap();
+        let waits_of = |n| {
+            tasks
+                .iter()
+                .find(|t| t.number == n)
+                .unwrap()
+                .waits_for
+                .clone()
+        };
+        assert_eq!(waits_of(d), vec![a, c]);
+        assert_eq!(waits_of(a), vec![b]);
+
+        let done = task_in(&conn, &room, &me, Stage::Ready);
+        decide(&conn, &room, done, Decision::MarkDone, NOW).unwrap();
+        assert!(matches!(
+            set_waits(&conn, &room, done, &[a], NOW),
+            Err(Fail::Api(ApiError::WrongStage(Stage::Done)))
+        ));
+    }
+
+    #[test]
+    fn writing_up_an_idea_adds_to_its_waits() {
+        let (conn, room, me) = setup();
+        let x = task_in(&conn, &room, &me, Stage::Proposed);
+        let y = task_in(&conn, &room, &me, Stage::Proposed);
+        let idea = task_in(&conn, &room, &me, Stage::Idea);
+        set_waits(&conn, &room, idea, &[x], NOW).unwrap();
+        let task = propose_idea(&conn, &room, idea, "T", "", &[y, x], NOW).unwrap();
+        assert_eq!(task.waits_for, vec![x, y]);
     }
 
     #[test]
