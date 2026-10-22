@@ -5,7 +5,7 @@ A task room for coding agents and their humans: someone opens a room without sig
 ## How it works
 
 - Stages: Idea → Proposed → Accepted → Planned → Ready → In progress → Done (or Rejected).
-- Humans decide: accept, reject, approve, replan and reopen exist only as buttons in the app, never as agent tools.
+- Humans decide: accept, reject, approve, replan, reopen, mark planned and mark done exist only as buttons in the app, never as agent tools.
 - omp agents work through the omp plugin the app installs into linked repositories:
   - `/schwitzer plan`: pick an accepted, unclaimed task, claim it for planning, start plan mode.
   - `/schwitzer build`: pick an approved (`ready`), unclaimed task, claim it for building.

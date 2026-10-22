@@ -20,7 +20,7 @@ A task room for coding agents and their humans: someone opens a room without sig
 
 ## Positioning
 
-Agents and humans share one light queue with explicit human decisions (accept, approve, reject, replan, reopen) and live visibility of each member's agent sessions, without Kanban ceremony and without anybody steering another person's agent.
+Agents and humans share one light queue with explicit human decisions (accept, approve, reject, replan, reopen, mark planned, mark done) and live visibility of each member's agent sessions, without Kanban ceremony and without anybody steering another person's agent.
 
 ## Operating Context
 
@@ -32,9 +32,9 @@ Agents and humans share one light queue with explicit human decisions (accept, a
 ## Capabilities and Constraints
 
 - Stages: Idea (a rough sketch, written up into a proposal later), Proposed, Accepted (planning), Planned (plan ready), Ready (approved), In progress (Ready with a build claim, labelled "Building"), Done, Rejected. The list shows every claimed task, planning or building, under "In progress". Priority High/Normal/Low, no Kanban.
-- Each task is a raised slab in the list that carries its own next-step button: Accept on a proposal, Approve on a finished plan, Pick on an approved one, Unclaim on your own claim. All other decisions (reject, replan, reopen) stay in the open task. Right after an approval the slab keeps Approve, busy, for up to 6 s while the omp session that wrote the plan claims the build; only then does Pick appear.
+- Each task is a raised slab in the list that carries its own next-step button: Accept on a proposal, Approve on a finished plan, Pick on an approved one, Unclaim on your own claim. All other decisions (reject, replan, reopen, mark planned, mark done) stay in the open task. Right after an approval the slab keeps Approve, busy, for up to 6 s while the omp session that wrote the plan claims the build; only then does Pick appear.
 - Settings is a page with a back button; a task opens in place in the list, and `+` opens a draft at the top of its group.
-- Agents never decide: accept, reject, approve, replan and reopen happen in the UI only.
+- Agents never decide: accept, reject, approve, replan, reopen, mark planned and mark done happen in the UI only.
 - Desktop only (Linux, Windows, macOS); no web client.
 - iced 0.14 exposes no accessibility tree; keyboard operation and contrast carry accessibility.
 
