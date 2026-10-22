@@ -4,7 +4,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use schwitzer_proto::{Event, MAX_EVENT_FRAME, MemberId, RoomId, SessionInfo, encode_frame};
+use schwitzer_proto::{
+    Event, HEADER_LEN, MAX_EVENT_FRAME, MemberId, RoomId, SessionInfo, encode_frame,
+};
 use tokio::sync::mpsc;
 
 /// Frames queued per subscription. A full queue drops the subscription: its
@@ -20,7 +22,7 @@ pub type Frame = Arc<[u8]>;
 /// Encodes `event` as one frame; `None` if it cannot be sent (and is logged).
 pub fn frame_of(event: &Event) -> Option<Frame> {
     match encode_frame(event) {
-        Ok(bytes) if bytes.len() - 4 <= MAX_EVENT_FRAME => Some(bytes.into()),
+        Ok(bytes) if bytes.len() - HEADER_LEN <= MAX_EVENT_FRAME => Some(bytes.into()),
         Ok(bytes) => {
             tracing::error!("event frame of {} bytes exceeds the limit", bytes.len());
             None

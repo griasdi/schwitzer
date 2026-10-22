@@ -13,7 +13,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 pub use addr::{AddrParseError, RoomKey, ServerAddr};
 pub use events::{Event, Subscribe};
-pub use frame::{FrameError, encode_frame, read_frame};
+pub use frame::{FrameError, HEADER_LEN, encode_frame, read_frame};
 pub use ids::{ClaimToken, IdParseError, MemberId, RoomId, RoomToken};
 pub use model::{
     Claim, Decision, Member, Note, Priority, Project, RoomState, SessionInfo, Stage, Task, Work,

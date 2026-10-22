@@ -3,6 +3,9 @@
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+/// Bytes of the length prefix before a frame's body.
+pub const HEADER_LEN: usize = 4;
+
 /// What a frame body reserves before its bytes have arrived. A peer can
 /// declare any length up to `max` and then stall, so the buffer grows with
 /// what was really received instead.
@@ -23,11 +26,11 @@ pub fn encode_frame<T: Serialize>(value: &T) -> Result<Vec<u8>, FrameError> {
     frame_bytes(&postcard::to_stdvec(value)?)
 }
 
-/// Puts the length prefix before `body`, which is already encoded (a sealed
-/// chunk, say). A body above `u32::MAX` bytes is [`FrameError::TooLarge`].
-pub fn frame_bytes(body: &[u8]) -> Result<Vec<u8>, FrameError> {
+/// Puts the length prefix before the encoded `body`. A body above `u32::MAX`
+/// bytes is [`FrameError::TooLarge`].
+fn frame_bytes(body: &[u8]) -> Result<Vec<u8>, FrameError> {
     let len = u32::try_from(body.len()).map_err(|_| FrameError::TooLarge(body.len()))?;
-    let mut out = Vec::with_capacity(4 + body.len());
+    let mut out = Vec::with_capacity(HEADER_LEN + body.len());
     out.extend_from_slice(&len.to_le_bytes());
     out.extend_from_slice(body);
     Ok(out)
@@ -46,15 +49,15 @@ where
     }
 }
 
-/// Reads one frame's body without decoding it, for a value that decodes
-/// across wire versions. `Ok(None)` and the errors as in [`read_frame`].
-pub async fn read_frame_body<R: AsyncRead + Unpin>(
+/// Reads one frame's body without decoding it. `Ok(None)` and the errors as
+/// in [`read_frame`].
+async fn read_frame_body<R: AsyncRead + Unpin>(
     reader: &mut R,
     max: usize,
 ) -> Result<Option<Vec<u8>>, FrameError> {
-    let mut len = [0u8; 4];
+    let mut len = [0u8; HEADER_LEN];
     let mut filled = 0;
-    while filled < 4 {
+    while filled < HEADER_LEN {
         let n = reader.read(&mut len[filled..]).await?;
         if n == 0 {
             if filled == 0 {
@@ -136,7 +139,7 @@ mod tests {
         ));
 
         let mut body = Vec::with_capacity(len.min(FIRST_RESERVE));
-        let mut r = &wire[4..];
+        let mut r = &wire[HEADER_LEN..];
         assert!(read_body(&mut r, len, &mut body).await.is_err());
         assert_eq!(body.len(), 10);
         assert!(body.capacity() < len);
