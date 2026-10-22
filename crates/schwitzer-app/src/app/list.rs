@@ -6,7 +6,7 @@ use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{Decision, Project, RoomState, Stage, Task};
 
 use super::icons::{Icon, Tone, icon};
-use super::logic::{self, Group};
+use super::logic::{self, Group, MissingSession};
 use super::task_view;
 use super::widgets::{
     self, LAMP, icon_button, icon_text_button, id_button, lamp, lamp_kind, member_tag, muted,
@@ -141,8 +141,12 @@ fn group_header<'a>(group: Group, count: usize, open: bool) -> Element<'a, Messa
 }
 
 /// The two lines of a slab: lamp and title, then number, stage, priority, the tasks it still
-/// waits for, and the worker's tag.
-pub fn summary<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
+/// waits for, `hint` (see [`session_hint`]) and the worker's tag.
+pub fn summary<'a>(
+    state: &'a RoomState,
+    task: &'a Task,
+    hint: Option<(&'static str, String)>,
+) -> Element<'a, Message> {
     let mut meta = row![
         text(format!("#{}", task.number))
             .size(TS_12)
@@ -160,6 +164,9 @@ pub fn summary<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message>
         meta = meta.push(muted(logic::waits_label(&open)));
     }
     meta = meta.push(Space::new().width(Length::Fill));
+    if let Some((label, why)) = hint {
+        meta = meta.push(with_tip(muted(label), why));
+    }
     if let Some(claim) = &task.claim {
         meta = meta.push(member_tag(
             logic::member_name(&state.members, &claim.member),
@@ -186,9 +193,38 @@ pub fn summary<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message>
     .into()
 }
 
+/// The hint a claim no omp session carries shows, and the sentence that explains it.
+pub fn session_hint(app: &App, state: &RoomState, task: &Task) -> Option<(&'static str, String)> {
+    let claim = task.claim.as_ref()?;
+    let missing = logic::missing_session(
+        state,
+        task,
+        app.client.member(),
+        &app.local_sessions,
+        app.now_ms,
+    )?;
+    let name = logic::member_name(&state.members, &claim.member);
+    Some(match missing {
+        MissingSession::Gone if claim.member == app.client.member() => (
+            "no session",
+            "None of your omp sessions carries this claim. If its agent stopped, Unclaim gives \
+             the task back."
+                .to_owned(),
+        ),
+        MissingSession::Gone => (
+            "no session",
+            format!("{name} shares no omp session that carries this claim."),
+        ),
+        MissingSession::Unknown => (
+            "session unknown",
+            format!("{name} is offline, so their omp sessions are not shared."),
+        ),
+    })
+}
+
 fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     let n = task.number;
-    let mut line = row![summary(state, task)]
+    let mut line = row![summary(state, task, session_hint(app, state, task))]
         .spacing(SP_3)
         .align_y(Alignment::Center);
     if let Some(action) = next_step(app, state, task) {

@@ -141,6 +141,58 @@ pub fn handing_off(task: &Task, approved_ms: Option<u64>, now_ms: u64) -> bool {
     pickable(task) && approved_ms.is_some_and(|at| now_ms.saturating_sub(at) < HANDOFF_MS)
 }
 
+/// How long a claim may go without an omp session that carries it before its slab says so:
+/// time to paste a pick prompt and for the agent's first write.
+pub const CLAIM_GRACE_MS: u64 = 5 * 60 * 1000;
+
+/// Why a claimed task shows no session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissingSession {
+    /// The claimer is online, and none of their sessions carries the claim.
+    Gone,
+    /// The claimer is offline: their app shares no sessions, so nobody can tell.
+    Unknown,
+}
+
+/// Whether a claim older than [`CLAIM_GRACE_MS`] lacks an omp session that carries it. Your
+/// own claim counts against every local session, wherever it runs, by its claim marker.
+/// Someone else's counts against the sessions they share linked to the task; when they are
+/// offline their app shares nothing, so the answer is [`MissingSession::Unknown`].
+pub fn missing_session(
+    state: &RoomState,
+    task: &Task,
+    me: MemberId,
+    local: &[LocalSession],
+    now_ms: u64,
+) -> Option<MissingSession> {
+    let claim = task.claim.as_ref()?;
+    // A `since_ms` ahead of the local clock saturates to 0: no hint.
+    if now_ms.saturating_sub(claim.since_ms) < CLAIM_GRACE_MS {
+        return None;
+    }
+    if claim.member == me {
+        let carried = local.iter().any(|s| s.markers.contains(&claim.token));
+        return (!carried).then_some(MissingSession::Gone);
+    }
+    // Only the claimer's sessions count: an earlier claimer's stale link must not hide it.
+    let carried = state
+        .sessions
+        .iter()
+        .any(|(m, list)| *m == claim.member && list.iter().any(|s| s.task == Some(task.number)));
+    if carried {
+        return None;
+    }
+    let online = state
+        .members
+        .iter()
+        .any(|m| m.id == claim.member && m.online);
+    Some(if online {
+        MissingSession::Gone
+    } else {
+        MissingSession::Unknown
+    })
+}
+
 /// The tasks of `project` in `group`, high priority first, then by number.
 pub fn tasks_in(state: &RoomState, project: u64, group: Group) -> Vec<&Task> {
     let mut tasks: Vec<&Task> = state
@@ -553,6 +605,71 @@ mod tests {
             tokens: 30,
             markers,
         }
+    }
+
+    #[test]
+    fn missing_session_needs_an_old_claim_without_a_session() {
+        let token = ClaimToken([7; 16]);
+        let now = CLAIM_GRACE_MS;
+        let claimed = task(1, Stage::Accepted, Some(claim(Work::Plan, token)));
+        let mut state = room(vec![claimed.clone()]);
+        assert_eq!(
+            missing_session(&state, &claimed, member(1), &[], now - 1),
+            None
+        );
+        let free = task(2, Stage::Accepted, None);
+        assert_eq!(missing_session(&state, &free, member(1), &[], now), None);
+
+        // Own claim: every local session counts, even one outside every repo.
+        assert_eq!(
+            missing_session(&state, &claimed, member(1), &[], now),
+            Some(MissingSession::Gone)
+        );
+        let carrying = [local("s", "/x", vec![token])];
+        assert_eq!(
+            missing_session(&state, &claimed, member(1), &carrying, now),
+            None
+        );
+
+        // Someone else's claim: their shared sessions and presence decide.
+        let alice = |online| Member {
+            id: member(1),
+            name: "alice".to_owned(),
+            online,
+        };
+        state.members = vec![alice(true)];
+        assert_eq!(
+            missing_session(&state, &claimed, member(2), &[], now),
+            Some(MissingSession::Gone)
+        );
+        let session = SessionInfo {
+            id: "s".to_owned(),
+            title: "title".to_owned(),
+            project: "proj".to_owned(),
+            model: "model".to_owned(),
+            started_ms: 0,
+            active_ms: 0,
+            tokens: 0,
+            task: Some(1),
+            projects: vec![1],
+        };
+        state.sessions = vec![(member(1), vec![session.clone()])];
+        assert_eq!(missing_session(&state, &claimed, member(2), &[], now), None);
+        state.sessions = vec![(member(3), vec![session])];
+        assert_eq!(
+            missing_session(&state, &claimed, member(2), &[], now),
+            Some(MissingSession::Gone)
+        );
+        state.members = vec![alice(false)];
+        assert_eq!(
+            missing_session(&state, &claimed, member(2), &[], now),
+            Some(MissingSession::Unknown)
+        );
+        state.members.clear();
+        assert_eq!(
+            missing_session(&state, &claimed, member(2), &[], now),
+            Some(MissingSession::Unknown)
+        );
     }
 
     #[test]

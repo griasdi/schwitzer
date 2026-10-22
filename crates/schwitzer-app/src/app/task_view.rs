@@ -61,7 +61,8 @@ pub fn view<'a>(
     let head = id_button(
         format!("task-{n}"),
         container(
-            row![list::summary(state, task), icons]
+            // The head's icons leave no room for the session hint: `people` explains it instead.
+            row![list::summary(state, task, None), icons]
                 .spacing(SP_3)
                 .align_y(Alignment::Center),
         )
@@ -275,7 +276,7 @@ fn people<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a,
         return line.into();
     };
     line = line.push(Space::new().width(Length::Fill));
-    column![
+    let mut people = column![
         line,
         row![
             icon(Icon::Bot, 14.0, Tone::Muted),
@@ -293,8 +294,11 @@ fn people<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a,
         .spacing(6)
         .align_y(Alignment::Center),
     ]
-    .spacing(SP_2)
-    .into()
+    .spacing(SP_2);
+    if let Some((_, why)) = list::session_hint(app, state, task) {
+        people = people.push(muted(why));
+    }
+    people.into()
 }
 
 /// Pick (when an approved plan waits) and the human decisions the server allows now. Right
