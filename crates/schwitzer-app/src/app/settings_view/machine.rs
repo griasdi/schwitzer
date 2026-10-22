@@ -10,7 +10,7 @@ use crate::app::pages::{frame, section};
 use crate::app::widgets::{dot, heading, input, muted, path_text, text_button};
 use crate::app::{App, Message};
 use crate::mcp::McpStatus;
-use crate::omp_plugin::PluginState;
+use crate::omp_plugin::count_outdated;
 use crate::settings;
 use crate::theme::{self, SP_2, SP_4, TS_14};
 use crate::update::{self, UpdateState};
@@ -67,11 +67,7 @@ pub fn omp_page(app: &App) -> Element<'_, Message> {
     .spacing(SP_2);
 
     let installed = app.plugins.len();
-    let outdated = app
-        .plugins
-        .values()
-        .filter(|state| **state == PluginState::Outdated)
-        .count();
+    let outdated = count_outdated(app.plugins.values());
     let summary = if installed == 0 {
         "No shared repo has the omp plugin.".to_owned()
     } else if outdated > 0 {

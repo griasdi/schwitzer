@@ -160,6 +160,14 @@ pub fn state(repo: &Path, config: &PluginConfig) -> Option<PluginState> {
     Some(current)
 }
 
+/// How many of `states` are out of date.
+pub fn count_outdated<'a>(states: impl IntoIterator<Item = &'a PluginState>) -> usize {
+    states
+        .into_iter()
+        .filter(|state| **state == PluginState::Outdated)
+        .count()
+}
+
 /// Whether everything [`install`] would write into `repo` is already there.
 fn matches(repo: &Path, config: &PluginConfig) -> bool {
     let dir = plugin_dir(repo);

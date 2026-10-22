@@ -22,7 +22,7 @@ use super::widgets::{
     heading, icon_button, icon_text_button, id_button, input, muted, path_text, text_button,
 };
 use super::{App, FolderFor, Message, Page, folder_label, logic, tilde};
-use crate::omp_plugin::PluginState;
+use crate::omp_plugin::count_outdated;
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 use crate::update::{self, UpdateState};
 use crate::wsl;
@@ -191,10 +191,7 @@ fn project_status(app: &App) -> Status {
     let linked = app.project_repos();
     let n = linked.len();
     let states: Vec<_> = linked.iter().map(|repo| app.plugins.get(repo)).collect();
-    let outdated = states
-        .iter()
-        .filter(|s| **s == Some(&PluginState::Outdated))
-        .count();
+    let outdated = count_outdated(states.iter().copied().flatten());
     let missing = states.iter().filter(|s| s.is_none()).count();
     if n == 0 {
         Status::Notice("No repo linked on this machine".to_owned())
@@ -218,11 +215,7 @@ fn omp_status(app: &App) -> Status {
     if let Some(problem) = mcp.problem(app.settings.mcp_port) {
         return Status::Problem(problem);
     }
-    let outdated = app
-        .plugins
-        .values()
-        .filter(|state| **state == PluginState::Outdated)
-        .count();
+    let outdated = count_outdated(app.plugins.values());
     if outdated > 0 {
         Status::Notice(format!("omp plugin out of date in {}", repos(outdated)))
     } else {
