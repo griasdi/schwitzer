@@ -2,7 +2,8 @@
 //!
 //! Every handler that changes state runs inside one store transaction and
 //! publishes its events right after the commit, still under the store's lock:
-//! events therefore reach subscribers in commit order.
+//! events therefore reach subscribers in commit order. Room mutations share
+//! that sequence in [`in_room`].
 
 use std::time::Instant;
 
@@ -15,9 +16,10 @@ use schwitzer_proto::{
 use tokio::time::timeout;
 use weida::{ErrorCode, IncomingRequest, Replier, TransferMeta};
 
-use crate::State;
 use crate::auth;
+use crate::hub::Hub;
 use crate::store::{self, R};
+use crate::{Shared, State};
 
 /// Accepts requests until the replier closes, each in its own task.
 pub async fn serve(state: State, replier: Replier) {
@@ -347,118 +349,144 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
     }
 }
 
-/// Runs a task mutation in one transaction as a member of `room`, publishes
-/// the resulting task to the room's members and replies with it.
-async fn mutate<F>(state: &State, caller: MemberId, room: RoomId, f: F) -> Reply
-where
-    F: FnOnce(&Connection, u64) -> R<Task> + Send + 'static,
-{
-    let st = state.clone();
-    let task = state
-        .store
-        .run(move |conn| {
-            let tx = conn.transaction()?;
-            store::require_member(&tx, &room, &caller)?;
-            let task = f(&tx, now_ms())?;
-            crate::require_task_fits(&task)?;
-            st.require_room_fits(&tx, &room)?;
-            let members = store::room_member_ids(&tx, &room)?;
-            tx.commit()?;
-            st.hub.publish(
-                &members,
-                &Event::Task {
-                    room,
-                    task: task.clone(),
-                },
-            );
-            Ok(task)
-        })
-        .await?;
-    Ok(Response::Task(task))
-}
-
-/// Claims a task in one transaction as a member of `room`. A claim that finds
-/// no free task changes nothing and publishes nothing; otherwise the task goes
-/// to the room's members.
-async fn mutate_claim(
+/// Runs `change` in one store transaction as a member of `room`, commits, then
+/// calls `publish` with the room's member ids and what `change` returned.
+///
+/// This is the one place that keeps the module's ordering invariant: `publish`
+/// runs right after the commit, inside the store's lock (the closure of
+/// `Store::run`), so events reach subscribers in commit order. `change` runs
+/// before the member ids are read; a refusal from it rolls the transaction back
+/// and publishes nothing.
+async fn in_room<T, C, P>(
     state: &State,
     caller: MemberId,
     room: RoomId,
-    f: impl FnOnce(&Connection, u64) -> R<Option<Task>> + Send + 'static,
-) -> Reply {
-    let st = state.clone();
-    let claimed = state
-        .store
-        .run(move |conn| {
-            let tx = conn.transaction()?;
-            store::require_member(&tx, &room, &caller)?;
-            let task = f(&tx, now_ms())?;
-            if let Some(task) = &task {
-                crate::require_task_fits(task)?;
-                st.require_room_fits(&tx, &room)?;
-            }
-            let members = store::room_member_ids(&tx, &room)?;
-            tx.commit()?;
-            if let Some(task) = &task {
-                st.hub.publish(
-                    &members,
-                    &Event::Task {
-                        room,
-                        task: task.clone(),
-                    },
-                );
-            }
-            Ok(task)
-        })
-        .await?;
-    Ok(Response::Claimed(claimed))
-}
-
-/// Runs a project mutation in one transaction as a member of `room`, then
-/// publishes the resulting project to the room's members.
-async fn mutate_project<F>(state: &State, caller: MemberId, room: RoomId, f: F) -> Reply
+    change: C,
+    publish: P,
+) -> Result<T, ApiError>
 where
-    F: FnOnce(&Connection, u64) -> R<Project> + Send + 'static,
+    T: Send + 'static,
+    C: FnOnce(&Shared, &Connection, u64) -> R<T> + Send + 'static,
+    P: FnOnce(&Hub, &[MemberId], &T) + Send + 'static,
 {
-    let st = state.clone();
-    let project = state
-        .store
-        .run(move |conn| {
-            let tx = conn.transaction()?;
-            store::require_member(&tx, &room, &caller)?;
-            let project = f(&tx, now_ms())?;
-            st.require_room_fits(&tx, &room)?;
-            let members = store::room_member_ids(&tx, &room)?;
-            tx.commit()?;
-            st.hub.publish(
-                &members,
-                &Event::Project {
-                    room,
-                    project: project.clone(),
-                },
-            );
-            Ok(project)
-        })
-        .await?;
-    Ok(Response::Project(project))
-}
-
-/// Deletes an empty project as a member of `room`, then tells the room's members.
-async fn delete_project(state: &State, caller: MemberId, room: RoomId, project: u64) -> Reply {
     let st = state.clone();
     state
         .store
         .run(move |conn| {
             let tx = conn.transaction()?;
             store::require_member(&tx, &room, &caller)?;
-            store::delete_project(&tx, &room, project)?;
+            let out = change(&st, &tx, now_ms())?;
             let members = store::room_member_ids(&tx, &room)?;
             tx.commit()?;
-            st.hub
-                .publish(&members, &Event::ProjectDeleted { room, project });
-            Ok(())
+            publish(&st.hub, &members, &out);
+            Ok(out)
         })
-        .await?;
+        .await
+}
+
+/// Runs a task mutation as a member of `room`, publishes the resulting task to
+/// the room's members and replies with it.
+async fn mutate<F>(state: &State, caller: MemberId, room: RoomId, f: F) -> Reply
+where
+    F: FnOnce(&Connection, u64) -> R<Task> + Send + 'static,
+{
+    let task = in_room(
+        state,
+        caller,
+        room,
+        move |st, conn, now| {
+            let task = f(conn, now)?;
+            crate::require_task_fits(&task)?;
+            st.require_room_fits(conn, &room)?;
+            Ok(task)
+        },
+        move |hub, members, task| {
+            hub.publish(
+                members,
+                &Event::Task {
+                    room,
+                    task: task.clone(),
+                },
+            );
+        },
+    )
+    .await?;
+    Ok(Response::Task(task))
+}
+
+/// Claims a task as a member of `room`. A claim that finds no free task changes
+/// nothing and publishes nothing; otherwise the task goes to the room's members.
+async fn mutate_claim<F>(state: &State, caller: MemberId, room: RoomId, f: F) -> Reply
+where
+    F: FnOnce(&Connection, u64) -> R<Option<Task>> + Send + 'static,
+{
+    let claimed = in_room(
+        state,
+        caller,
+        room,
+        move |st, conn, now| {
+            let task = f(conn, now)?;
+            if let Some(task) = &task {
+                crate::require_task_fits(task)?;
+                st.require_room_fits(conn, &room)?;
+            }
+            Ok(task)
+        },
+        move |hub, members, task| {
+            if let Some(task) = task {
+                hub.publish(
+                    members,
+                    &Event::Task {
+                        room,
+                        task: task.clone(),
+                    },
+                );
+            }
+        },
+    )
+    .await?;
+    Ok(Response::Claimed(claimed))
+}
+
+/// Runs a project mutation as a member of `room`, publishes the resulting
+/// project to the room's members and replies with it.
+async fn mutate_project<F>(state: &State, caller: MemberId, room: RoomId, f: F) -> Reply
+where
+    F: FnOnce(&Connection, u64) -> R<Project> + Send + 'static,
+{
+    let project = in_room(
+        state,
+        caller,
+        room,
+        move |st, conn, now| {
+            let project = f(conn, now)?;
+            st.require_room_fits(conn, &room)?;
+            Ok(project)
+        },
+        move |hub, members, project| {
+            hub.publish(
+                members,
+                &Event::Project {
+                    room,
+                    project: project.clone(),
+                },
+            );
+        },
+    )
+    .await?;
+    Ok(Response::Project(project))
+}
+
+/// Deletes an empty project as a member of `room`, then tells the room's members.
+async fn delete_project(state: &State, caller: MemberId, room: RoomId, project: u64) -> Reply {
+    in_room(
+        state,
+        caller,
+        room,
+        move |_, conn, _| store::delete_project(conn, &room, project),
+        move |hub, members, ()| hub.publish(members, &Event::ProjectDeleted { room, project }),
+    )
+    .await?;
     Ok(Response::Ok)
 }
 
@@ -542,34 +570,39 @@ async fn join_room(state: &State, caller: MemberId, token: RoomToken) -> Reply {
 }
 
 async fn leave_room(state: &State, caller: MemberId, room: RoomId) -> Reply {
-    let st = state.clone();
-    state
-        .store
-        .run(move |conn| {
-            let tx = conn.transaction()?;
-            store::require_member(&tx, &room, &caller)?;
-            store::remove_member(&tx, &room, &caller)?;
+    in_room(
+        state,
+        caller,
+        room,
+        move |st, conn, _| {
+            store::remove_member(conn, &room, &caller)?;
             st.sessions.clear(&room, &caller);
-            let others = store::room_member_ids(&tx, &room)?;
-            let member = Member {
+            Ok(Member {
                 id: caller,
-                name: store::person_name(&tx, &caller)?,
+                name: store::person_name(conn, &caller)?,
                 online: false,
-            };
-            tx.commit()?;
-            st.hub.publish(&[caller], &Event::Left { room });
-            st.hub.publish(&others, &Event::Member { room, member });
-            st.hub.publish(
-                &others,
+            })
+        },
+        move |hub, others, member| {
+            hub.publish(&[caller], &Event::Left { room });
+            hub.publish(
+                others,
+                &Event::Member {
+                    room,
+                    member: member.clone(),
+                },
+            );
+            hub.publish(
+                others,
                 &Event::Sessions {
                     room,
                     member: caller,
                     sessions: Vec::new(),
                 },
             );
-            Ok(())
-        })
-        .await?;
+        },
+    )
+    .await?;
     Ok(Response::Ok)
 }
 
