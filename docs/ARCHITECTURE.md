@@ -324,7 +324,7 @@ flowchart LR
 |`notify_hand_ins`|system notification when one of the member's agents hands in a plan or finishes a build; default `false`|
 |`commit_trailers`|`"<room id hex>/<project id>"` set: projects whose builds by the member's agents put `Schwitzer-Task: #<n>` into every commit; default empty|
 
-A bad `settings.toml` loads as defaults with a notice and is not overwritten until the next save.
+A bad `settings.toml` loads as defaults with a notice and is not overwritten until the next save. A `mcp_port` of 0 is replaced by the default with a notice, as the Settings page accepts 1 to 65535 only.
 
 **Theme.** Colours, sizes and fonts are Daylight and Night tokens, read only by the style functions in `theme.rs`; the app follows the system mode. DESIGN.md is normative.
 

@@ -10,6 +10,33 @@ use serde::{Deserialize, Serialize};
 /// The port of the MCP server unless `settings.toml` says otherwise.
 pub const DEFAULT_MCP_PORT: u16 = 13339;
 
+/// The MCP port entered in Settings: 1 to 65535, the range `settings.toml` is held to as
+/// well. Port 0 would bind a random port that the plugin's `mcp_url` could not name.
+pub fn parse_port(s: &str) -> Option<u16> {
+    s.trim().parse::<u16>().ok().filter(|p| *p != 0)
+}
+
+/// What [`Settings::load`] found wrong with `settings.toml`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoadProblem {
+    /// The file cannot be read or parsed (the reason): the defaults are used.
+    Unreadable(String),
+    /// `mcp_port` was 0 and is replaced; the rest of the file is used.
+    PortReplaced,
+}
+
+impl LoadProblem {
+    /// The notice that tells the member.
+    pub fn notice(&self) -> String {
+        match self {
+            Self::Unreadable(reason) => format!("Settings not read, using defaults: {reason}"),
+            Self::PortReplaced => {
+                format!("Ignored mcp_port 0 in settings, replaced by {DEFAULT_MCP_PORT}")
+            }
+        }
+    }
+}
+
 /// File name of the settings inside the data directory.
 const FILE: &str = "settings.toml";
 
@@ -161,20 +188,31 @@ pub fn subdirs(dir: &Path) -> Vec<PathBuf> {
 
 impl Settings {
     /// Reads `settings.toml` from `dir`. A missing file gives the defaults; a file that cannot
-    /// be read or parsed gives the defaults and the reason. The file is left alone: only
-    /// [`Settings::save`] writes it.
-    pub fn load(dir: &Path) -> (Self, Option<String>) {
+    /// be read or parsed gives the defaults and the reason. A `mcp_port` of 0 is replaced by
+    /// [`DEFAULT_MCP_PORT`]: the listener would bind a random port that the plugin's URL could
+    /// not name. The file is left alone: only [`Settings::save`] writes it.
+    pub fn load(dir: &Path) -> (Self, Option<LoadProblem>) {
         let path = dir.join(FILE);
+        let unreadable = |e: &dyn std::fmt::Display| {
+            (
+                Self::default(),
+                Some(LoadProblem::Unreadable(format!("{}: {e}", path.display()))),
+            )
+        };
         match std::fs::read_to_string(&path) {
             Ok(text) => match toml::from_str::<Settings>(&text) {
                 Ok(mut settings) => {
                     settings.migrate_room_keys();
-                    (settings, None)
+                    let problem = (settings.mcp_port == 0).then(|| {
+                        settings.mcp_port = DEFAULT_MCP_PORT;
+                        LoadProblem::PortReplaced
+                    });
+                    (settings, problem)
                 }
-                Err(e) => (Self::default(), Some(format!("{}: {e}", path.display()))),
+                Err(e) => unreadable(&e),
             },
             Err(e) if e.kind() == io::ErrorKind::NotFound => (Self::default(), None),
-            Err(e) => (Self::default(), Some(format!("{}: {e}", path.display()))),
+            Err(e) => unreadable(&e),
         }
     }
 
@@ -412,11 +450,41 @@ mod tests {
         std::fs::write(dir.path().join(FILE), "mcp_port = \"nope\"").unwrap();
         let (settings, problem) = Settings::load(dir.path());
         assert_eq!(settings, Settings::default());
-        assert!(problem.is_some_and(|p| p.contains(FILE)));
+        assert!(matches!(problem, Some(LoadProblem::Unreadable(p)) if p.contains(FILE)));
         assert_eq!(
             std::fs::read_to_string(dir.path().join(FILE)).unwrap(),
             "mcp_port = \"nope\""
         );
+    }
+
+    #[test]
+    fn port_zero_in_the_file_is_replaced_by_the_default_and_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(FILE), "name = \"alice\"\nmcp_port = 0\n").unwrap();
+        let (settings, problem) = Settings::load(dir.path());
+        assert_eq!(settings.mcp_port, DEFAULT_MCP_PORT);
+        assert_eq!(settings.name, "alice");
+        let problem = problem.unwrap();
+        assert_eq!(problem, LoadProblem::PortReplaced);
+        assert_eq!(
+            problem.notice(),
+            "Ignored mcp_port 0 in settings, replaced by 13339"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(FILE)).unwrap(),
+            "name = \"alice\"\nmcp_port = 0\n"
+        );
+    }
+
+    #[test]
+    fn parse_port_takes_one_to_65535() {
+        for ok in ["13401", " 13401 ", "65535"] {
+            assert!(parse_port(ok).is_some(), "{ok:?}");
+        }
+        assert_eq!(parse_port(" 13401 "), Some(13401));
+        for bad in ["0", "65536", "", "-1", "abc"] {
+            assert_eq!(parse_port(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

@@ -5,7 +5,6 @@ use iced::{Alignment, Element, Length};
 
 use super::{Switch, projects_folders, repos, switch_row};
 use crate::app::icons::{Icon, Tone, icon};
-use crate::app::logic;
 use crate::app::pages::{frame, section};
 use crate::app::widgets::{dot, heading, input, muted, path_text, text_button};
 use crate::app::{App, Message};
@@ -29,7 +28,7 @@ pub fn omp_page(app: &App) -> Element<'_, Message> {
     };
     let default_port = settings::DEFAULT_MCP_PORT.to_string();
     let changed =
-        logic::parse_port(&app.forms.mcp_port).is_some_and(|p| p != app.settings.mcp_port);
+        settings::parse_port(&app.forms.mcp_port).is_some_and(|p| p != app.settings.mcp_port);
     let connection = column![
         heading("Connection"),
         row![

@@ -409,12 +409,6 @@ pub fn details_markdown(title: &str, body: &str) -> String {
     }
 }
 
-/// The MCP port entered in Settings: 1 to 65535. Port 0 would bind a random port that the
-/// plugin's `mcp_url` could not name.
-pub fn parse_port(s: &str) -> Option<u16> {
-    s.trim().parse::<u16>().ok().filter(|p| *p != 0)
-}
-
 /// Whether `url` is an http or https link with something after the scheme: the only
 /// links a click in task text opens.
 pub fn is_web_link(url: &str) -> bool {
@@ -516,17 +510,6 @@ mod tests {
             "# Fix it\n\n## Why\n\nBecause."
         );
         assert_eq!(details_markdown("Fix it", "  \n"), "# Fix it");
-    }
-
-    #[test]
-    fn parse_port_takes_one_to_65535() {
-        for ok in ["13401", " 13401 ", "65535"] {
-            assert!(parse_port(ok).is_some(), "{ok:?}");
-        }
-        assert_eq!(parse_port(" 13401 "), Some(13401));
-        for bad in ["0", "65536", "", "-1", "abc"] {
-            assert_eq!(parse_port(bad), None, "{bad:?}");
-        }
     }
 
     #[test]

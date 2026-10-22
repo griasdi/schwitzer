@@ -490,7 +490,7 @@ impl App {
             fatal(&format!("cannot create {}: {e}", data_dir.display()));
         }
         let (mut settings, problem) = Settings::load(&data_dir);
-        let unreadable = problem.is_some();
+        let unreadable = matches!(problem, Some(settings::LoadProblem::Unreadable(_)));
         let saved_before = settings.clone();
         let first_start = !unreadable && settings.projects_dirs.is_none();
         if settings.projects_dirs.is_none() {
@@ -508,7 +508,7 @@ impl App {
 
         let mut notices = Vec::new();
         if let Some(problem) = problem {
-            notices.push(format!("Settings not read, using defaults: {problem}"));
+            notices.push(problem.notice());
         }
         for key in &settings.rooms {
             match key.parse::<RoomKey>() {
@@ -1939,7 +1939,7 @@ impl App {
     }
 
     fn submit_mcp_port(&mut self) {
-        let Some(port) = logic::parse_port(&self.forms.mcp_port) else {
+        let Some(port) = settings::parse_port(&self.forms.mcp_port) else {
             self.banner = Some("Port must be a number from 1 to 65535".to_owned());
             return;
         };
