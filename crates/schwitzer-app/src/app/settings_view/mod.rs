@@ -22,7 +22,6 @@ use super::widgets::{
     heading, icon_button, icon_text_button, id_button, input, muted, path_text, text_button,
 };
 use super::{App, FolderFor, Message, Page, folder_label, logic, tilde};
-use crate::mcp::McpStatus;
 use crate::omp_plugin::PluginState;
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 use crate::update::{self, UpdateState};
@@ -213,24 +212,21 @@ fn project_status(app: &App) -> Status {
 
 /// The omp connection, and plugins out of date in any shared repo.
 fn omp_status(app: &App) -> Status {
-    match &app.mcp {
-        None => Status::Plain("Starting…".to_owned()),
-        Some(McpStatus::PortInUse) => {
-            Status::Problem(format!("Port {} is in use", app.settings.mcp_port))
-        }
-        Some(McpStatus::Failed(e)) => Status::Problem(e.clone()),
-        Some(McpStatus::Listening { .. }) => {
-            let outdated = app
-                .plugins
-                .values()
-                .filter(|state| **state == PluginState::Outdated)
-                .count();
-            if outdated > 0 {
-                Status::Notice(format!("omp plugin out of date in {}", repos(outdated)))
-            } else {
-                Status::Plain(format!("Ready on port {}", app.settings.mcp_port))
-            }
-        }
+    let Some(mcp) = &app.mcp else {
+        return Status::Plain("Starting…".to_owned());
+    };
+    if let Some(problem) = mcp.problem(app.settings.mcp_port) {
+        return Status::Problem(problem);
+    }
+    let outdated = app
+        .plugins
+        .values()
+        .filter(|state| **state == PluginState::Outdated)
+        .count();
+    if outdated > 0 {
+        Status::Notice(format!("omp plugin out of date in {}", repos(outdated)))
+    } else {
+        Status::Plain(format!("Ready on port {}", app.settings.mcp_port))
     }
 }
 

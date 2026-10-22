@@ -17,14 +17,15 @@ use crate::update::{self, UpdateState};
 
 /// The omp connection: its port, the plugins in the shared repos, and where sessions are read.
 pub fn omp_page(app: &App) -> Element<'_, Message> {
-    let (state, status) = match &app.mcp {
-        None => (None, "Starting…".to_owned()),
-        Some(McpStatus::Listening { url }) => (Some(true), format!("Connection on {url}")),
-        Some(McpStatus::PortInUse) => (
-            Some(false),
-            format!("Port {} is in use", app.settings.mcp_port),
-        ),
-        Some(McpStatus::Failed(e)) => (Some(false), e.clone()),
+    let port = app.settings.mcp_port;
+    let state = app.mcp.as_ref().map(McpStatus::dot);
+    let status = if let Some(McpStatus::Listening { url }) = &app.mcp {
+        format!("Connection on {url}")
+    } else {
+        app.mcp
+            .as_ref()
+            .and_then(|mcp| mcp.problem(port))
+            .unwrap_or_else(|| "Starting…".to_owned())
     };
     let default_port = settings::DEFAULT_MCP_PORT.to_string();
     let changed =

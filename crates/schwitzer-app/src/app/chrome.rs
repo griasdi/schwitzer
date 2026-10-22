@@ -206,14 +206,12 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
         None => "connecting",
     };
     let server_tip = app.selected_server_tip();
-    let (port_state, port_tip) = match &app.mcp {
-        None => (None, "Agent port starting".to_owned()),
-        Some(McpStatus::Listening { url }) => (Some(true), format!("Agent port: {url}")),
-        Some(McpStatus::PortInUse) => (
-            Some(false),
-            format!("Agent port {} is in use", app.settings.mcp_port),
-        ),
-        Some(McpStatus::Failed(e)) => (Some(false), format!("Agent port: {e}")),
+    let port_state = app.mcp.as_ref().map(McpStatus::dot);
+    let port_tip = match &app.mcp {
+        None => "Agent port starting".to_owned(),
+        Some(McpStatus::Listening { url }) => format!("Agent port: {url}"),
+        Some(McpStatus::PortInUse) => format!("Agent port {} is in use", app.settings.mcp_port),
+        Some(McpStatus::Failed(e)) => format!("Agent port: {e}"),
     };
     let mut bar = row![
         text(&app.settings.name).size(TS_12).font(SEMIBOLD),
