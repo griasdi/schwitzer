@@ -378,7 +378,7 @@ Line height is iced's default relative 1.3 everywhere; no override.
 
 A single narrow column, designed for a 400x780 window (minimum 340x520), pinned beside the editor. The window shows one **page** at a time above a 1px hairline and the 32px **status bar**, which stays on every page; an optional dismissable error strip (8px inset) tops all of it.
 
-**Main page**, top to bottom: the **header bar** (room switcher left; invite and settings ghost icons right; 8px padding), a hairline, the **task list** (60% of the area, `FillPortion(60)`), a hairline, the **sessions** panel (38%, `FillPortion(38)`).
+**Main page**, top to bottom: the **header bar** (room switcher left; invite and settings ghost icons right; 8px padding), a hairline, the **task list** (takes the remaining height), a hairline, the **sessions** panel (its header plus its slabs: it grows with its sessions up to three, then scrolls).
 
 **Pages** replace the main column: a header bar with a ghost back button (`Esc` tooltip) and the title (20px semibold), a hairline, a scrolling body, an optional footer bar (hairline, 8px 12px padding, right-aligned Cancel + primary action). The body is centred, at most 560px wide, 12px inset; its blocks are **sections**, one raised slab each, 16px apart. Every page opens at its top. A task is not a page: it opens in place in the list, and a new task is drafted there (see Slabs).
 
