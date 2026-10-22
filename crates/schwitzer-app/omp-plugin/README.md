@@ -9,6 +9,7 @@ The Schwitzer app writes an omp extension into every repository linked to a proj
 |`/schwitzer`|Menu of the four subcommands|
 |`/schwitzer plan`|Pick an accepted, unclaimed task, claim it for planning, start plan mode|
 |`/schwitzer build`|Pick an approved (`ready`), unclaimed task, claim it for building|
+|`/schwitzer build new`|Open a new omp session with `/schwitzer build` in its editor|
 |`/schwitzer propose [text]`|The agent drafts a proposal (or writes up an open idea), asks, then sends it|
 |`/schwitzer idea <text>`|Note an idea in a project right away, without an agent turn|
 
@@ -74,6 +75,15 @@ sequenceDiagram
 - No session entry is stored, so the plan review hook never sends a build task's plan.
 - The task message tells the agent to implement the approved plan and then call `schwitzer_finish` with room, task and a note on what was done, or `schwitzer_unclaim` with a note on why if it stops without finishing.
 - The editor gets `Build Schwitzer task #<n> "<title>" from project "<project>" in room "<room>". schwitzer-claim: <token>`, and the plugin says "Task #<n> is claimed for building. Press Enter to start."
+- After a `schwitzer_finish` without error from the main agent (not from a subagent), the plugin waits for the end of that run and, when omp has a UI, offers the first unclaimed approved task of the configured projects in a dialog `Build #<n> "<title>" next?`, with ` from project "<project>"` before `next?` when the repo is linked to more than one project. The choices are:
+  - "In a fresh session (recommended)": the editor gets `/schwitzer build new` and the plugin says "Press Enter for a new session with /schwitzer build; a fresh session keeps the context small."
+  - "In this session": the task is claimed at once, as by `/schwitzer build` with that task picked. In plan mode the plugin says "Leave plan mode, then run /schwitzer build again." instead.
+  - "Not now", or dismissing the dialog: nothing happens.
+- No approved task waits: no offer. An error is shown as `Schwitzer: <message>`.
+
+### /schwitzer build new
+
+Needs the agent idle, like every subcommand except `idea`. It waits for idle once more, opens a new omp session and puts `/schwitzer build` into its editor, saying "New session: press Enter to pick the task to build." When omp cancels the new session, nothing else happens. It is not in the menu of a bare `/schwitzer`; the offer above puts it into the editor.
 
 ### /schwitzer propose [text]
 
