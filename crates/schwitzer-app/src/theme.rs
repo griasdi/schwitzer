@@ -8,6 +8,7 @@ use iced::theme::Palette;
 use iced::theme::palette::{Extended, Pair};
 use iced::widget::{
     button, container, markdown, overlay::menu, pick_list, scrollable, text_editor, text_input,
+    toggler,
 };
 use iced::{Background, Border, Color, Font, Pixels, Shadow, Theme, Vector, color};
 
@@ -658,6 +659,31 @@ pub fn button_segment(on: bool) -> impl Fn(&Theme, button::Status) -> button::St
             }
             (false, _) => face(None, t.text, border(t.line_strong), shadow),
         }
+    }
+}
+
+/// A switch. It is drawn without a handler inside a row button that takes the press, so iced
+/// reports it disabled; only whether it is on counts.
+pub fn switch(theme: &Theme, status: toggler::Status) -> toggler::Style {
+    let t = tokens(theme);
+    let (toggler::Status::Active { is_toggled: on }
+    | toggler::Status::Hovered { is_toggled: on }
+    | toggler::Status::Disabled { is_toggled: on }) = status;
+    let (background, track_border, knob_border, knob_border_width) = if on {
+        (t.primary, t.primary, Color::TRANSPARENT, 0.0)
+    } else {
+        (t.ground, t.line_strong, t.line_strong, 1.0)
+    };
+    toggler::Style {
+        background: background.into(),
+        background_border_width: 1.0,
+        background_border_color: track_border,
+        foreground: t.raised.into(),
+        foreground_border_width: knob_border_width,
+        foreground_border_color: knob_border,
+        text_color: None,
+        border_radius: None,
+        padding_ratio: 0.15,
     }
 }
 

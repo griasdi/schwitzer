@@ -40,7 +40,6 @@ icons! {
     Users => "users",
     UserPlus => "user-plus",
     Plug => "plug",
-    Refresh => "refresh-cw",
     Notes => "message-square",
     ArrowUp => "arrow-up",
     ArrowDown => "arrow-down",
@@ -49,6 +48,10 @@ icons! {
     Alert => "circle-alert",
     Plan => "file-text",
     Back => "arrow-left",
+    Bell => "bell",
+    Info => "info",
+    Download => "download",
+    DoorOpen => "door-open",
 }
 
 /// How an icon is coloured; resolved against the theme when drawn.

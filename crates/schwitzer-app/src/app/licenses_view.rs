@@ -1,4 +1,4 @@
-//! The Licenses page: Schwitzer's own license, those of the bundled font and icons, and those of
+//! The About page: Schwitzer's own license, those of the bundled font and icons, and those of
 //! the open source components, each unfolding in place.
 
 use iced::widget::{column, container, row, text};
@@ -43,7 +43,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         )),
     ]
     .spacing(SP_4);
-    frame("licenses-page", "Licenses", body.into(), None)
+    frame("licenses-page", "About", body.into(), None)
 }
 
 /// The entries of `group`, each a row that unfolds its sources and text below it.

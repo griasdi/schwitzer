@@ -258,7 +258,7 @@ stateDiagram-v2
 
 ## 8. Desktop app
 
-The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` holds the state, `Message` is everything that can happen, `update` changes the state and returns tasks, `view` draws it. Pages are `Page::{Main, Settings, Licenses}`; a task opens in place in the list (`Expanded::{Task, New}`).
+The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` holds the state, `Message` is everything that can happen, `update` changes the state and returns tasks, `view` draws it. Pages are `Page::{Main, Settings, Licenses}` and the settings topics `Page::{RoomSettings, ProjectSettings, Rooms, Omp, ProjectsFolders, Updates}`; `Page::parent` is where Back goes (a topic to Settings, Settings to Main), and `App::open_page` opens a page at its top. A danger action on a settings page waits in `App::confirm` until the member confirms it in place. A task opens in place in the list (`Expanded::{Task, New}`).
 
 |File (`app/`)|Shows|
 |---|---|
@@ -266,9 +266,9 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |`list.rs`|the task list in its groups|
 |`task_view.rs`|an opened task, the new-task form, the decision buttons|
 |`live.rs`|the live agent sessions of the open project|
-|`settings_view.rs`|settings: name, rooms, projects and their repos, omp, updates|
-|`pages.rs`|full-window pages with a back button: Settings, Licenses|
-|`licenses_view.rs`|the licenses page|
+|`settings_view/`|settings: `mod.rs` the overview of nav slabs by scope (room, this machine, you, about), the first-start page and the shared rows (nav slab, switch row, confirm row); `room.rs` the selected room and all rooms; `project.rs` the selected project and its repos; `machine.rs` omp, projects folders, updates|
+|`pages.rs`|full-window pages with a back button: Settings and its topics, About|
+|`licenses_view.rs`|the About page with the licenses|
 |`widgets.rs`|lamps, pills, buttons and other shared widgets|
 |`sticky.rs`|`Sticky`: the open task's head, pinned to the list's top while its slab is scrolled past|
 |`icons.rs`|Lucide icons from `assets/icons/`|
@@ -468,7 +468,7 @@ What is shared, per session (`SessionInfo`): id, title (≤ 200 bytes), `project
 - `/schwitzer idea <text>` calls `add_idea` at once, without an agent turn, and works while the agent is busy. A text over 200 bytes becomes the body, and the title is its longest prefix within 197 bytes followed by `…`.
 - `/schwitzer propose [text]` hands the agent a drafting task: it looks into the repo without changing anything, writes a title and a Markdown body, shows both in its chat reply, asks the user with the ask tool in a question that names only the title (the dialog cuts long text off), and only then calls `schwitzer_propose`. With open ideas, the user may pick one instead; the agent then writes it up with `idea: N` (`ProposeIdea`), and the idea keeps its number.
 - Other projects: before each prompt of the main agent, the plugin adds a hidden `schwitzer-projects` message listing the other projects of the joined rooms and their local repos, with the rule to propose a change there instead of making it; such a proposal's body starts with `Requested from project "<p>" in room "<r>"`. An `edit`, `write` or `ast_edit` call into another project's repo is held by a `tool_call` guard: "Allow this edit", "Allow edits in "<project>" for this session" or "Block: propose it to "<project>" instead"; without a UI it is blocked.
-- Task number in commits: a per-member switch per project (`Settings::commit_trailers`, Settings page, project section). `App::write_plugin_configs` rewrites only `schwitzer.json` in the project's repos when it changes, so omp sees it at the next commit. While a build claim of the omp process is on such a project, a `tool_call` guard blocks a `bash` `git commit` in the repo whose command lacks `Schwitzer-Task: #<n>` and tells the agent to add `--trailer "Schwitzer-Task: #<n>"`.
+- Task number in commits: a per-member switch per project (`Settings::commit_trailers`, the project's settings page). `App::write_plugin_configs` rewrites only `schwitzer.json` in the project's repos when it changes, so omp sees it at the next commit. While a build claim of the omp process is on such a project, a `tool_call` guard blocks a `bash` `git commit` in the repo whose command lacks `Schwitzer-Task: #<n>` and tells the agent to add `--trailer "Schwitzer-Task: #<n>"`.
 
 Every message text is in [the plugin README](../crates/schwitzer-app/omp-plugin/README.md).
 
@@ -548,7 +548,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |New MCP tool or argument|`mcp/tools.rs`, `omp-plugin/index.ts` (`TOOLS`), `omp-plugin/README.md`|
 |New `/schwitzer` subcommand or prompt text|`omp-plugin/index.ts`, `omp-plugin/README.md`; a rebuilt app marks every installed plugin out of date and rewrites it|
 |Shared session fields|`sessions.rs` (`FileState::apply`), `logic::shared_sessions`, `SessionInfo` in `model.rs` (a wire change), `app/live.rs`|
-|New setting|`settings.rs`, `app/settings_view.rs`|
+|New setting|`settings.rs`, the topic's page in `app/settings_view/` and, if it needs one, its status line on the overview (`settings_view/mod.rs`)|
 |Colours, sizes, widget looks|DESIGN.md first, then `theme.rs`|
 |Self-update|`update.rs`, `app/resume.rs`, `deploy/package.sh` (asset names)|
 |Graphics device lost|`app/gpu.rs` (a 1×1 shader layer that registers wgpu's device-lost callback), the `Message::Tick` arm in `app/mod.rs` (restart through `App::restart`)|

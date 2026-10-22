@@ -90,7 +90,17 @@ pub enum Message {
         idea: bool,
     },
     OpenSettings,
-    /// Opens the Licenses page from the About section of the settings.
+    /// Opens a page of Settings, or Settings itself, at its top.
+    OpenPage(Page),
+    /// Selects room `id` and opens its settings page.
+    OpenRoom(RoomId),
+    /// Shows project `id` of the selected room and opens its settings page.
+    OpenProject(u64),
+    /// Asks in place to confirm a danger action before it runs.
+    Ask(Confirm),
+    /// Drops the pending confirmation.
+    CancelConfirm,
+    /// Opens the About page with the licenses from Settings.
     OpenLicenses,
     /// Unfolds license `i` of `about::entries()` on the Licenses page, or folds it.
     ToggleLicense(usize),
@@ -100,8 +110,9 @@ pub enum Message {
     /// A press on a task slab or on the head of the open task: opens it, or closes it when it
     /// is open.
     ToggleTask(u64),
-    /// Esc, the back button, the close button of the open task and Cancel on a draft: closes
-    /// the open task or draft, else returns from Settings to the main page.
+    /// Esc, the back button, the close button of the open task and Cancel on a draft: drops a
+    /// pending confirmation, closes the open task or draft, else goes up one page: from a topic
+    /// page to Settings, from Settings to the main page.
     Back,
     ToggleGroup(Group),
     /// Folds or unfolds the sessions panel.
@@ -118,10 +129,11 @@ pub enum Message {
     SubmitJoin,
     Joined(Result<RoomId, String>),
     CopyKey,
+    /// Leaves the selected room, after the member confirmed it.
     LeaveRoom,
     Left(Result<(), String>),
     /// Forgets the selected room on this machine without asking its server, which does not
-    /// answer.
+    /// answer; after the member confirmed it.
     RemoveRoom,
     NameInput(String),
     SubmitName,
@@ -130,7 +142,7 @@ pub enum Message {
     SubmitMcpPort,
     /// Shows project `id` of the selected room.
     SelectProject(u64),
-    /// Opens Settings with the focus on the new project's name.
+    /// Opens the room's settings with the focus on the new project's name.
     OpenNewProject,
     NewProjectName(String),
     CreateProject,
@@ -138,7 +150,8 @@ pub enum Message {
     ProjectNameInput(String),
     RenameProject,
     ProjectRenamed(Result<Response, String>),
-    /// Deletes the selected project; the server refuses one with tasks.
+    /// Deletes the selected project after the member confirmed it; the server refuses one with
+    /// tasks.
     DeleteProject,
     ProjectDeleted(Result<Response, String>),
     /// Moves the open task into project `id`.
@@ -148,7 +161,7 @@ pub enum Message {
     AddProjectsDir,
     /// Index into the projects folders.
     RemoveProjectsDir(usize),
-    /// Opens Settings with the focus on the projects folder input.
+    /// Opens the projects folders page with the focus on its input.
     OpenProjectsDirs,
     /// Ends the first-start page: saves the projects folders shown on it and opens the main page.
     ConfirmProjectsDirs,
@@ -242,11 +255,43 @@ struct ServerStatus {
 
 /// Which page fills the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-enum Page {
+pub enum Page {
     Main,
+    /// The overview of the settings by scope, each topic opening its own page.
     Settings,
-    /// Schwitzer's license and the open source licenses, opened from Settings.
+    /// About Schwitzer: its license and the open source licenses, opened from Settings.
     Licenses,
+    /// The selected room: server, invite key, projects, leave.
+    RoomSettings,
+    /// The selected project: linked repos and their omp plugin, name, delete.
+    ProjectSettings,
+    /// All rooms: switch, join, create.
+    Rooms,
+    /// The omp connection: port, plugins, session files.
+    Omp,
+    /// The folders searched for repos.
+    ProjectsFolders,
+    /// This build's version and the self-update.
+    Updates,
+}
+
+impl Page {
+    /// The page Back returns to.
+    fn parent(self) -> Option<Page> {
+        match self {
+            Page::Main => None,
+            Page::Settings => Some(Page::Main),
+            _ => Some(Page::Settings),
+        }
+    }
+}
+
+/// A danger action waiting for the member to confirm it in place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confirm {
+    LeaveRoom,
+    RemoveRoom,
+    DeleteProject,
 }
 
 /// The one element open in place in the task list.
@@ -380,6 +425,8 @@ pub struct App {
     license_open: Option<usize>,
     /// The task or draft open in place in the list.
     expanded: Option<Expanded>,
+    /// The danger action asked to confirm on a settings page.
+    confirm: Option<Confirm>,
     /// Folded groups of the list.
     collapsed: HashSet<Group>,
     /// Whether the sessions panel is unfolded.
@@ -513,6 +560,7 @@ impl App {
             first_start,
             license_open: None,
             expanded: None,
+            confirm: None,
             collapsed: HashSet::from([Group::Closed]),
             sessions_open: true,
             members_open: false,
@@ -625,6 +673,12 @@ impl App {
                 }
                 Page::Settings => settings_view::view(self),
                 Page::Licenses => licenses_view::view(self),
+                Page::RoomSettings => settings_view::room_page(self),
+                Page::ProjectSettings => settings_view::project_page(self),
+                Page::Rooms => settings_view::rooms_page(self),
+                Page::Omp => settings_view::omp_page(self),
+                Page::ProjectsFolders => settings_view::folders_page(self),
+                Page::Updates => settings_view::updates_page(self),
             }
         };
         let window = container(
@@ -680,7 +734,7 @@ impl App {
                         Icon::Settings,
                         Tone::Text,
                         "Settings",
-                        Some(Message::OpenSettings),
+                        Some(Message::OpenPage(Page::RoomSettings)),
                         theme::button_secondary,
                     ),
                 )
@@ -694,7 +748,7 @@ impl App {
                     Icon::Users,
                     Tone::OnPrimary,
                     "Create or join a room",
-                    Some(Message::OpenSettings),
+                    Some(Message::OpenPage(Page::Rooms)),
                     theme::button_primary,
                 ),
             ),
@@ -965,19 +1019,27 @@ impl App {
                 });
                 Task::batch([operation::focus("proposal-title"), reveal("new-task")])
             }
-            Message::OpenSettings => {
-                if self.page != Page::Settings {
-                    self.reset_drafts();
-                }
-                self.expanded = None;
-                self.page = Page::Settings;
-                self.sync_project_form();
+            Message::OpenSettings => self.open_page(Page::Settings),
+            Message::OpenPage(page) => self.open_page(page),
+            Message::OpenRoom(id) => {
+                self.select(Some(id));
+                self.open_page(Page::RoomSettings)
+            }
+            Message::OpenProject(id) => {
+                self.show_project(id);
+                self.open_page(Page::ProjectSettings)
+            }
+            Message::Ask(confirm) => {
+                self.confirm = Some(confirm);
+                Task::none()
+            }
+            Message::CancelConfirm => {
+                self.confirm = None;
                 Task::none()
             }
             Message::OpenLicenses => {
-                self.page = Page::Licenses;
                 self.license_open = None;
-                operation::snap_to(pages::BODY_ID, operation::RelativeOffset::START)
+                self.open_page(Page::Licenses)
             }
             Message::ToggleLicense(i) => {
                 self.license_open = (self.license_open != Some(i)).then_some(i);
@@ -1016,17 +1078,17 @@ impl App {
                     self.confirm_projects_dirs();
                     return Task::none();
                 }
+                if self.confirm.take().is_some() {
+                    return Task::none();
+                }
                 if self.expanded.take().is_some() {
                     self.reset_drafts();
-                } else if self.page == Page::Licenses {
-                    // Back to the About block, the last one on Settings.
-                    self.page = Page::Settings;
-                    return operation::snap_to_end(pages::BODY_ID);
-                } else if self.page != Page::Main {
-                    self.page = Page::Main;
-                    self.reset_drafts();
+                    return Task::none();
                 }
-                Task::none()
+                match self.page.parent() {
+                    Some(parent) => self.open_page(parent),
+                    None => Task::none(),
+                }
             }
             Message::ToggleGroup(group) => {
                 if !self.collapsed.remove(&group) {
@@ -1071,27 +1133,36 @@ impl App {
                 }
                 None => Task::none(),
             },
-            Message::LeaveRoom => match self.selected {
-                Some(room) => {
-                    let client = self.client.clone();
-                    call(async move { client.leave_room(room).await }, Message::Left)
+            Message::LeaveRoom => {
+                self.confirm = None;
+                match self.selected {
+                    Some(room) => {
+                        let client = self.client.clone();
+                        call(async move { client.leave_room(room).await }, Message::Left)
+                    }
+                    None => Task::none(),
                 }
-                None => Task::none(),
-            },
-            Message::Left(result) => {
-                match result {
-                    Ok(()) => self.sync_rooms(),
-                    Err(e) => self.banner = Some(e),
-                }
-                Task::none()
             }
-            Message::RemoveRoom => {
-                if let Some(room) = self.selected {
-                    self.client.forget_room(room);
+            Message::Left(result) => match result {
+                Ok(()) => {
                     self.sync_rooms();
-                    self.notify("Room removed from this app");
+                    self.notify("Room left");
+                    self.leave_room_page()
                 }
-                Task::none()
+                Err(e) => {
+                    self.banner = Some(e);
+                    Task::none()
+                }
+            },
+            Message::RemoveRoom => {
+                self.confirm = None;
+                let Some(room) = self.selected else {
+                    return Task::none();
+                };
+                self.client.forget_room(room);
+                self.sync_rooms();
+                self.notify("Room removed from this app");
+                self.leave_room_page()
             }
             Message::NameInput(s) => {
                 self.forms.name = s;
@@ -1220,24 +1291,17 @@ impl App {
             }
 
             Message::SelectProject(id) => {
-                if let Some(room) = self.selected {
-                    self.choose_project(room, id);
-                }
-                self.expanded = None;
-                self.reset_drafts();
-                self.sync_project_form();
-                // A repo cloned a moment ago shows as soon as its project is opened.
-                self.read_project_dirs();
+                self.show_project(id);
                 Task::none()
             }
-            Message::OpenNewProject => {
-                self.open_settings();
-                operation::focus("new-project-name")
-            }
-            Message::OpenProjectsDirs => {
-                self.open_settings();
-                operation::focus("projects-dir-input")
-            }
+            Message::OpenNewProject => Task::batch([
+                self.open_page(Page::RoomSettings),
+                operation::focus("new-project-name"),
+            ]),
+            Message::OpenProjectsDirs => Task::batch([
+                self.open_page(Page::ProjectsFolders),
+                operation::focus("projects-dir-input"),
+            ]),
             Message::ConfirmProjectsDirs => {
                 self.confirm_projects_dirs();
                 Task::none()
@@ -1307,6 +1371,7 @@ impl App {
                 Task::none()
             }
             Message::DeleteProject => {
+                self.confirm = None;
                 let (Some(room), Some(project)) = (self.selected, self.selected_project()) else {
                     return Task::none();
                 };
@@ -1318,7 +1383,12 @@ impl App {
             }
             Message::ProjectDeleted(result) => {
                 match result {
-                    Ok(Response::Ok) => self.notify("Project deleted"),
+                    Ok(Response::Ok) => {
+                        self.notify("Project deleted");
+                        if self.page == Page::ProjectSettings {
+                            return self.open_page(Page::RoomSettings);
+                        }
+                    }
                     Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
                     Err(e) => self.banner = Some(e),
                 }
@@ -1658,14 +1728,39 @@ impl App {
             .unwrap_or_default();
     }
 
-    /// Opens Settings, keeping drafts when it is open already.
-    fn open_settings(&mut self) {
-        if self.page != Page::Settings {
+    /// Opens `page` at its top. Drafts and a pending confirmation stay only when it is open
+    /// already.
+    fn open_page(&mut self, page: Page) -> Task<Message> {
+        if self.page != page {
             self.reset_drafts();
+            self.confirm = None;
         }
         self.expanded = None;
-        self.page = Page::Settings;
+        self.page = page;
         self.sync_project_form();
+        operation::snap_to(pages::BODY_ID, operation::RelativeOffset::START)
+    }
+
+    /// After the selected room was left or removed: from its page back to Settings.
+    fn leave_room_page(&mut self) -> Task<Message> {
+        if self.page == Page::RoomSettings {
+            self.open_page(Page::Settings)
+        } else {
+            Task::none()
+        }
+    }
+
+    /// Shows project `id` of the selected room.
+    fn show_project(&mut self, id: u64) {
+        if let Some(room) = self.selected {
+            self.choose_project(room, id);
+        }
+        self.expanded = None;
+        self.confirm = None;
+        self.reset_drafts();
+        self.sync_project_form();
+        // A repo cloned a moment ago shows as soon as its project is opened.
+        self.read_project_dirs();
     }
 
     /// Reads the subfolders of the searched folders.
@@ -1798,7 +1893,7 @@ impl App {
                 self.sync_rooms();
                 self.select(Some(RoomId::of(&key.token)));
                 self.save_settings();
-                self.publish()
+                Task::batch([self.publish(), self.open_page(Page::Main)])
             }
             Err(e) => {
                 self.banner = Some(e);
@@ -1826,7 +1921,7 @@ impl App {
                 self.sync_rooms();
                 self.select(Some(room));
                 self.save_settings();
-                self.publish()
+                Task::batch([self.publish(), self.open_page(Page::Main)])
             }
             Err(e) => {
                 self.banner = Some(e);
@@ -2415,6 +2510,7 @@ impl App {
         if self.selected != room {
             self.selected = room;
             self.expanded = None;
+            self.confirm = None;
             self.reset_drafts();
             self.sync_project_form();
         }

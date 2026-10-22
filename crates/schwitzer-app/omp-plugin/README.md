@@ -1,6 +1,6 @@
 # The omp plugin
 
-The Schwitzer app writes an omp extension into every repository linked to a project (Settings, the project's linked repos), so an omp session started there gets the `/schwitzer` command. With it, the session plans, builds and proposes tasks of the projects the repo is linked to and notes ideas for them, and gives the agent the app's tools, all through the app's own MCP server. The source is `index.ts` in this directory; the copies in repos are written by the app and overwritten, so edit this file, never a copy.
+The Schwitzer app writes an omp extension into every repository linked to a project (Settings, the project's page, "Repos on this machine"), so an omp session started there gets the `/schwitzer` command. With it, the session plans, builds and proposes tasks of the projects the repo is linked to and notes ideas for them, and gives the agent the app's tools, all through the app's own MCP server. The source is `index.ts` in this directory; the copies in repos are written by the app and overwritten, so edit this file, never a copy.
 
 ## Commands
 
@@ -99,7 +99,7 @@ An agent in one repo may need a change in another Schwitzer project, for example
 
 ## Task number in commits
 
-A member can switch on "Task number in commits" per project in the app (Settings, the project's section; `commit_trailers` in `settings.toml`, off by default). The app writes the switch into `schwitzer.json` of every repo of the project that has the plugin as soon as it changes, and the plugin reads that file on every check, so it takes effect at once, without an omp restart or a plugin update.
+A member can switch on "Task number in commits" per project in the app (Settings, the project's page, "Your agents"; `commit_trailers` in `settings.toml`, off by default). The app writes the switch into `schwitzer.json` of every repo of the project that has the plugin as soon as it changes, and the plugin reads that file on every check, so it takes effect at once, without an omp restart or a plugin update.
 
 - A build claim (`/schwitzer build`, the build after an approved plan, or `schwitzer_claim` with `work: build`) remembers its room, task and project in the omp process; `schwitzer_finish` and `schwitzer_unclaim` forget it.
 - Before a `bash` call (`tool_call`) of any agent whose command contains `git … commit` (git's global options such as `-C <dir>` or `-c <key=value>` may stand between) and whose `cwd` lies in this repo, the plugin calls `list_rooms` (3 s timeout) and finds the remembered build claims on a project with the switch on. When the command lacks `Schwitzer-Task: #<n>` for one of them, the call is blocked: "Schwitzer: commits while building task #<n> carry the trailer Schwitzer-Task: #<n>. Commit again with --trailer "Schwitzer-Task: #<n>" added to the git commit command (or with the trailer as the last paragraph of the message)."
@@ -144,9 +144,9 @@ The app writes these files into the repo:
 
 ## Keeping it current
 
-- Settings, per linked repo of the selected project: the status "omp plugin installed", "omp plugin out of date" or "No omp plugin", and buttons to install, remove or update the plugin in that repo.
+- Settings, the project's page, per linked repo: the status "omp plugin installed", "omp plugin out of date" or "No omp plugin", and buttons to install, remove or update the plugin in that repo.
 - At start and every 5 s the app compares each installed plugin with what it would write: the three plugin files, the version in the lock entry, and that `.omp/mcp.json` holds no `schwitzer` server. Any difference marks it out of date, for example after an app update or a new MCP port.
-- Settings, omp, "omp plugin": a summary, "Update all", and "Update automatically" On or Off (`auto_update_plugins` in `settings.toml`, on by default). With it on, an out-of-date plugin is rewritten as soon as the app sees it. A repo whose automatic update failed shows the error in the banner and is not retried until its plugin changes state, the user updates it by hand, or auto-update is switched on again.
+- Settings, the omp page, "omp plugin": a summary, "Update all", and the "Update automatically" switch (`auto_update_plugins` in `settings.toml`, on by default). With it on, an out-of-date plugin is rewritten as soon as the app sees it. A repo whose automatic update failed shows the error in the banner and is not retried until its plugin changes state, the user updates it by hand, or auto-update is switched on again.
 - When the linked repos change, the app rewrites every installed plugin, so that `schwitzer.json` lists the right projects and other repos, whether auto-update is on or not. From a repo no project is linked to any more it removes the plugin: the plugin directory, its entries in the lock file (`plugins` and `settings`) and the `schwitzer` server in `mcp.json`. A file omp would not read is left alone.
 
 ## How it talks to the app

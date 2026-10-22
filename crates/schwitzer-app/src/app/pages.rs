@@ -1,4 +1,4 @@
-//! Full-window pages with a back button: Settings, Licenses.
+//! Full-window pages with a back button: Settings and its topic pages, About.
 
 use iced::widget::{column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
@@ -18,7 +18,7 @@ pub const BODY_ID: &str = "page-body";
 /// A page: header bar with back button and title, scrolling body, optional footer bar.
 pub fn frame<'a>(
     id: &'static str,
-    title: &'a str,
+    title: impl text::IntoFragment<'a>,
     body: Element<'a, Message>,
     footer: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
