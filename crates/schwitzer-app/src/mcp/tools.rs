@@ -334,6 +334,15 @@ fn find_project<'a>(projects: &'a [Project], arg: &str) -> Result<&'a Project, S
         })
 }
 
+/// The id of the project `arg` names in `room`, `None` when `arg` is omitted or blank. The room
+/// need only be loaded when a project is named.
+fn optional_project(room: &RoomRef, arg: Option<&str>) -> Result<Option<u64>, String> {
+    arg.map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|arg| find_project(&room.loaded()?.projects, arg).map(|p| p.id))
+        .transpose()
+}
+
 /// The project a new task goes to: `arg` when given, else the room's only project.
 fn target_project<'a>(projects: &'a [Project], arg: Option<&str>) -> Result<&'a Project, String> {
     if let Some(arg) = arg.map(str::trim).filter(|a| !a.is_empty()) {
@@ -599,15 +608,7 @@ impl Tools {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
             let state = room.loaded()?;
-            let project = match args
-                .project
-                .as_deref()
-                .map(str::trim)
-                .filter(|p| !p.is_empty())
-            {
-                Some(arg) => Some(find_project(&state.projects, arg)?.id),
-                None => None,
-            };
+            let project = optional_project(&room, args.project.as_deref())?;
             let rows: Vec<Value> = state
                 .tasks
                 .iter()
@@ -688,15 +689,7 @@ impl Tools {
     async fn claim(&self, Parameters(args): Parameters<ClaimArgs>) -> CallToolResult {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
-            let project = match args
-                .project
-                .as_deref()
-                .map(str::trim)
-                .filter(|p| !p.is_empty())
-            {
-                Some(arg) => Some(find_project(&room.loaded()?.projects, arg)?.id),
-                None => None,
-            };
+            let project = optional_project(&room, args.project.as_deref())?;
             let response = self
                 .client
                 .request(
