@@ -301,6 +301,17 @@ pub fn pick_prompt(room: &str, task: &Task, token: &ClaimToken) -> String {
     )
 }
 
+/// The task's title as a level-one heading over its details, the Markdown the copy button of
+/// the open task puts on the clipboard; details start at `##`.
+pub fn details_markdown(title: &str, body: &str) -> String {
+    let body = body.trim_end();
+    if body.trim().is_empty() {
+        format!("# {}", title.trim())
+    } else {
+        format!("# {}\n\n{body}", title.trim())
+    }
+}
+
 /// The MCP port entered in Settings: 1 to 65535. Port 0 would bind a random port that the
 /// plugin's `mcp_url` could not name.
 pub fn parse_port(s: &str) -> Option<u16> {
@@ -391,6 +402,15 @@ mod tests {
 
     fn member(byte: u8) -> MemberId {
         MemberId([byte; 32])
+    }
+
+    #[test]
+    fn details_markdown_puts_the_title_over_the_details() {
+        assert_eq!(
+            details_markdown("Fix it", "## Why\n\nBecause.\n"),
+            "# Fix it\n\n## Why\n\nBecause."
+        );
+        assert_eq!(details_markdown("Fix it", "  \n"), "# Fix it");
     }
 
     #[test]

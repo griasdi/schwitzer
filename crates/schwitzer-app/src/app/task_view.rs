@@ -14,7 +14,7 @@ use super::widgets::{
     self, LAMP, heading, hrule, icon_button, icon_text_button, id_button, lamp, member_tag, muted,
     text_button,
 };
-use super::{App, Message, sticky};
+use super::{App, Message, TaskText, sticky};
 use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 
 /// Task `task` open in place: the slab's two lines as a head that closes it again, then
@@ -28,6 +28,16 @@ pub fn view<'a>(
     let n = task.number;
     let editable = logic::editable(task);
     let mut icons = row![];
+    if app.task_draft.is_none() {
+        icons = icons.push(icon_button(
+            "copy-details",
+            Icon::Copy,
+            Tone::Muted,
+            "Copy title and details as Markdown",
+            Some(Message::CopyText(TaskText::Details)),
+            theme::button_ghost,
+        ));
+    }
     if editable && app.task_draft.is_none() {
         icons = icons.push(icon_button(
             "edit-task",
@@ -372,6 +382,16 @@ fn plan<'a>(
     .spacing(SP_2)
     .align_y(Alignment::Center);
     head = head.push(Space::new().width(Length::Fill));
+    if ready && app.plan_draft.is_none() {
+        head = head.push(icon_button(
+            "copy-plan",
+            Icon::Copy,
+            Tone::Muted,
+            "Copy plan as Markdown",
+            Some(Message::CopyText(TaskText::Plan)),
+            theme::button_ghost,
+        ));
+    }
     if editable && app.plan_draft.is_none() {
         head = head.push(widgets::icon_button(
             "edit-plan",
@@ -506,7 +526,15 @@ fn notes<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, 
             .push(muted(format!(
                 "{} ago",
                 logic::ago(app.now_ms.saturating_sub(note.at_ms))
-            )));
+            )))
+            .push(icon_button(
+                format!("copy-note-{i}"),
+                Icon::Copy,
+                Tone::Muted,
+                "Copy note as Markdown",
+                Some(Message::CopyText(TaskText::Note(i))),
+                theme::button_ghost,
+            ));
         let body = match app.open_md.notes.get(i) {
             Some(md) => rich(app, md),
             None => text(&note.text).size(TS_14).into(),

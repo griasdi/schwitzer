@@ -194,6 +194,8 @@ pub enum Message {
     AddNote,
     NoteAdded(Result<Response, String>),
     Published(RoomId, Result<(), String>),
+    /// Puts a Markdown text of the open task on the clipboard.
+    CopyText(TaskText),
     /// The five-minute update check; a server's announcement checks too.
     CheckUpdate,
     /// "Check now": asks GitHub for its latest release, whatever the servers announce.
@@ -216,6 +218,16 @@ pub enum Message {
 }
 
 /// Whether a server answers, with the reason when it does not.
+/// A Markdown text of the open task that a copy button puts on the clipboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskText {
+    /// Title as `# heading` over the details.
+    Details,
+    Plan,
+    /// Note `i` in note order.
+    Note(usize),
+}
+
 #[derive(Debug, Clone, Default)]
 struct ServerStatus {
     online: bool,
@@ -1381,6 +1393,24 @@ impl App {
             Message::CancelEditTask => {
                 self.task_draft = None;
                 Task::none()
+            }
+            Message::CopyText(part) => {
+                let Some((_, task)) = self.open() else {
+                    return Task::none();
+                };
+                let (text, notice) = match part {
+                    TaskText::Details => (
+                        logic::details_markdown(&task.title, &task.body),
+                        "Title and details copied",
+                    ),
+                    TaskText::Plan => (task.plan.clone(), "Plan copied"),
+                    TaskText::Note(i) => match task.notes.get(i) {
+                        Some(note) => (note.text.clone(), "Note copied"),
+                        None => return Task::none(),
+                    },
+                };
+                self.notify(notice);
+                iced::clipboard::write(text)
             }
             Message::EditTitle(s) => {
                 if let Some(draft) = &mut self.task_draft {
