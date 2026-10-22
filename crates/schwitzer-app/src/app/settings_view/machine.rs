@@ -11,6 +11,7 @@ use crate::app::widgets::{dot, heading, input, muted, path_text, text_button};
 use crate::app::{App, Message};
 use crate::mcp::McpStatus;
 use crate::omp_plugin::PluginState;
+use crate::settings;
 use crate::theme::{self, SP_2, SP_4, TS_14};
 use crate::update::{self, UpdateState};
 
@@ -25,6 +26,7 @@ pub fn omp_page(app: &App) -> Element<'_, Message> {
         ),
         Some(McpStatus::Failed(e)) => (Some(false), e.clone()),
     };
+    let default_port = settings::DEFAULT_MCP_PORT.to_string();
     let changed =
         logic::parse_port(&app.forms.mcp_port).is_some_and(|p| p != app.settings.mcp_port);
     let connection = column![
@@ -42,7 +44,7 @@ pub fn omp_page(app: &App) -> Element<'_, Message> {
         row![
             input(
                 "mcp-port-input",
-                "13339",
+                &default_port,
                 &app.forms.mcp_port,
                 Message::McpPortInput,
                 Message::SubmitMcpPort

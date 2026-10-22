@@ -15,7 +15,7 @@ use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14}
 /// A text input with a widget id that submits with Enter.
 pub fn input<'a>(
     id: &'static str,
-    placeholder: &'a str,
+    placeholder: &str,
     value: &'a str,
     on_input: fn(String) -> Message,
     on_submit: Message,
