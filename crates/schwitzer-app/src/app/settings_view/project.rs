@@ -4,7 +4,7 @@
 use iced::widget::{column, row, text};
 use iced::{Alignment, Element, Length};
 
-use super::{confirm_row, switch_row, view};
+use super::{Switch, confirm_row, switch_row, view};
 use crate::app::icons::{Icon, Tone, icon};
 use crate::app::logic;
 use crate::app::pages::{frame, section};
@@ -142,15 +142,13 @@ pub fn project_page(app: &App) -> Element<'_, Message> {
         heading("Your agents"),
         switch_row(
             "commit-trailer-toggle",
-            None,
+            Switch::Flat,
             "Task number in commits",
             "omp holds back a commit until its message carries Schwitzer-Task: #<number>. Only \
              your own agents.",
             app.selected
                 .is_some_and(|room| app.settings.commit_trailer(&room, project.id)),
             Message::CommitTrailers,
-            theme::button_row,
-            [SP_2, SP_2],
         ),
     ]
     .spacing(SP_2);

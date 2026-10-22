@@ -107,13 +107,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 section(you(app)),
                 switch_row(
                     "settings-notify",
-                    Some(Icon::Bell),
+                    Switch::Slab(Icon::Bell),
                     "Notify when my agents hand in",
                     "A plan handed in or a build finished, in any room",
                     app.settings.notify_hand_ins,
                     Message::NotifyHandIns,
-                    theme::slab,
-                    [SP_2, SP_3],
                 ),
             ]
             .spacing(SP_1),
@@ -404,23 +402,33 @@ fn nav_slab<'a>(
     )
 }
 
+/// How a switch row sits on its page.
+enum Switch {
+    /// A slab of the overview, led by an icon.
+    Slab(Icon),
+    /// A flat row inside a section.
+    Flat,
+}
+
 /// A full-width row with a label, a caption and a switch; a press anywhere on it flips the
 /// switch. The switch itself has no handler, so it leaves the press to the row.
-#[allow(clippy::too_many_arguments)]
 fn switch_row<'a>(
     id: &'static str,
-    glyph: Option<Icon>,
+    kind: Switch,
     label: &'a str,
     caption: &'a str,
     value: bool,
     message: fn(bool) -> Message,
-    style: fn(&Theme, button::Status) -> button::Style,
-    padding: [f32; 2],
 ) -> Element<'a, Message> {
+    type Style = fn(&Theme, button::Status) -> button::Style;
     let mut line = row![].spacing(SP_3).align_y(Alignment::Center);
-    if let Some(glyph) = glyph {
-        line = line.push(icon(glyph, 16.0, Tone::Muted));
-    }
+    let (style, padding): (Style, [f32; 2]) = match kind {
+        Switch::Slab(glyph) => {
+            line = line.push(icon(glyph, 16.0, Tone::Muted));
+            (theme::slab, [SP_2, SP_3])
+        }
+        Switch::Flat => (theme::button_row, [SP_2, SP_2]),
+    };
     line = line
         .push(
             column![

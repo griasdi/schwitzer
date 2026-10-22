@@ -3,7 +3,7 @@
 use iced::widget::{column, row, text};
 use iced::{Alignment, Element, Length};
 
-use super::{projects_folders, repos, switch_row};
+use super::{Switch, projects_folders, repos, switch_row};
 use crate::app::icons::{Icon, Tone, icon};
 use crate::app::logic;
 use crate::app::pages::{frame, section};
@@ -90,14 +90,12 @@ pub fn omp_page(app: &App) -> Element<'_, Message> {
         .align_y(Alignment::Center),
         switch_row(
             "plugins-auto-toggle",
-            None,
+            Switch::Flat,
             "Update automatically",
             "Rewrites an out-of-date plugin as soon as Schwitzer sees it; omp loads it on its \
              next start.",
             app.settings.auto_update_plugins,
             Message::AutoUpdatePlugins,
-            theme::button_row,
-            [SP_2, SP_2],
         ),
     ]
     .spacing(SP_2);
@@ -195,24 +193,20 @@ pub fn updates_page(app: &App) -> Element<'_, Message> {
         column![
             switch_row(
                 "auto-install-toggle",
-                None,
+                Switch::Flat,
                 "Install updates",
                 "The newest release your servers announce, or GitHub's latest one; checked every \
                  5 minutes.",
                 app.settings.auto_install_updates,
                 Message::AutoInstallUpdates,
-                theme::button_row,
-                [SP_2, SP_2],
             ),
             switch_row(
                 "auto-restart-toggle",
-                None,
+                Switch::Flat,
                 "Restart after installing",
                 "You come back where you were, unsaved text included.",
                 app.settings.auto_restart_updates,
                 Message::AutoRestartUpdates,
-                theme::button_row,
-                [SP_2, SP_2],
             ),
         ]
         .spacing(2),
