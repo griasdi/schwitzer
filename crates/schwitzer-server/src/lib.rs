@@ -23,7 +23,7 @@ mod hub;
 mod limit;
 mod release;
 mod rpc;
-pub mod store;
+mod store;
 mod update;
 
 use hub::{Hub, Sessions};
