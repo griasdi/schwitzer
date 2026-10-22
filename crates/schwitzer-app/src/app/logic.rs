@@ -9,6 +9,7 @@ use schwitzer_proto::{
 use serde::{Deserialize, Serialize};
 
 use crate::sessions::LocalSession;
+use crate::update::UpdateState;
 use crate::{settings, wsl};
 
 /// A local session counts as idle when its files were last written this long ago.
@@ -491,6 +492,38 @@ pub fn ago(ms: u64) -> String {
         60..=1_439 => format!("{}h {:02}m", minutes / 60, minutes % 60),
         _ => format!("{}d", minutes / 1_440),
     }
+}
+
+/// What a check for a new release does next.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Check {
+    /// A release already on offer is at least as new as the announced one.
+    Skip,
+    /// The announced release is not newer than this build.
+    UpToDate,
+    /// Look up this release; `None` asks GitHub for its latest.
+    Ask(Option<semver::Version>),
+}
+
+/// Decides a check from where the updater stands, whether the member asked for GitHub's
+/// latest release (`latest`), the release the servers announced and this build's version.
+pub fn next_check(
+    updater: &UpdateState,
+    latest: bool,
+    announced: Option<semver::Version>,
+    current: &semver::Version,
+) -> Check {
+    let target = if latest { None } else { announced };
+    if let UpdateState::Available { release, .. } = updater
+        && !latest
+        && target.as_ref().is_some_and(|t| *t <= release.version)
+    {
+        return Check::Skip;
+    }
+    if target.as_ref().is_some_and(|version| version <= current) {
+        return Check::UpToDate;
+    }
+    Check::Ask(target)
 }
 
 #[cfg(test)]
@@ -976,5 +1009,51 @@ mod tests {
         );
         assert_eq!(breakable_path("~"), "~");
         assert_eq!(breakable_path(""), "");
+    }
+
+    #[test]
+    fn a_check_asks_unless_the_target_is_known_not_to_be_news() {
+        let v = |s: &str| semver::Version::parse(s).unwrap();
+        let release = |version: &str| crate::update::Release {
+            version: v(version),
+            url: String::new(),
+            size: 0,
+            sha256: [0; 32],
+        };
+        let current = v("1.0.0");
+        let idle = UpdateState::Idle;
+        let offered = UpdateState::Available {
+            release: release("1.2.0"),
+            error: None,
+        };
+        // No announcement: GitHub is asked.
+        assert_eq!(next_check(&idle, false, None, &current), Check::Ask(None));
+        // An announcement above this build is looked up; one at or below it is not.
+        assert_eq!(
+            next_check(&idle, false, Some(v("1.1.0")), &current),
+            Check::Ask(Some(v("1.1.0")))
+        );
+        assert_eq!(
+            next_check(&idle, false, Some(v("1.0.0")), &current),
+            Check::UpToDate
+        );
+        // "Check now" ignores the announcement.
+        assert_eq!(
+            next_check(&idle, true, Some(v("1.1.0")), &current),
+            Check::Ask(None)
+        );
+        // A release found above the announced one stays on offer, unless the member asks again.
+        assert_eq!(
+            next_check(&offered, false, Some(v("1.1.0")), &current),
+            Check::Skip
+        );
+        assert_eq!(
+            next_check(&offered, true, Some(v("1.1.0")), &current),
+            Check::Ask(None)
+        );
+        assert_eq!(
+            next_check(&offered, false, Some(v("1.3.0")), &current),
+            Check::Ask(Some(v("1.3.0")))
+        );
     }
 }

@@ -506,7 +506,7 @@ flowchart TB
   gh --> check["schwitzer-server release check, 2 min"]:::server
   check --> self["--auto-update: install the server asset,<br/>exec it in place (stkn.org)"]:::server
   check --> ev["Event::Release"]:::server
-  ev --> target["App::release_target<br/>highest announced by the kept rooms' servers,<br/>else GitHub latest"]:::app
+  ev --> target["App::release_target (app/updates.rs)<br/>highest announced by the kept rooms' servers,<br/>else GitHub latest"]:::app
   target --> upd["update::check<br/>releases/tags/v-version"]:::app
   upd --> dl["download, at most 256 MiB<br/>sha256 = asset digest"]:::app
   dl --> swap["swap the program file<br/>the AppImage itself when run from one"]:::app
@@ -555,7 +555,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |Shared session fields|`sessions.rs` (`FileState::apply`), `logic::shared_sessions`, `SessionInfo` in `model.rs` (a wire change), `app/live.rs`|
 |New setting|`settings.rs`, the topic's page in `app/settings_view/` and, if it needs one, its status line on the overview (`settings_view/mod.rs`)|
 |Colours, sizes, widget looks|DESIGN.md first, then `theme.rs`|
-|Self-update|`update.rs`, `app/resume.rs`, `deploy/package.sh` (asset names)|
+|Self-update|`update.rs`, `app/updates.rs` (`App::check_update`, `App::install_update`), `app/logic.rs` (`next_check`), `app/resume.rs`, `deploy/package.sh` (asset names)|
 |Graphics device lost|`app/gpu.rs` (a 1×1 shader layer that registers wgpu's device-lost callback), the `Message::Tick` arm in `app/mod.rs` (restart through `App::restart`)|
 |Server deployment|`deploy/deploy.sh`, `deploy/schwitzer-server.service`, `crates/schwitzer-server/src/update.rs`|
 
