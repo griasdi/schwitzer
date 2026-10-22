@@ -21,6 +21,7 @@ fn options(listen: SocketAddr, data: &TempDir) -> Options {
         data_dir: data.path().to_path_buf(),
         // Tests never reach GitHub.
         releases_url: None,
+        auto_update: None,
     }
 }
 

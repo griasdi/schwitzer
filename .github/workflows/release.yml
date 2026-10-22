@@ -43,8 +43,35 @@ jobs:
           name: schwitzer-${{ matrix.platform }}
           path: dist/*
           if-no-files-found: error
+  server:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: ubuntu-22.04, arch: x86_64 }
+          - { os: ubuntu-22.04-arm, arch: aarch64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.arch }}-unknown-linux-musl
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: server-linux-${{ matrix.arch }}
+      - name: Tag matches the workspace version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "v$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)" = "$GITHUB_REF_NAME"
+      - run: cargo build --release --locked -p schwitzer-server --target ${{ matrix.arch }}-unknown-linux-musl
+      - run: deploy/package.sh server-linux-${{ matrix.arch }} "$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: schwitzer-server-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
   publish:
-    needs: build
+    needs: [build, server]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     permissions:
@@ -71,6 +98,7 @@ jobs:
           - Linux: download the `.AppImage` for x86_64 or aarch64, make it executable (`chmod +x`) and run it. Or unpack the `.tar.gz` and run `schwitzer`.
           - macOS (Apple silicon): unpack, move `Schwitzer.app` to Applications and run `xattr -dr com.apple.quarantine /Applications/Schwitzer.app` once; the app is not notarized.
           - Windows: run `…-windows-x86_64-setup.exe`; it installs for your user, without admin rights. Or unpack the zip and run `schwitzer.exe`. SmartScreen asks once because the app is not signed.
+          - Server (Linux x86_64 or aarch64): unpack `schwitzer-server-…-linux-<arch>.tar.gz`; the binary is static. Start it with `--auto-update` to install new releases in place and restart; keep it in a folder the server's user can write to.
 
           Keep the app (the AppImage too) in a folder you can write to: it installs new releases in place and restarts.
           EOF

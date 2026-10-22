@@ -1,12 +1,16 @@
 #!/bin/sh
 # Packs target/release/schwitzer[.exe] into dist/ under the names the app's
-# updater (crates/schwitzer-app/src/update.rs) looks for:
+# updater (crates/schwitzer-app/src/update.rs) looks for, and the server built for
+# musl under the name the server's updater (crates/schwitzer-server/src/update.rs) looks for:
 #
 #   linux-x86_64, linux-aarch64   schwitzer-<version>-<platform>.tar.gz with `schwitzer`,
 #                                 schwitzer-<version>-linux-<arch>.AppImage
 #   macos-aarch64                 schwitzer-<version>-macos-aarch64.tar.gz with `Schwitzer.app`
 #   windows-x86_64                schwitzer-<version>-windows-x86_64.zip with `schwitzer.exe`,
 #                                 schwitzer-<version>-windows-x86_64-setup.exe (Inno Setup)
+#   server-linux-x86_64,          schwitzer-server-<version>-linux-<arch>.tar.gz with
+#   server-linux-aarch64          `schwitzer-server` (static, musl), from
+#                                 target/<arch>-unknown-linux-musl/release
 #
 # Usage: package.sh <platform> <version>
 set -eu
@@ -132,6 +136,11 @@ windows-x86_64)
     fi
     # MSYS_NO_PATHCONV: Git Bash would take the /Q, /D and /F switches for paths.
     (cd "$root" && MSYS_NO_PATHCONV=1 "$iscc" /Q "/DVersion=$version" "/F$name-setup" deploy/schwitzer.iss)
+    ;;
+server-linux-x86_64 | server-linux-aarch64)
+    arch=${platform#server-linux-}
+    tar -czf "$root/dist/schwitzer-server-$version-linux-$arch.tar.gz" \
+        -C "$root/target/$arch-unknown-linux-musl/release" schwitzer-server
     ;;
 *)
     echo "package.sh: unknown platform $platform" >&2

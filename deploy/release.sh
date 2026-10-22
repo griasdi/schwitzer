@@ -1,10 +1,10 @@
 #!/bin/sh
-# Releases the desktop app and the shared server: sets the workspace version
-# (a "Release <version>" commit when it changes), prints the release notes,
-# pushes the tag v<version> and deploys that commit to stkn.org with
-# `deploy/deploy.sh stkn`. The tag starts .github/workflows/release.yml, which
-# builds the app for every platform and publishes the GitHub release the app
-# updates from. stkn.org is updated here and nowhere else.
+# Releases Schwitzer: sets the workspace version (a "Release <version>" commit
+# when it changes), prints the release notes and pushes the tag v<version>,
+# which starts .github/workflows/release.yml: it builds the app for every
+# platform and the server for Linux and publishes the GitHub release. Apps and
+# servers started with `--auto-update` (stkn.org among them) update themselves
+# from it.
 #
 # Run it on main, with HEAD pushed and no uncommitted changes to tracked files.
 #
@@ -57,6 +57,3 @@ deploy/changelog.sh "${prev:+$prev..}HEAD"
 git tag -a "$tag" -m "Schwitzer $version"
 git push -q origin "$tag"
 say "$tag pushed; the release workflow builds it: https://github.com/griasdi/schwitzer/actions"
-deploy/deploy.sh stkn ||
-    die "deploying $tag to stkn.org failed; fix the cause and run deploy/deploy.sh stkn on $tag"
-say "$tag runs on stkn.org"

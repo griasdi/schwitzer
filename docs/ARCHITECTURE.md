@@ -38,7 +38,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |`schwitzer` desktop app|each member's machine (Linux, Windows, macOS)|task list, decisions, settings; MCP server for the member's agents; session scanner; plugin keeper; self-update|room servers over weida/QUIC; omp through the plugin files and the MCP server; GitHub over HTTPS|
 |omp + the Schwitzer plugin|the member's machine, in every repo linked to a project|the coding agent; `/schwitzer plan · build · propose · idea` and the `schwitzer_*` tools|the app's MCP server on `127.0.0.1`|
 |`schwitzer-server`|anyone's host, UDP (default `0.0.0.0:7444`)|rooms, projects, tasks, claims, notes; fans out events; holds live sessions in memory; announces the newest release|apps over weida/QUIC; the GitHub releases API|
-|stkn.org|the shared server, `weida://…@stkn.org:7444`|`schwitzer-server` as the systemd user unit `schwitzer-server`, deployed by `deploy/release.sh` through `deploy/deploy.sh stkn` with every release; other people use it, so a protocol break cuts off their older apps until they update|apps|
+|stkn.org|the shared server, `weida://…@stkn.org:7444`|`schwitzer-server --auto-update` as the systemd user unit `schwitzer-server`, set up once by the maintainer with `deploy/deploy.sh stkn`; it installs every published release itself; other people use it, so a protocol break cuts off their older apps until they update|apps|
 |GitHub Releases + releases API|github.com|release assets with sha256 digests; the server polls `RELEASES_URL` every 120 s, the app downloads from it|apps, servers|
 |GitHub Actions|github.com|`ci.yml` (gate), `release.yml` (assets on `v*` tags), `site.yml` (product site)|GitHub Releases, GitHub Pages|
 |Product site|`site/`, GitHub Pages|the product page and downloads|nothing|
@@ -48,7 +48,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |Crate|Owns|Must not know about|
 |---|---|---|
 |`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `RoomState`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (7), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
-|`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `release.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
+|`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `release.rs`, `update.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
 |`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
 |`schwitzer-app`|the `schwitzer` binary: UI, MCP server, plugin writer, session scanner, updater, WSL support|SQLite, weida: it reaches the network only through `schwitzer-client`|
 
@@ -233,6 +233,8 @@ sequenceDiagram
 Enums are stored as explicit integers (`stage_to_int`: `Proposed 0`, `Accepted 1`, `Planned 2`, `Ready 3`, `Done 4`, `Rejected 5`, `Idea 6`), never as their postcard encoding.
 
 **Release check** (`release.rs`): every 120 s it reads the release list from `--releases-url`, picks the newest stable release (no draft, no prerelease, valid semver) and sends `Event::Release` to everyone when it changes, whatever the server's own version.
+
+**Auto update** (`update.rs`, `--auto-update`, Linux x86_64 and aarch64): at startup `AutoUpdate::prepare` notes the program file and checks that its folder is writable, else the server refuses to start. When the release check sees a stable release newer than the server's own version, it takes `schwitzer-server-<version>-linux-<arch>.tar.gz` from that release's assets, downloads it (at most 64 MiB), checks size and the sha256 digest GitHub lists, swaps the binary in beside the program file and reports the version; `Server::stopped` returns `Stop::Updated`, `main` shuts the endpoints down and execs the new program with the same arguments (same PID, so systemd sees no exit). A failed install of a version is retried after 30 minutes.
 
 **What the server holds.** Tasks, plans, notes, room and project names and member names, in plain text in its database; TLS protects them only on the wire. Shared sessions (title, model, token counts, linked task) only in memory. It never sees code, the MCP token, or sessions outside the repos a member linked.
 
@@ -496,10 +498,10 @@ flowchart TB
   classDef server fill:#16494a,stroke:#cdf5f2,color:#cdf5f2
   classDef ext fill:#222d26,stroke:#627568,color:#e4eee6
   rel["deploy/release.sh x.y.z"]:::ext --> tag["tag v*"]:::ext
-  tag --> stkn["deploy/deploy.sh stkn<br/>stkn.org runs the release"]:::server
-  tag --> yml["release.yml<br/>4 platforms, --features self-update,<br/>deploy/package.sh"]:::ext
+  tag --> yml["release.yml<br/>app: 4 platforms, --features self-update;<br/>server: Linux musl x86_64, aarch64;<br/>deploy/package.sh"]:::ext
   yml --> gh["GitHub release<br/>assets + sha256 digests,<br/>notes from deploy/changelog.sh"]:::ext
   gh --> check["schwitzer-server release check, 2 min"]:::server
+  check --> self["--auto-update: install the server asset,<br/>exec it in place (stkn.org)"]:::server
   check --> ev["Event::Release"]:::server
   ev --> target["App::release_target<br/>highest announced by the kept rooms' servers,<br/>else GitHub latest"]:::app
   target --> upd["update::check<br/>releases/tags/v-version"]:::app
@@ -518,9 +520,9 @@ flowchart TB
 |Piece|What it does|
 |---|---|
 |`.github/workflows/ci.yml`|on every push to `main` and every pull request: the gate on ubuntu-24.04 (fmt, clippy with and without `schwitzer-app/remote`, tests), `cargo deny`, and app clippy plus the `update::` tests on macos-14 and windows-latest|
-|`.github/workflows/release.yml`|on `v*` tags: builds the four platforms with `deploy/package.sh` and publishes the GitHub release|
+|`.github/workflows/release.yml`|on `v*` tags: builds the app for four platforms and the server for Linux (musl, x86_64 and aarch64), packs them with `deploy/package.sh` and publishes the GitHub release|
 |`.github/workflows/site.yml`|publishes `site/` to GitHub Pages|
-|`deploy/deploy.sh stkn`|builds the committed `HEAD` (uncommitted work is ignored), copies it to stkn.org with rsync, installs the systemd user unit `schwitzer-server` on `[::]:7444`, restarts it only when the binary or unit changed, and waits for its `server url:` line; `deploy/release.sh` runs it after the tag push, the only time stkn.org is updated|
+|`deploy/deploy.sh stkn`|the maintainer's installer, never run by agents: builds the committed `HEAD` (uncommitted work is ignored), copies it to stkn.org with rsync, installs the systemd user unit `schwitzer-server` on `[::]:7444` with `--auto-update`, restarts it only when the binary or unit changed, and waits for its `server url:` line; after that the service updates itself from each release|
 
 Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UDP (a proposal through to Done, a restart on the same data dir, a forgotten room, the release announcement). Most unit tests sit in `app/logic.rs`, `store.rs` and `schwitzer-proto`; `sessions.rs` tests read `crates/schwitzer-app/tests/fixtures/*.jsonl`. The commands are in [AGENTS.md](../AGENTS.md) and [CONTRIBUTING.md](../CONTRIBUTING.md).
 
@@ -552,7 +554,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |Colours, sizes, widget looks|DESIGN.md first, then `theme.rs`|
 |Self-update|`update.rs`, `app/resume.rs`, `deploy/package.sh` (asset names)|
 |Graphics device lost|`app/gpu.rs` (a 1×1 shader layer that registers wgpu's device-lost callback), the `Message::Tick` arm in `app/mod.rs` (restart through `App::restart`)|
-|Server deployment|`deploy/deploy.sh`, `deploy/schwitzer-server.service`|
+|Server deployment|`deploy/deploy.sh`, `deploy/schwitzer-server.service`, `crates/schwitzer-server/src/update.rs`|
 
 ### Repository map
 

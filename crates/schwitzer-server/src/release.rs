@@ -1,14 +1,17 @@
 //! The app release this server announces: the newest stable release on GitHub, whatever the
-//! server's own version.
+//! server's own version. With `--auto-update` the same check installs that release's server
+//! (`update.rs`).
 
 use std::sync::PoisonError;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use schwitzer_proto::Event;
 use serde::Deserialize;
+use tokio::sync::oneshot;
 use tokio::time::MissedTickBehavior;
 
 use crate::State;
+use crate::update::{self, AutoUpdate};
 
 /// GitHub API URL of the schwitzer release list.
 pub const RELEASES_URL: &str = "https://api.github.com/repos/griasdi/schwitzer/releases";
@@ -24,11 +27,20 @@ struct Listed {
     draft: bool,
     #[serde(default)]
     prerelease: bool,
+    #[serde(default)]
+    assets: Vec<update::Asset>,
+}
+
+/// A stable release on GitHub and its downloads.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Stable {
+    pub version: semver::Version,
+    pub assets: Vec<update::Asset>,
 }
 
 /// The newest stable release in GitHub's release list `json`. Tags that are no version are
 /// skipped.
-pub(crate) fn newest_stable(json: &[u8]) -> Result<Option<semver::Version>, String> {
+pub(crate) fn newest_stable(json: &[u8]) -> Result<Option<Stable>, String> {
     let listed: Vec<Listed> =
         serde_json::from_slice(json).map_err(|e| format!("unreadable release list: {e}"))?;
     Ok(listed
@@ -36,16 +48,21 @@ pub(crate) fn newest_stable(json: &[u8]) -> Result<Option<semver::Version>, Stri
         .filter(|r| !r.draft && !r.prerelease)
         .filter_map(|r| {
             let tag = r.tag_name.as_str();
-            tag.strip_prefix('v')
+            let version = tag
+                .strip_prefix('v')
                 .unwrap_or(tag)
                 .parse::<semver::Version>()
-                .ok()
+                .ok()?;
+            Some(Stable {
+                version,
+                assets: r.assets,
+            })
         })
-        .filter(|v| v.pre.is_empty())
-        .max())
+        .filter(|s| s.version.pre.is_empty())
+        .max_by(|a, b| a.version.cmp(&b.version)))
 }
 
-fn fetch(url: &str) -> Result<Option<semver::Version>, String> {
+fn fetch(url: &str) -> Result<Option<Stable>, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(30)))
         .user_agent(format!("schwitzer-server/{}", env!("CARGO_PKG_VERSION")))
@@ -69,9 +86,18 @@ fn fetch(url: &str) -> Result<Option<semver::Version>, String> {
 
 /// Checks `url` every two minutes and announces a changed release to every stream. Stores the
 /// release before publishing it: `/events` reads it after subscribing, so no stream misses it.
-pub(crate) async fn watch(state: State, url: String) {
+///
+/// With `update`, a release newer than this server is installed over the program file and its
+/// version sent on the channel; the task then idles until the server shuts down. A failed install
+/// of a version is retried after [`update::RETRY_AFTER`].
+pub(crate) async fn watch(
+    state: State,
+    url: String,
+    mut update: Option<(AutoUpdate, oneshot::Sender<semver::Version>)>,
+) {
     let mut interval = tokio::time::interval(CHECK_INTERVAL);
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut failed: Option<(semver::Version, Instant)> = None;
     loop {
         interval.tick().await;
         let u = url.clone();
@@ -82,8 +108,8 @@ pub(crate) async fn watch(state: State, url: String) {
                 continue;
             }
         };
-        let version = match found {
-            Ok(Some(version)) => version,
+        let stable = match found {
+            Ok(Some(stable)) => stable,
             // No stable release listed: keep the last known release.
             Ok(None) => continue,
             Err(e) => {
@@ -91,17 +117,49 @@ pub(crate) async fn watch(state: State, url: String) {
                 continue;
             }
         };
-        {
+        let version = stable.version.clone();
+        let changed = {
             let mut known = state.release.lock().unwrap_or_else(PoisonError::into_inner);
-            if known.as_ref() == Some(&version) {
-                continue;
+            let changed = known.as_ref() != Some(&version);
+            if changed {
+                *known = Some(version.clone());
             }
-            *known = Some(version.clone());
+            changed
+        };
+        if changed {
+            tracing::info!("announcing release {version}");
+            state.hub.publish_all(&Event::Release {
+                version: version.to_string(),
+            });
         }
-        tracing::info!("announcing release {version}");
-        state.hub.publish_all(&Event::Release {
-            version: version.to_string(),
-        });
+
+        let Some((updater, _)) = &update else {
+            continue;
+        };
+        let retry_later = failed
+            .as_ref()
+            .is_some_and(|(v, at)| *v == version && at.elapsed() < update::RETRY_AFTER);
+        if version <= update::current() || retry_later {
+            continue;
+        }
+        tracing::info!("installing server release {version}");
+        let updater = updater.clone();
+        let installed = tokio::task::spawn_blocking(move || updater.install(&stable))
+            .await
+            .unwrap_or_else(|e| Err(format!("update worker stopped: {e}")));
+        match installed {
+            Ok(()) => {
+                if let Some((_, tx)) = update.take() {
+                    let _ = tx.send(version);
+                }
+                // Ending would read as a failed task in `Server::stopped`.
+                std::future::pending::<()>().await;
+            }
+            Err(e) => {
+                tracing::warn!("server update to {version} failed: {e}");
+                failed = Some((version, Instant::now()));
+            }
+        }
     }
 }
 
@@ -130,7 +188,32 @@ mod tests {
             ("v0.2.0", false, false),
             ("v0.1.5", false, false),
         ]);
-        assert_eq!(newest_stable(&json), Ok(Some(v("0.3.0"))));
+        assert_eq!(
+            newest_stable(&json).map(|s| s.map(|s| s.version)),
+            Ok(Some(v("0.3.0")))
+        );
+    }
+
+    #[test]
+    fn the_winner_keeps_its_assets() {
+        let json = serde_json::to_vec(&serde_json::json!([
+            { "tag_name": "v0.1.0", "assets": [] },
+            { "tag_name": "v0.2.0", "assets": [{
+                "name": "schwitzer-server-0.2.0-linux-x86_64.tar.gz",
+                "browser_download_url": "https://example.org/s.tar.gz",
+                "size": 42,
+                "digest": "sha256:00"
+            }] },
+        ]))
+        .unwrap();
+        let stable = newest_stable(&json).unwrap().unwrap();
+        assert_eq!(stable.version, v("0.2.0"));
+        assert_eq!(stable.assets.len(), 1);
+        assert_eq!(
+            stable.assets[0].name,
+            "schwitzer-server-0.2.0-linux-x86_64.tar.gz"
+        );
+        assert_eq!(stable.assets[0].size, 42);
     }
 
     #[test]
@@ -142,7 +225,10 @@ mod tests {
             ("nightly", false, false),
             ("v0.1.0", false, false),
         ]);
-        assert_eq!(newest_stable(&json), Ok(Some(v("0.1.0"))));
+        assert_eq!(
+            newest_stable(&json).map(|s| s.map(|s| s.version)),
+            Ok(Some(v("0.1.0")))
+        );
     }
 
     #[test]

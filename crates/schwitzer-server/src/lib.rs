@@ -11,6 +11,7 @@ use schwitzer_proto::{
     ApiError, Event, MAX_EVENT_FRAME, MAX_RPC_BYTES, Member, MemberId, PATH_EVENTS, PATH_RPC,
     RoomId, RoomState, ServerAddr, Task, encoded_len,
 };
+use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 use weida::{
     Binding, ClientTrust, FilesOptions, IdentitySource, Listener, Runtime, RuntimeConfig, ServerTls,
@@ -23,11 +24,13 @@ mod limit;
 mod release;
 mod rpc;
 pub mod store;
+mod update;
 
 use hub::{Hub, Sessions};
 use store::{R, Store};
 
 pub use release::RELEASES_URL;
+pub use update::AutoUpdate;
 
 /// How the server is run.
 #[derive(Debug, Clone)]
@@ -41,6 +44,9 @@ pub struct Options {
     pub data_dir: PathBuf,
     /// GitHub API URL of the release list, checked every two minutes; `None` checks nothing.
     pub releases_url: Option<String>,
+    /// Installs newer stable releases over the program file and stops with [`Stop::Updated`];
+    /// needs `releases_url`.
+    pub auto_update: Option<AutoUpdate>,
 }
 
 /// What every request handler shares.
@@ -124,27 +130,52 @@ impl Shared {
     }
 }
 
+/// Why a running server stops.
+#[derive(Debug)]
+pub enum Stop {
+    /// An endpoint task ended or panicked: they serve until aborted, so this is a failure.
+    Failed(&'static str),
+    /// `--auto-update` installed this release over the program file: restart into it.
+    Updated(semver::Version),
+}
+
 /// A running server. Dropping it stops the endpoints.
 pub struct Server {
     /// How clients reach this server.
     pub addr: ServerAddr,
     tasks: JoinSet<&'static str>,
+    /// The release `--auto-update` installed; `None` without auto update.
+    installed: Option<oneshot::Receiver<semver::Version>>,
     binding: Binding,
     _listener: Listener,
     _runtime: Runtime,
 }
 
 impl Server {
-    /// Waits until an endpoint task ends and returns its name. They serve until
-    /// aborted, so one that ends (or panics) is a failure to exit on.
-    pub async fn ended(&mut self) -> &'static str {
-        match self.tasks.join_next().await {
-            Some(Ok(name)) => name,
-            Some(Err(e)) => {
-                tracing::error!("endpoint task failed: {e}");
-                "panicked task"
+    /// Waits until the server has to stop and says why. Call it once.
+    pub async fn stopped(&mut self) -> Stop {
+        let installed = async {
+            match self.installed.as_mut() {
+                Some(rx) => match rx.await {
+                    Ok(version) => version,
+                    Err(_) => std::future::pending().await,
+                },
+                None => std::future::pending().await,
             }
-            None => std::future::pending().await,
+        };
+        let ended = async {
+            match self.tasks.join_next().await {
+                Some(Ok(name)) => name,
+                Some(Err(e)) => {
+                    tracing::error!("endpoint task failed: {e}");
+                    "panicked task"
+                }
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            version = installed => Stop::Updated(version),
+            task = ended => Stop::Failed(task),
         }
     }
 
@@ -159,6 +190,9 @@ impl Server {
 
 /// Opens the store and the identity, binds the QUIC endpoint and starts serving.
 pub async fn start(opts: Options) -> anyhow::Result<Server> {
+    if opts.auto_update.is_some() && opts.releases_url.is_none() {
+        anyhow::bail!("auto update needs the release check");
+    }
     std::fs::create_dir_all(&opts.data_dir)
         .with_context(|| format!("creating {}", opts.data_dir.display()))?;
     let store = Store::open(&opts.data_dir.join("schwitzer.db"))?;
@@ -205,8 +239,14 @@ pub async fn start(opts: Options) -> anyhow::Result<Server> {
     }
     spawn!("rpc", rpc::serve(state.clone(), rpc_replier));
     spawn!("events", events::serve(state.clone(), events_replier));
+    let mut installed = None;
     if let Some(url) = opts.releases_url {
-        spawn!("release check", release::watch(state.clone(), url));
+        let update = opts.auto_update.map(|updater| {
+            let (tx, rx) = oneshot::channel();
+            installed = Some(rx);
+            (updater, tx)
+        });
+        spawn!("release check", release::watch(state.clone(), url, update));
     }
 
     let addr = ServerAddr {
@@ -218,6 +258,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Server> {
     Ok(Server {
         addr,
         tasks,
+        installed,
         binding,
         _listener: listener,
         _runtime: runtime,

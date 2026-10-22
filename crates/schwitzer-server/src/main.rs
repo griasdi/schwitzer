@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use schwitzer_server::{Options, RELEASES_URL, start};
+use schwitzer_server::{AutoUpdate, Options, RELEASES_URL, Stop, start};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -23,6 +23,10 @@ struct Cli {
     /// GitHub API URL of the release list the server checks for app updates.
     #[arg(long, default_value = RELEASES_URL)]
     releases_url: String,
+    /// Install new stable releases from GitHub and restart into them in place (Linux x86_64 and
+    /// aarch64; the program's folder must be writable).
+    #[arg(long)]
+    auto_update: bool,
 }
 
 #[tokio::main]
@@ -35,11 +39,23 @@ async fn main() -> ExitCode {
         )
         .with_writer(std::io::stderr)
         .init();
+    let auto_update = if cli.auto_update {
+        match AutoUpdate::prepare() {
+            Ok(update) => Some(update),
+            Err(e) => {
+                eprintln!("error: --auto-update: {e:#}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
     let opts = Options {
         listen: cli.listen,
         public_host: cli.public_host,
         data_dir: cli.data_dir,
         releases_url: Some(cli.releases_url),
+        auto_update: auto_update.clone(),
     };
     let mut server = match start(opts).await {
         Ok(server) => server,
@@ -49,9 +65,24 @@ async fn main() -> ExitCode {
         }
     };
     println!("server url: {}", server.addr);
-    // None of the endpoint tasks is meant to end: a server that lost one would
-    // keep answering the rest, so it exits and is restarted.
-    let task = server.ended().await;
-    tracing::error!("server task {task} ended");
-    ExitCode::FAILURE
+    match server.stopped().await {
+        // None of the endpoint tasks is meant to end: a server that lost one would
+        // keep answering the rest, so it exits and is restarted.
+        Stop::Failed(task) => {
+            tracing::error!("server task {task} ended");
+            ExitCode::FAILURE
+        }
+        Stop::Updated(version) => {
+            tracing::info!("restarting into {version}");
+            // Closes the connections, so clients reconnect at once, and frees the port.
+            server.shutdown().await;
+            let Some(update) = &auto_update else {
+                unreachable!("only --auto-update installs releases");
+            };
+            let e = update.restart();
+            // The new program is in place: a supervisor restarting on failure starts it.
+            tracing::error!("cannot restart into {version}: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }

@@ -15,6 +15,9 @@
 #
 # `deploy.sh activate …` is the half that runs on the target; `stkn` calls
 # it.
+#
+# Run by the user only, to install the service or change its unit; agents never
+# run it. The service then updates itself (--auto-update).
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)

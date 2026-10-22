@@ -34,12 +34,13 @@ Keep the app (the AppImage too) in a folder you can write to: it installs the ne
 
 ## Run your own server
 
+On Linux (x86_64 or aarch64), download `schwitzer-server-<version>-linux-<arch>.tar.gz` from the [releases](https://github.com/griasdi/schwitzer/releases) and unpack it; the binary is static. Or build it with `cargo build --release -p schwitzer-server`. Then:
+
 ```sh
-cargo build --release -p schwitzer-server
-target/release/schwitzer-server --listen 0.0.0.0:7444 --public-host <name clients dial> --data-dir <dir>
+./schwitzer-server --listen 0.0.0.0:7444 --public-host <name clients dial> --data-dir <dir> --auto-update
 ```
 
-The server listens on UDP (QUIC) and prints `server url: weida://sha256:…@host:port` on stdout; that URL goes into "Create a room". `--public-host` must be the name clients dial. Always pass `--data-dir` (it defaults to `./schwitzer-data` in the working directory). [`deploy/schwitzer-server.service`](deploy/schwitzer-server.service) is an example systemd unit.
+The server listens on UDP (QUIC) and prints `server url: weida://sha256:…@host:port` on stdout; that URL goes into "Create a room". `--public-host` must be the name clients dial. Always pass `--data-dir` (it defaults to `./schwitzer-data` in the working directory). With `--auto-update` the server installs each new stable release over its own program file and restarts into it in place; keep the binary in a folder the server's user can write to. [`deploy/schwitzer-server.service`](deploy/schwitzer-server.service) is an example systemd unit.
 
 ## Build from source
 
