@@ -135,7 +135,7 @@ fn group_header<'a>(group: Group, count: usize, open: bool) -> Element<'a, Messa
             .height(32)
             .align_y(Alignment::Center),
         Some(Message::ToggleGroup(group)),
-        theme::button_header,
+        theme::button_row,
         Length::Fill,
     )
 }

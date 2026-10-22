@@ -214,7 +214,7 @@ fn fold_head<'a>(
         .height(32)
         .align_y(Alignment::Center),
         toggle,
-        theme::button_header,
+        theme::button_row,
         Length::Fill,
     )
 }

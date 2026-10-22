@@ -48,7 +48,7 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, project: u64) -> Element<'a,
             .height(32)
             .align_y(Alignment::Center),
         Some(Message::ToggleSessions),
-        theme::button_header,
+        theme::button_row,
         Length::Fill,
     ))
     .padding([SP_1, SP_2]);

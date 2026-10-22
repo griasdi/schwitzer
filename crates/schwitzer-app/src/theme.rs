@@ -2,7 +2,6 @@
 //! appearance; every colour of the app comes from the [`Tokens`] of the active theme, and the
 //! style functions below are the only place that reads them for widgets.
 
-use iced::border::Radius;
 use iced::font::Weight;
 use iced::theme::Palette;
 use iced::theme::palette::{Extended, Pair};
@@ -28,6 +27,8 @@ pub const TS_20: f32 = 20.0;
 
 /// Corner radius of rows, inputs and buttons.
 pub const RADIUS: f32 = 8.0;
+/// Corner radius of the fully round tags, pills, dots and scroller rails.
+pub const RADIUS_PILL: f32 = 999.0;
 /// Corner radius of the square stage lamps.
 pub const RADIUS_LAMP: f32 = 3.0;
 
@@ -385,7 +386,7 @@ pub fn tag(hue: usize) -> impl Fn(&Theme) -> container::Style {
             text_color: Some(tag.text),
             background: Some(tag.fill.into()),
             border: Border {
-                radius: Radius::new(999.0),
+                radius: RADIUS_PILL.into(),
                 ..Border::default()
             },
             ..container::Style::default()
@@ -402,7 +403,7 @@ pub fn pill(theme: &Theme) -> container::Style {
         border: Border {
             color: t.line,
             width: 1.0,
-            radius: Radius::new(999.0),
+            radius: RADIUS_PILL.into(),
         },
         ..container::Style::default()
     }
@@ -455,7 +456,7 @@ pub fn dot(state: Option<bool>) -> impl Fn(&Theme) -> container::Style {
         container::Style {
             background: Some(fill.into()),
             border: Border {
-                radius: Radius::new(999.0),
+                radius: RADIUS_PILL.into(),
                 ..Border::default()
             },
             ..container::Style::default()
@@ -593,19 +594,8 @@ pub fn button_ghost_open(open: bool) -> impl Fn(&Theme, button::Status) -> butto
     }
 }
 
-/// A flat row inside a slab, such as a room in the settings.
+/// Flat until hovered: a room in the settings, a group header, a fold head.
 pub fn button_row(theme: &Theme, status: button::Status) -> button::Style {
-    let t = tokens(theme);
-    let none = Shadow::default();
-    match status {
-        button::Status::Active | button::Status::Disabled => face(None, t.text, rounded(), none),
-        button::Status::Hovered => face(Some(t.hover), t.text, rounded(), none),
-        button::Status::Pressed => face(Some(t.selected), t.text, rounded(), none),
-    }
-}
-
-/// A group header in the list: flat in the well until hovered.
-pub fn button_header(theme: &Theme, status: button::Status) -> button::Style {
     let t = tokens(theme);
     let none = Shadow::default();
     match status {
@@ -808,7 +798,7 @@ pub fn scroll(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
         rail.border = Border::default();
         rail.scroller.background = color.into();
         rail.scroller.border = Border {
-            radius: Radius::new(999.0),
+            radius: RADIUS_PILL.into(),
             ..Border::default()
         };
     }
