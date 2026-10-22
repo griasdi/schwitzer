@@ -93,18 +93,13 @@ fn scannable(dirs: &[SessionsDir]) -> Vec<SessionsDir> {
     if dirs.iter().all(|dir| dir.distro.is_none()) {
         return dirs.to_vec();
     }
-    #[cfg(windows)]
-    {
-        let running = crate::wsl::running_distros();
-        dirs.iter()
-            .filter(|dir| dir.distro.as_ref().is_none_or(|d| running.contains(d)))
-            .cloned()
-            .collect()
-    }
-    #[cfg(not(windows))]
-    {
-        dirs.to_vec()
-    }
+    let Some(running) = crate::wsl::running_distros() else {
+        return dirs.to_vec();
+    };
+    dirs.iter()
+        .filter(|dir| dir.distro.as_ref().is_none_or(|d| running.contains(d)))
+        .cloned()
+        .collect()
 }
 
 fn watch(key: &SessionsKey) -> impl Stream<Item = Vec<LocalSession>> + use<> {

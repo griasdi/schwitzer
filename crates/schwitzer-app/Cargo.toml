@@ -47,7 +47,7 @@ sha2.workspace = true
 resvg.workspace = true
 notify-rust.workspace = true
 
-[target.'cfg(not(windows))'.dependencies]
+[target.'cfg(unix)'.dependencies]
 tar.workspace = true
 flate2.workspace = true
 close_fds.workspace = true

@@ -337,7 +337,7 @@ fn unreadable(e: impl std::fmt::Display) -> String {
 }
 
 /// The program file in the release archive `bytes`.
-#[cfg(not(windows))]
+#[cfg(unix)]
 fn extract(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
     for entry in archive.entries().map_err(unreadable)? {
@@ -386,7 +386,7 @@ fn sibling(exe: &Path, suffix: &str) -> PathBuf {
 
 /// Writes `binary` beside `exe` and swaps it in. A rename gives a new file, so the running
 /// process keeps the old one, and macOS checks the new file's signature afresh.
-#[cfg(not(windows))]
+#[cfg(unix)]
 fn replace(exe: &Path, binary: &[u8]) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -594,7 +594,7 @@ mod tests {
         assert!(verify(b"archive!", &release).is_err());
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     fn tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
         let gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         let mut builder = tar::Builder::new(gz);
@@ -608,7 +608,7 @@ mod tests {
         builder.into_inner().unwrap().finish().unwrap()
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     #[test]
     fn extract_finds_the_program_at_any_depth() {
         let archive = tar_gz(&[

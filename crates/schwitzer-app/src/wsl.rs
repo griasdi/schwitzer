@@ -140,9 +140,10 @@ fn parse_distros(out: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// The names of the running WSL distros; none when WSL is missing or nothing runs.
+/// The names of the running WSL distros, `None` where there is no WSL to ask (not Windows);
+/// none in the list when WSL is missing or nothing runs.
 #[cfg(windows)]
-pub fn running_distros() -> Vec<String> {
+pub fn running_distros() -> Option<Vec<String>> {
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
 
@@ -155,10 +156,10 @@ pub fn running_distros() -> Vec<String> {
         .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW)
         .output();
-    match output {
+    Some(match output {
         Ok(out) if out.status.success() => parse_distros(&out.stdout),
         _ => Vec::new(),
-    }
+    })
 }
 
 /// The running distros with their homes and default projects folders.
@@ -167,6 +168,7 @@ fn distros() -> Vec<Distro> {
     use crate::settings;
 
     running_distros()
+        .unwrap_or_default()
         .into_iter()
         .map(|name| {
             let homes = settings::subdirs(Path::new(&format!("{UNC}{name}\\home")));
@@ -216,6 +218,12 @@ pub fn subscription() -> Subscription<Vec<Distro>> {
 #[cfg(not(windows))]
 pub fn subscription() -> Subscription<Vec<Distro>> {
     Subscription::none()
+}
+
+/// The running WSL distros: `None`, there is no WSL to ask outside Windows.
+#[cfg(not(windows))]
+pub fn running_distros() -> Option<Vec<String>> {
+    None
 }
 
 #[cfg(test)]
