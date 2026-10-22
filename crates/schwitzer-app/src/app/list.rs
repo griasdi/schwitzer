@@ -9,8 +9,8 @@ use super::icons::{Icon, Tone, icon};
 use super::logic::{self, Group, MissingSession};
 use super::task_view;
 use super::widgets::{
-    self, LAMP, icon_button, icon_text_button, id_button, lamp, lamp_kind, member_tag, muted,
-    priority_pill, with_tip,
+    self, LAMP, chevron, fold_button, icon_button, icon_text_button, id_button, lamp, lamp_kind,
+    member_tag, muted, priority_pill, with_tip,
 };
 use super::{App, Expanded, Message};
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
@@ -91,13 +91,8 @@ pub fn empty<'a>(
 }
 
 fn group_header<'a>(group: Group, count: usize, open: bool) -> Element<'a, Message> {
-    let chevron = if open {
-        Icon::ChevronDown
-    } else {
-        Icon::ChevronRight
-    };
     let mut line = row![
-        icon(chevron, 14.0, Tone::Muted),
+        chevron(open),
         text(group.title()).size(TS_12).font(SEMIBOLD),
         widgets::pill(count.to_string()),
         Space::new().width(Length::Fill),
@@ -128,15 +123,10 @@ fn group_header<'a>(group: Group, count: usize, open: bool) -> Element<'a, Messa
         }
         _ => {}
     }
-    id_button(
+    fold_button(
         format!("group-{}", group.slug()),
-        container(line)
-            .padding([0.0, SP_1])
-            .height(32)
-            .align_y(Alignment::Center),
+        line,
         Some(Message::ToggleGroup(group)),
-        theme::button_row,
-        Length::Fill,
     )
 }
 

@@ -6,9 +6,8 @@ use iced::widget::{Space, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{RoomState, SessionInfo};
 
-use super::icons::{Icon, Tone, icon};
 use super::logic;
-use super::widgets::{self, id_button, member_tag, muted};
+use super::widgets::{self, chevron, fold_button, id_button, member_tag, muted};
 use super::{App, Message};
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 
@@ -28,28 +27,18 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, project: u64) -> Element<'a,
             rows = rows.push(session_row(app, owner.clone(), hue, session));
         }
     }
-    let chevron = if app.sessions_open {
-        Icon::ChevronDown
-    } else {
-        Icon::ChevronRight
-    };
     let line = row![
-        icon(chevron, 14.0, Tone::Muted),
+        chevron(app.sessions_open),
         text("Sessions").size(TS_12).font(SEMIBOLD),
         widgets::pill(count.to_string()),
         Space::new().width(Length::Fill),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
-    let header = container(id_button(
+    let header = container(fold_button(
         "group-sessions",
-        container(line)
-            .padding([0.0, SP_1])
-            .height(32)
-            .align_y(Alignment::Center),
+        line,
         Some(Message::ToggleSessions),
-        theme::button_row,
-        Length::Fill,
     ))
     .padding([SP_1, SP_2]);
     if !app.sessions_open {

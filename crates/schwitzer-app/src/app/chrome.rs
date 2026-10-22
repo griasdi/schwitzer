@@ -247,7 +247,7 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
     ));
     container(bar)
         .padding([SP_1, SP_2])
-        .height(32)
+        .height(theme::CONTROL)
         .align_y(Alignment::Center)
         .width(Length::Fill)
         .style(theme::bar)

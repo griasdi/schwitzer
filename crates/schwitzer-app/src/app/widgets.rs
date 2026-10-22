@@ -3,7 +3,7 @@
 //! iced 0.14 buttons carry no id, so a button that has to be addressed (by tests, by the
 //! headless control) sits in a container that has one.
 
-use iced::widget::{Space, button, container, row, text, text_input, tooltip};
+use iced::widget::{Space, button, container, row, svg, text, text_input, tooltip};
 use iced::{Alignment, Element, Length, Theme};
 use schwitzer_proto::{Priority, Stage, Task};
 
@@ -48,6 +48,35 @@ pub fn id_button<'a>(
     .id(id.into())
     .width(width)
     .into()
+}
+
+/// The fold chevron of a group header, a fold head or a license: 14 px, muted.
+pub fn chevron<'a>(open: bool) -> svg::Svg<'a, Theme> {
+    let glyph = if open {
+        Icon::ChevronDown
+    } else {
+        Icon::ChevronRight
+    };
+    icon(glyph, 14.0, Tone::Muted)
+}
+
+/// A flat full-width header button, [`theme::CONTROL`] tall, around `line`. Icon buttons in
+/// `line` take the press before the header. `on_press: None` shows it inert.
+pub fn fold_button<'a>(
+    id: impl Into<String>,
+    line: impl Into<Element<'a, Message>>,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    id_button(
+        id,
+        container(line)
+            .padding([0.0, SP_1])
+            .height(theme::CONTROL)
+            .align_y(Alignment::Center),
+        on_press,
+        theme::button_row,
+        Length::Fill,
+    )
 }
 
 /// A text button: 32 px tall, label in medium weight.

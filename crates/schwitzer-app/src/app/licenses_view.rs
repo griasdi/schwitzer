@@ -4,9 +4,8 @@
 use iced::widget::{column, container, row, text};
 use iced::{Alignment, Element, Length};
 
-use super::icons::{Icon, Tone, icon};
 use super::pages::{frame, section};
-use super::widgets::{heading, id_button, muted};
+use super::widgets::{chevron, heading, id_button, muted};
 use super::{App, Message};
 use crate::about::{self, Group};
 use crate::theme::{self, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
@@ -59,11 +58,6 @@ fn group<'a>(
             continue;
         }
         let open = app.license_open == Some(i);
-        let chevron = if open {
-            Icon::ChevronDown
-        } else {
-            Icon::ChevronRight
-        };
         let mut lines = column![text(entry.title.as_ref()).size(TS_14)]
             .spacing(2)
             .width(Length::Fill);
@@ -73,7 +67,7 @@ fn group<'a>(
         rows = rows.push(id_button(
             format!("license-{i}"),
             container(
-                row![icon(chevron, 14.0, Tone::Muted), lines]
+                row![chevron(open), lines]
                     .spacing(SP_2)
                     .align_y(Alignment::Center),
             )

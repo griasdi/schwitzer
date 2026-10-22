@@ -18,6 +18,9 @@ pub const SP_2: f32 = 8.0;
 pub const SP_3: f32 = 12.0;
 pub const SP_4: f32 = 16.0;
 
+/// Height of a control: the header buttons, the status bar.
+pub const CONTROL: f32 = 32.0;
+
 /// Captions, tags, counters.
 pub const TS_12: f32 = 12.0;
 /// Body text and rows.

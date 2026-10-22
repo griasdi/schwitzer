@@ -13,8 +13,8 @@ use super::icons::{Icon, Tone, icon};
 use super::list;
 use super::logic;
 use super::widgets::{
-    self, LAMP, heading, hrule, icon_button, icon_text_button, id_button, lamp, member_tag, muted,
-    text_button,
+    self, LAMP, chevron, fold_button, heading, hrule, icon_button, icon_text_button, id_button,
+    lamp, member_tag, muted, text_button,
 };
 use super::{App, Message, TaskText, sticky};
 use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
@@ -198,24 +198,12 @@ fn fold_head<'a>(
     line: Row<'a, Message>,
     toggle: Option<Message>,
 ) -> Element<'a, Message> {
-    let chevron = if open {
-        Icon::ChevronDown
-    } else {
-        Icon::ChevronRight
-    };
-    id_button(
+    fold_button(
         id,
-        container(
-            row![icon(chevron, 14.0, Tone::Muted), line]
-                .spacing(SP_2)
-                .align_y(Alignment::Center),
-        )
-        .padding([0.0, SP_1])
-        .height(32)
-        .align_y(Alignment::Center),
+        row![chevron(open), line]
+            .spacing(SP_2)
+            .align_y(Alignment::Center),
         toggle,
-        theme::button_row,
-        Length::Fill,
     )
 }
 
