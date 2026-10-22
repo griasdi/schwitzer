@@ -10,6 +10,7 @@ pub mod logic;
 mod pages;
 mod plugins;
 mod resume;
+mod rooms;
 mod settings_view;
 mod sticky;
 mod task_view;
@@ -39,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use self::chrome::RoomChoice;
 use self::icons::{Icon, Tone};
 use self::logic::Group;
+use self::rooms::Rooms;
 use crate::bridge::{self, ClientKey, call, fire};
 use crate::mcp::{self, McpStatus};
 use crate::omp_plugin::PluginState;
@@ -412,7 +414,7 @@ pub struct App {
     saved: Settings,
     theme: Theme,
     /// The joined rooms in list order, with their last known state.
-    rooms: Vec<(RoomKey, Option<RoomState>)>,
+    rooms: Rooms,
     servers: HashMap<ServerAddr, ServerStatus>,
     selected: Option<RoomId>,
     /// The subfolders of the projects folder, for suggestions; read outside `view`.
@@ -526,8 +528,8 @@ impl App {
             ),
         };
 
-        let rooms = client.rooms();
-        let selected = rooms.first().map(|(key, _)| RoomId::of(&key.token));
+        let rooms = Rooms::new(&client);
+        let selected = rooms.ids().next();
         let now = now_ms();
         let mut app = Self {
             forms: Forms {
@@ -1632,19 +1634,11 @@ impl App {
     // ---- lookups ------------------------------------------------------------------------
 
     fn selected_state(&self) -> Option<&RoomState> {
-        let selected = self.selected?;
-        self.rooms
-            .iter()
-            .find(|(key, _)| RoomId::of(&key.token) == selected)
-            .and_then(|(_, state)| state.as_ref())
+        self.rooms.state(self.selected?)
     }
 
     fn selected_key(&self) -> Option<&RoomKey> {
-        let selected = self.selected?;
-        self.rooms
-            .iter()
-            .map(|(key, _)| key)
-            .find(|key| RoomId::of(&key.token) == selected)
+        self.rooms.key(self.selected?)
     }
 
     /// Whether the selected room's server answers; `None` before it said either.
@@ -1671,12 +1665,9 @@ impl App {
     fn room_choices(&self) -> Vec<RoomChoice> {
         self.rooms
             .iter()
-            .map(|(key, state)| {
-                let id = RoomId::of(&key.token);
-                RoomChoice {
-                    id,
-                    name: logic::room_label(id, state.as_ref()),
-                }
+            .map(|(id, _, state)| RoomChoice {
+                id,
+                name: logic::room_label(id, state),
             })
             .collect()
     }
@@ -2178,12 +2169,7 @@ impl App {
                         self.banner = Some(format!("{}:{}: {e}", server.host, server.port));
                     }
                     // A server that came back lost the sessions of this member.
-                    let stale: Vec<RoomId> = self
-                        .rooms
-                        .iter()
-                        .filter(|(key, _)| key.server == server)
-                        .map(|(key, _)| RoomId::of(&key.token))
-                        .collect();
+                    let stale: Vec<RoomId> = self.rooms.ids_on(&server).collect();
                     self.published.retain(|room, _| !stale.contains(room));
                     self.servers.insert(
                         server,
@@ -2212,19 +2198,15 @@ impl App {
                 let me = self.client.member();
                 let notify = self.settings.notify_hand_ins;
                 let mut shown_notices: Vec<Task<Message>> = Vec::new();
-                match self
-                    .rooms
-                    .iter_mut()
-                    .find(|(key, _)| RoomId::of(&key.token) == id)
-                {
-                    Some(entry) => {
-                        if let Some(old) = &entry.1 {
+                match self.rooms.set_state(id, *state) {
+                    Some(old) => {
+                        if let (Some(old), Some(state)) = (old, self.rooms.state(id)) {
                             let now = now_ms();
-                            for n in logic::approved_between(old, &state) {
+                            for n in logic::approved_between(&old, state) {
                                 self.handoffs.insert((id, n), now);
                             }
                             if notify {
-                                for (work, task) in logic::hand_ins(old, &state, &me) {
+                                for (work, task) in logic::hand_ins(&old, state, &me) {
                                     let summary = match work {
                                         Work::Plan => format!("Plan handed in · {}", state.name),
                                         Work::Build => format!("Build finished · {}", state.name),
@@ -2236,7 +2218,6 @@ impl App {
                                 }
                             }
                         }
-                        entry.1 = Some(*state);
                     }
                     None => self.sync_rooms(),
                 }
@@ -2272,27 +2253,17 @@ impl App {
 
     /// Takes the rooms from the client, keeps the selection valid and saves the room list.
     fn sync_rooms(&mut self) {
-        self.rooms = self.client.rooms();
-        self.published.retain(|room, _| {
-            self.rooms
-                .iter()
-                .any(|(k, _)| RoomId::of(&k.token) == *room)
-        });
-        let selected_gone = self.selected.is_some_and(|selected| {
-            !self
-                .rooms
-                .iter()
-                .any(|(key, _)| RoomId::of(&key.token) == selected)
-        });
-        if selected_gone || self.selected.is_none() {
-            let first = self.rooms.first().map(|(key, _)| RoomId::of(&key.token));
+        self.rooms.reload(&self.client);
+        self.published.retain(|room, _| self.rooms.contains(*room));
+        if self
+            .selected
+            .is_none_or(|selected| !self.rooms.contains(selected))
+        {
+            let first = self.rooms.ids().next();
             self.select(first);
         }
-        self.settings.retain_rooms(
-            self.rooms
-                .iter()
-                .map(|(key, _)| (RoomId::of(&key.token), key.to_string())),
-        );
+        self.settings
+            .retain_rooms(self.rooms.iter().map(|(id, key, _)| (id, key.to_string())));
         self.save_settings();
     }
 
@@ -2454,9 +2425,8 @@ impl App {
     /// has not timed out yet.
     fn publish(&mut self) -> Task<Message> {
         let mut calls = Vec::new();
-        for (key, state) in &self.rooms {
+        for (room, _, state) in self.rooms.iter() {
             let Some(state) = state else { continue };
-            let room = RoomId::of(&key.token);
             let repos = self.settings.room_project_repos(&room);
             let sessions =
                 logic::shared_sessions(&self.local_sessions, state, self.client.member(), &repos);

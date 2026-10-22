@@ -285,11 +285,7 @@ impl App {
         self.sessions_open = r.sessions_open;
         self.members_open = r.members_open;
         self.collapsed = r.collapsed.into_iter().collect();
-        let joined = r.selected.filter(|room| {
-            self.rooms
-                .iter()
-                .any(|(key, _)| RoomId::of(&key.token) == *room)
-        });
+        let joined = r.selected.filter(|room| self.rooms.contains(*room));
         if let Some(room) = joined {
             // Not `select`, which drops the drafts.
             self.selected = Some(room);

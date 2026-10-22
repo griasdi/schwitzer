@@ -12,7 +12,7 @@ impl App {
     pub(super) fn release_target(&self) -> Option<semver::Version> {
         self.releases
             .iter()
-            .filter(|(server, _)| self.rooms.iter().any(|(key, _)| key.server == **server))
+            .filter(|(server, _)| self.rooms.has_server(server))
             .map(|(_, version)| version)
             .max()
             .cloned()

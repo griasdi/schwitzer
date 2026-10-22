@@ -193,13 +193,12 @@ fn pick_row<'a>(
 /// All rooms to switch between, and the forms to join or create one.
 pub fn rooms_page(app: &App) -> Element<'_, Message> {
     let mut list = column![].spacing(2);
-    for (key, state) in &app.rooms {
-        let id = RoomId::of(&key.token);
+    for (id, key, state) in app.rooms.iter() {
         let online = app.servers.get(&key.server).map(|s| s.online);
         list = list.push(pick_row(
             format!("room-{}", id.short()),
             dot(online),
-            logic::room_label(id, state.as_ref()),
+            logic::room_label(id, state),
             format!("{}:{}", key.server.host, key.server.port),
             app.selected == Some(id),
             Message::OpenRoom(id),
