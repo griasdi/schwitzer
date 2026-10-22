@@ -7,7 +7,7 @@ colors:
   hover: "#f2f8f3"
   selected: "#e2f1e5"
   line: "#d9e5db"
-  line-strong: "#8fa394"
+  line-strong: "#75887a"
   text: "#142019"
   muted: "#56665a"
   primary: "#2db34a"
@@ -43,7 +43,7 @@ colors:
   night-hover: "#222d26"
   night-selected: "#213629"
   night-line: "#2a3a30"
-  night-line-strong: "#627568"
+  night-line-strong: "#6f8475"
   night-text: "#e4eee6"
   night-muted: "#93a597"
   night-primary: "#3dcb5c"
@@ -334,8 +334,8 @@ Six hues, picked per member by a fixed hash, the same on every machine. Day: lig
 - **Slab White / Night Slab** (#ffffff / #1a231e, `raised`): task slabs (open or not), session slabs, page sections, the header, page and status bars, inputs, tooltips, menus, secondary buttons.
 - **Mint Breath** (#f2f8f3 / #222d26, `hover`): a slab or button under the pointer.
 - **Mint Pressed** (#e2f1e5 / #213629, `selected`): a pressed slab or button, text selection, active segment fill, opened room switcher.
-- **Mint Hairline** (#d9e5db / #2a3a30, `line`): separators, slab and resting input and secondary-button borders, scroller rails, disabled primary fill.
-- **Sage Edge** (#8fa394 / #627568, `line-strong`): hovered slab and input borders (3:1 on the ground), unknown-state dot, scroller while hovered.
+- **Mint Hairline** (#d9e5db / #2a3a30, `line`): separators, slab and resting input borders, disabled secondary-button borders, scroller rails, disabled primary fill.
+- **Sage Edge** (#75887a / #6f8475, `line-strong`): resting secondary-button and segment borders, hovered slab and input borders, open-task border, unknown-state dot, scroller while hovered; 3:1 on `ground`, `raised`, `hover` and `selected`.
 - **Green-Black Ink / Night Text** (#142019 / #e4eee6, `text`): all primary text.
 - **Moss Grey** (#56665a / #93a597, `muted`): secondary text, placeholders, inactive icons; held at 4.5:1 on `ground`, `raised`, `hover` and `selected`.
 - **Under-Edge** (rgba(12, 28, 17, 0.14) / rgba(0, 0, 0, 0.55), `edge`): the soft shadow of raised slabs and buttons.
@@ -418,10 +418,10 @@ Soft but not bubbly. Everything interactive is a rounded rectangle with an 8px r
 Four kinds plus a segmented control; every button is wrapped in an id container so tests and the headless control can address it.
 - **Shape:** 8px radius; 32px tall (6px 12px padding around a 14px medium label; icon+label gap 6px, icon 16px). Primary, secondary and danger buttons are raised plates: under-edge shadow at rest, deeper on hover, none when pressed or disabled.
 - **Primary:** Action Green fill, Deep Green Ink text. Hovered: `primary-hover`. Pressed: Leaf Ink fill. Disabled: Hairline fill, Moss Grey text. One per view for the main call to action (Propose, Save, "Approve & build", "Pick and copy prompt"); on a slab it is the next step: **Approve** (check icon) on a ready plan, **Pick** (hand-grab icon) on an approved one, **Accept** (check icon) on proposals. Pick is disabled (muted icon) while a pick runs. Right after an approval Approve stays on the slab, disabled with a muted icon, for up to 6 s while the planning omp session claims the build, then Pick takes its place.
-- **Secondary:** raised fill, Mint Hairline border; hovered Mint Breath with Sage Edge border; pressed Mint Pressed. Cancel, Replan, Reopen, Mark planned, Mark done, Add, Save name; **Unclaim** (leave icon) on a slab whose claim is yours.
+- **Secondary:** raised fill, Sage Edge border; hovered Mint Breath with Moss Grey border; pressed Mint Pressed with Moss Grey border; disabled: no fill, Mint Hairline border, Moss Grey text. Cancel, Replan, Reopen, Mark planned, Mark done, Add, Save name; **Unclaim** (leave icon) on a slab whose claim is yours.
 - **Danger:** red text and 1px red border on no fill; hovered Alarm Wash; pressed solid red with on-danger text. Reject (open task only).
 - **Ghost:** no border, no fill, no shadow; hover Mint Breath, pressed Mint Pressed. Icon buttons (32x32, 16px glyph, tooltip above, below in the header and page bars) in the bars (invite, settings, back), group headers (`+`) and the head of the open task (edit, close), text links ("Share mine"), the `#n` session task link.
-- **Segment:** 1px border; the active segment is Mint Pressed with Leaf Ink border and text, shadowless (priority High / Normal / Low).
+- **Segment:** 1px Sage Edge border, Moss Grey under the pointer; the active segment is Mint Pressed with Leaf Ink border and text, shadowless (priority High / Normal / Low).
 
 ### Slabs and group headers
 - **Task slab:** a full-width button on `raised`, 8px radius, 1px Mint Hairline border, under-edge shadow, padding 8px 12px. Hover: Mint Breath fill, Sage Edge border, deeper shadow. Pressed: Mint Pressed, no shadow. Opens the task in place. Two lines plus the next-step button (see Layout); the button takes the press before the slab does. Reject, Replan, Reopen, Mark planned and Mark done stay in the open task.
@@ -465,7 +465,7 @@ None, by design. Hover, press and focus are instant swaps (including the shadow)
 The product site in `site/` is the one exception: it borrows the tokens, Figtree and the slab, lamp and tag components, but animates on purpose, because its job is to show the room working. Its motion is a single authored moment, the two-desk demo: a packet in the new stage's lamp colour crosses the room server (two 480 ms hops), slabs move to their new group (420 ms), all on `cubic-bezier(0.16, 1, 0.3, 1)`, and building slabs shed small sweat drops. Everything else on the page is static, and `prefers-reduced-motion` turns the demo into a click-through without travel, slab movement or drops. The page has its own larger type and spacing scale (display, section titles, 16px section radius); the replica windows inside it keep the app's metrics.
 
 ### Accessibility and input
-iced 0.14 exposes no accessibility tree and screen readers cannot read the window, so contrast and keyboard operation carry accessibility. Muted text is held at 4.5:1 on every surface; hovered slab and input borders reach 3:1 on the ground; lamps hold 3:1 on raised. Keyboard: `Tab` / `Shift+Tab` move focus through the fields, `Esc` closes the open task or draft, else returns from Settings to the main page, `Ctrl+N` (Cmd on macOS) opens the draft of a new proposal, `Ctrl+,` opens the Settings page, `Enter` submits the focused field. Focus is visible only on fields and editors (2px Leaf Ink ring): iced 0.14 buttons have no focused state, so buttons and slabs are pointer targets (at least 32px tall) and every keyboard path must go through a shortcut or a field. Every icon-only button has a tooltip naming its action.
+iced 0.14 exposes no accessibility tree and screen readers cannot read the window, so contrast and keyboard operation carry accessibility. Muted text is held at 4.5:1 on every surface; Sage Edge (resting secondary and segment borders, hovered slab and input borders) holds 3:1 on every surface; lamps hold 3:1 on raised. Keyboard: `Tab` / `Shift+Tab` move focus through the fields, `Esc` closes the open task or draft, else returns from Settings to the main page, `Ctrl+N` (Cmd on macOS) opens the draft of a new proposal, `Ctrl+,` opens the Settings page, `Enter` submits the focused field. Focus is visible only on fields and editors (2px Leaf Ink ring): iced 0.14 buttons have no focused state, so buttons and slabs are pointer targets (at least 32px tall) and every keyboard path must go through a shortcut or a field. Every icon-only button has a tooltip naming its action.
 
 ## Do's and Don'ts
 

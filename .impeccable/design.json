@@ -116,8 +116,8 @@
         "role": "neutral",
         "displayName": "Sage Edge",
         "theme": "Daylight",
-        "canonical": "#8fa394",
-        "oklch": "oklch(69.5% 0.031 153)",
+        "canonical": "#75887a",
+        "oklch": "oklch(60.7% 0.030 153)",
         "tonalRamp": [
           "#020f05",
           "#192a1e",
@@ -762,8 +762,8 @@
         "role": "neutral",
         "displayName": "Night Sage Edge",
         "theme": "Night",
-        "canonical": "#627568",
-        "oklch": "oklch(54.3% 0.030 155)",
+        "canonical": "#6f8475",
+        "oklch": "oklch(59.2% 0.033 154)",
         "tonalRamp": [
           "#020f06",
           "#19291f",

@@ -72,7 +72,8 @@ pub struct Tokens {
     pub selected: Color,
     /// Separators and input borders at rest.
     pub line: Color,
-    /// Input borders under the pointer (3:1 on the ground).
+    /// Resting secondary-button and segment borders; slab and input borders under the pointer.
+    /// 3:1 on ground, raised, hover and selected.
     pub line_strong: Color,
     pub text: Color,
     /// Secondary text, 4.5:1 on every surface.
@@ -107,7 +108,7 @@ const DAYLIGHT: Tokens = Tokens {
     hover: color!(0xf2f8f3),
     selected: color!(0xe2f1e5),
     line: color!(0xd9e5db),
-    line_strong: color!(0x8fa394),
+    line_strong: color!(0x75887a),
     text: color!(0x142019),
     muted: color!(0x56665a),
     primary: color!(0x2db34a),
@@ -160,7 +161,7 @@ const NIGHT: Tokens = Tokens {
     hover: color!(0x222d26),
     selected: color!(0x213629),
     line: color!(0x2a3a30),
-    line_strong: color!(0x627568),
+    line_strong: color!(0x6f8475),
     text: color!(0xe4eee6),
     muted: color!(0x93a597),
     primary: color!(0x3dcb5c),
@@ -529,7 +530,7 @@ pub fn button_primary(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
-/// A bordered secondary button.
+/// A bordered secondary button: a Sage Edge border at rest, Moss Grey under the pointer.
 pub fn button_secondary(theme: &Theme, status: button::Status) -> button::Style {
     let t = tokens(theme);
     let shadow = lift(t, status);
@@ -539,9 +540,9 @@ pub fn button_secondary(theme: &Theme, status: button::Status) -> button::Style 
         radius: RADIUS.into(),
     };
     match status {
-        button::Status::Active => face(Some(t.raised), t.text, border(t.line), shadow),
-        button::Status::Hovered => face(Some(t.hover), t.text, border(t.line_strong), shadow),
-        button::Status::Pressed => face(Some(t.selected), t.text, border(t.line_strong), shadow),
+        button::Status::Active => face(Some(t.raised), t.text, border(t.line_strong), shadow),
+        button::Status::Hovered => face(Some(t.hover), t.text, border(t.muted), shadow),
+        button::Status::Pressed => face(Some(t.selected), t.text, border(t.muted), shadow),
         button::Status::Disabled => face(None, t.muted, border(t.line), shadow),
     }
 }
@@ -642,16 +643,20 @@ pub fn button_segment(on: bool) -> impl Fn(&Theme, button::Status) -> button::St
         } else {
             lift(t, status)
         };
-        let border = Border {
-            color: if on { t.ink } else { t.line },
+        let border = |color| Border {
+            color,
             width: 1.0,
             radius: RADIUS.into(),
         };
         match (on, status) {
-            (true, _) => face(Some(t.selected), t.ink, border, shadow),
-            (false, button::Status::Hovered) => face(Some(t.hover), t.text, border, shadow),
-            (false, button::Status::Pressed) => face(Some(t.selected), t.text, border, shadow),
-            (false, _) => face(None, t.text, border, shadow),
+            (true, _) => face(Some(t.selected), t.ink, border(t.ink), shadow),
+            (false, button::Status::Hovered) => {
+                face(Some(t.hover), t.text, border(t.muted), shadow)
+            }
+            (false, button::Status::Pressed) => {
+                face(Some(t.selected), t.text, border(t.muted), shadow)
+            }
+            (false, _) => face(None, t.text, border(t.line_strong), shadow),
         }
     }
 }
@@ -808,4 +813,43 @@ pub fn task_markdown(theme: &Theme) -> markdown::Settings {
     settings.h6_size = Pixels(TS_14);
     settings.spacing = Pixels(SP_2);
     settings
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Color, DAYLIGHT, NIGHT};
+
+    /// WCAG contrast ratio of two opaque sRGB colours.
+    fn contrast(a: Color, b: Color) -> f32 {
+        fn luminance(c: Color) -> f32 {
+            let lin = |c: f32| {
+                if c <= 0.04045 {
+                    c / 12.92
+                } else {
+                    ((c + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+        }
+        let (la, lb) = (luminance(a), luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    #[test]
+    fn edges_and_muted_text_hold_their_contrast_in_both_themes() {
+        for (i, t) in [&DAYLIGHT, &NIGHT].into_iter().enumerate() {
+            let surfaces = [
+                ("ground", t.ground),
+                ("raised", t.raised),
+                ("hover", t.hover),
+                ("selected", t.selected),
+            ];
+            for (name, s) in surfaces {
+                let edge = contrast(t.line_strong, s);
+                assert!(edge >= 3.0, "theme {i}: line_strong on {name} is {edge:.2}");
+                let muted = contrast(t.muted, s);
+                assert!(muted >= 4.5, "theme {i}: muted on {name} is {muted:.2}");
+            }
+        }
+    }
 }
