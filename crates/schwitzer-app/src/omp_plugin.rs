@@ -282,10 +282,7 @@ fn read_json(path: &Path, section: &str, what: &str) -> io::Result<Option<Map<St
 
 /// Writes the JSON file at `path` through a temporary file and a rename.
 fn write_json(path: &Path, value: Map<String, Value>) -> io::Result<()> {
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let tmp = path.with_file_name(format!("{name}.tmp"));
-    std::fs::write(&tmp, pretty(&Value::Object(value))?.as_bytes())?;
-    std::fs::rename(&tmp, path)
+    settings::write_atomic(path, pretty(&Value::Object(value))?.as_bytes())
 }
 
 fn pretty(value: &impl Serialize) -> io::Result<String> {

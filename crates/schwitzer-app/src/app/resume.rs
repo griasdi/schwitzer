@@ -146,9 +146,7 @@ fn clamp(content: &text_editor::Content, line: usize, column: usize) -> Position
 /// Writes `resume` into `dir` through a temporary file and a rename.
 pub fn write(dir: &Path, resume: &Resume) -> io::Result<()> {
     let json = serde_json::to_vec(resume).map_err(io::Error::other)?;
-    let tmp = dir.join(format!("{FILE}.tmp"));
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, dir.join(FILE))
+    crate::settings::write_atomic(&dir.join(FILE), &json)
 }
 
 /// Removes the resume file from `dir`.

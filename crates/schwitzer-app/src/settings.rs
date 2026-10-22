@@ -332,9 +332,7 @@ impl Settings {
     pub fn save(&self, dir: &Path) -> io::Result<()> {
         let text = toml::to_string_pretty(self).map_err(io::Error::other)?;
         std::fs::create_dir_all(dir)?;
-        let tmp = dir.join(format!("{FILE}.tmp"));
-        std::fs::write(&tmp, text)?;
-        std::fs::rename(&tmp, dir.join(FILE))
+        write_atomic(&dir.join(FILE), text.as_bytes())
     }
 }
 
@@ -367,6 +365,19 @@ pub fn data_dir() -> PathBuf {
 /// The weida identity (key and certificate) lives under the data directory.
 pub fn identity_dir(data: &Path) -> PathBuf {
     data.join("identity")
+}
+
+/// Writes `bytes` to `path` through a temporary file beside it (`<name>.tmp`, a leftover one
+/// is overwritten) and a rename, so a reader or a crash sees the old file or the whole new
+/// one, never half of it; the rename stays on one filesystem because the temporary file lies
+/// in the same directory. The new file has the mode a plain `write` gives it and is not synced.
+/// Secrets use their own writer (`mcp::token`), which creates the file readable by the user
+/// only.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let tmp = path.with_file_name(format!("{name}.tmp"));
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)
 }
 
 fn default_name() -> String {
@@ -425,6 +436,17 @@ mod tests {
         assert!(settings.auto_install_updates);
         assert!(settings.auto_restart_updates);
         assert!(!settings.notify_hand_ins);
+    }
+
+    #[test]
+    fn write_atomic_replaces_the_file_over_a_leftover_temporary_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.json");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::write(dir.path().join("a.json.tmp"), "stale").unwrap();
+        write_atomic(&path, b"new").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        assert!(!dir.path().join("a.json.tmp").exists());
     }
 
     #[test]
