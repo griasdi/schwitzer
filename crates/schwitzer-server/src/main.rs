@@ -43,7 +43,7 @@ async fn main() -> ExitCode {
         match AutoUpdate::prepare() {
             Ok(update) => Some(update),
             Err(e) => {
-                eprintln!("error: --auto-update: {e:#}");
+                tracing::error!("--auto-update: {e:#}");
                 return ExitCode::FAILURE;
             }
         }
@@ -60,7 +60,7 @@ async fn main() -> ExitCode {
     let mut server = match start(opts).await {
         Ok(server) => server,
         Err(e) => {
-            eprintln!("error: {e:#}");
+            tracing::error!("{e:#}");
             return ExitCode::FAILURE;
         }
     };
