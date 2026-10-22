@@ -15,7 +15,9 @@
 // MCP server, whose URL schwitzer.json names. The token is read from <data_dir>/mcp-token per call.
 // Before a prompt it tells the agent which other Schwitzer projects exist and that a change one of
 // them needs goes there as a proposal; before an edit, write or ast_edit touches a repo linked to
-// another project it asks the user (and blocks without a UI).
+// another project it asks the user (and blocks without a UI). While a build claim of this omp
+// process is on a project whose switch "Task number in commits" is on, a git commit in this repo
+// without the trailer Schwitzer-Task: #<n> is blocked and the agent is told to add it.
 // omp-plugin/README.md describes what the plugin does.
 
 import { join, resolve, sep } from "node:path";
@@ -24,7 +26,8 @@ import { join, resolve, sep } from "node:path";
 interface Config {
   data_dir: string;
   mcp_url: string;
-  projects: { room: string; project: number }[];
+  /** commit_trailer is missing in plugins written before the switch existed. */
+  projects: { room: string; project: number; commit_trailer?: boolean }[];
   /** Repos of the projects this repo is not linked to; missing in plugins written before. */
   other_repos?: { room: string; project: number; path: string }[];
 }
@@ -657,6 +660,51 @@ async function crossProjectCheck(
   return { block: true, reason };
 }
 
+/** `git … commit` anywhere in a shell command, with git's global options before `commit`. */
+const GIT_COMMIT = /\bgit(?:\s+(?:-[cC]\s+\S+|--?[\w-]+(?:=\S+)?))*\s+commit\b/;
+
+/** Blocks a `git commit` in this repo while a build claim of this omp process is on a project
+ *  whose switch "Task number in commits" is on, until the command carries
+ *  `Schwitzer-Task: #<n>` for each such task. Never throws; when the app does not answer in
+ *  HINT_TIMEOUT_MS the commit goes through. */
+async function commitTrailerCheck(event: ToolCallEvent, ctx: Ctx): Promise<{ block: true; reason: string } | undefined> {
+  try {
+    const command = event.input.command;
+    if (event.toolName !== "bash" || typeof command !== "string" || !GIT_COMMIT.test(command)) return undefined;
+    if (buildClaims().size === 0) return undefined;
+    // A `cd` or `-C` inside the command is not interpreted.
+    const dir = typeof event.input.cwd === "string" ? resolve(ctx.cwd, event.input.cwd) : ctx.cwd;
+    if (!within(dir, OWN_ROOT)) return undefined;
+    const config = await loadConfig();
+    const on = config.projects.filter((p) => p.commit_trailer === true);
+    if (on.length === 0) return undefined;
+    const rows = await listRooms(config, HINT_TIMEOUT_MS);
+    const wanted = new Set<number>();
+    for (const [key, projectName] of buildClaims()) {
+      const slash = key.lastIndexOf("/");
+      const id8 = key.slice(0, slash);
+      const number = Number(key.slice(slash + 1));
+      const id = rows.find((r) => r.room === id8)?.projects.find((p) => p.name === projectName)?.id;
+      if (id !== undefined && on.some((p) => p.room.startsWith(id8) && p.project === id)) wanted.add(number);
+    }
+    const missing = [...wanted]
+      .sort((a, b) => a - b)
+      .filter((n) => !new RegExp(`Schwitzer-Task:\\s*#${n}(?!\\d)`).test(command));
+    if (missing.length === 0) return undefined;
+    const tasks = missing.map((n) => `#${n}`).join(", ");
+    const trailers = missing.map((n) => `Schwitzer-Task: #${n}`).join(", ");
+    const flags = missing.map((n) => `--trailer "Schwitzer-Task: #${n}"`).join(" ");
+    return {
+      block: true,
+      reason:
+        `Schwitzer: commits while building task ${tasks} carry the trailer ${trailers}. Commit again with ` +
+        `${flags} added to the git commit command (or with the trailer as the last paragraph of the message).`,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 /** Unclaimed tasks of the configured projects in `stage` (accepted for plan, ready for build, idea
  *  to write up), high priority first, then by number. A ready task that still waits for another
  *  is left out: the server refuses its build. A configured project the app no longer has joined
@@ -803,7 +851,7 @@ type Claimed = { marker: string; task: Record<string, unknown> } | { refused: st
  *  ("No free task." when someone was faster). */
 async function claimFor(config: Config, room: string, project: string, number: number, work: Work): Promise<Claimed> {
   const got = parseClaim(await tool(config, "claim", { room, project, work, task: number, agent: "omp" }));
-  if (work === "build" && !("refused" in got)) await rememberStart(config, room, number);
+  if (work === "build" && !("refused" in got)) await rememberStart(config, room, number, project);
   return got;
 }
 
@@ -1004,6 +1052,20 @@ function buildStarts(): Map<string, string> {
   return starts;
 }
 
+/** The project name of every build claim of this omp process, keyed `<room id8>/<task>`. Unlike
+ *  BUILD_STARTS it does not need a git HEAD; the commit trailer check reads it. */
+const BUILD_CLAIMS = Symbol.for("schwitzer.buildClaims");
+
+function buildClaims(): Map<string, string> {
+  const store = globalThis as Record<symbol, unknown>;
+  let claims = store[BUILD_CLAIMS] as Map<string, string> | undefined;
+  if (!claims) {
+    claims = new Map();
+    store[BUILD_CLAIMS] = claims;
+  }
+  return claims;
+}
+
 /** git in this repo: its trimmed stdout, or undefined when git is missing, fails or takes too long. */
 async function git(args: string[]): Promise<string | undefined> {
   try {
@@ -1017,23 +1079,26 @@ async function git(args: string[]): Promise<string | undefined> {
   }
 }
 
-/** Remembers HEAD of this repo for the build claim on `task`; never throws. Without a git HEAD an
- *  older start for the same task is dropped. */
-async function rememberStart(config: Config, room: string | undefined, task: number): Promise<void> {
+/** Remembers the build claim on `task` in `project`, and HEAD of this repo for it; never throws.
+ *  Without a git HEAD an older start for the same task is dropped. */
+async function rememberStart(config: Config, room: string | undefined, task: number, project: string): Promise<void> {
   try {
     const key = await roomKey(config, room);
     if (key === undefined) return;
+    buildClaims().set(`${key}/${task}`, project);
     const head = await git(["rev-parse", "--verify", "HEAD"]);
     if (head !== undefined && /^[0-9a-f]{40,64}$/.test(head)) buildStarts().set(`${key}/${task}`, head);
     else buildStarts().delete(`${key}/${task}`);
   } catch {}
 }
 
-/** Forgets the start of `task` after its claim ended (finish or unclaim); never throws. */
+/** Forgets the claim and start of `task` after its claim ended (finish or unclaim); never throws. */
 async function forgetStart(config: Config, room: string | undefined, task: number): Promise<void> {
   try {
     const key = await roomKey(config, room);
-    if (key !== undefined) buildStarts().delete(`${key}/${task}`);
+    if (key === undefined) return;
+    buildStarts().delete(`${key}/${task}`);
+    buildClaims().delete(`${key}/${task}`);
   } catch {}
 }
 
@@ -1217,8 +1282,8 @@ async function replan(ctx: Ctx, config: Config, claim: TaskClaim, reviewId: stri
   ctx.ui.notify(`Task #${claim.task} was sent back in Schwitzer; omp revises the plan.`, "info");
 }
 
-/** An agent's schwitzer_<name> call: a build claim remembers HEAD, finish gets the commits since then
- *  appended to its note, and a finished or given-back claim forgets its start. */
+/** An agent's schwitzer_<name> call: a build claim remembers its project and HEAD, finish gets the
+ *  commits since then appended to its note, and a finished or given-back claim forgets both. */
 async function forward(config: Config, name: string, args: Record<string, unknown>): Promise<string> {
   const room = typeof args.room === "string" ? args.room : undefined;
   const task = typeof args.task === "number" ? args.task : undefined;
@@ -1229,8 +1294,11 @@ async function forward(config: Config, name: string, args: Record<string, unknow
   if (name === "claim" && args.work === "build") {
     try {
       const got = parseClaim(text);
-      if (!("refused" in got) && typeof got.task.number === "number") await rememberStart(config, room, got.task.number);
-    } catch {} // the claim stands; only the commit list is lost
+      if (!("refused" in got)) {
+        const { number, project } = got.task;
+        if (typeof number === "number" && typeof project === "string") await rememberStart(config, room, number, project);
+      }
+    } catch {} // the claim stands; only the commit list and the trailer check are lost
   } else if ((name === "finish" || name === "unclaim") && task !== undefined) {
     await forgetStart(config, room, task);
   }
@@ -1310,6 +1378,8 @@ export default function schwitzer(pi: Pi): void {
   });
   // A throwing handler would block the tool; crossProjectCheck catches what it must.
   pi.on("tool_call", async (event, ctx) => crossProjectCheck(pi, event, ctx));
+  // For every agent kind: subagents commit in the same repo too. commitTrailerCheck never throws.
+  pi.on("tool_call", async (event, ctx) => commitTrailerCheck(event, ctx));
   // A successful schwitzer_finish of the main agent: offer the next approved task when its run ends.
   pi.on("tool_result", (event, ctx) => {
     if (ctx.agent && ctx.agent.kind !== "main") return;

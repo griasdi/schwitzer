@@ -170,6 +170,7 @@ pub enum Message {
     UpdateAllPlugins,
     AutoUpdatePlugins(bool),
     NotifyHandIns(bool),
+    CommitTrailers(bool),
 
     ProposalTitle(String),
     ProposalBody(text_editor::Action),
@@ -1202,6 +1203,21 @@ impl App {
                 self.save_settings();
                 Task::none()
             }
+            Message::CommitTrailers(on) => {
+                if let (Some(room), Some(project)) =
+                    (self.selected, self.selected_project().map(|p| p.id))
+                {
+                    let key = settings::repo_key(&room, project);
+                    if on {
+                        self.settings.commit_trailers.insert(key);
+                    } else {
+                        self.settings.commit_trailers.remove(&key);
+                    }
+                    self.save_settings();
+                    self.write_plugin_configs(&room, project);
+                }
+                Task::none()
+            }
 
             Message::SelectProject(id) => {
                 if let Some(room) = self.selected {
@@ -1952,11 +1968,38 @@ impl App {
 
     /// Writes the plugin into `repo` for the projects it is linked to and marks it current.
     fn update_plugin(&mut self, repo: &Path) -> std::io::Result<()> {
-        let projects = omp_plugin::projects_of(&self.settings.repos, repo);
+        let projects =
+            omp_plugin::projects_of(&self.settings.repos, &self.settings.commit_trailers, repo);
         omp_plugin::install(repo, &self.plugin_config(repo, projects))?;
         self.plugins.insert(repo.to_owned(), PluginState::Current);
         self.auto_failed.remove(repo);
         Ok(())
+    }
+
+    /// Rewrites `schwitzer.json` in every repo of `project` that has the plugin, so omp
+    /// sees a changed project switch at its next commit; failures go to the banner.
+    /// Config only: a full [`Self::update_plugin`] would also replace an out-of-date
+    /// `index.ts` for a member who turned automatic updates off.
+    fn write_plugin_configs(&mut self, room: &RoomId, project: u64) {
+        for repo in self.settings.project_repos(room, project).to_vec() {
+            if !self.plugins.contains_key(&repo) {
+                continue;
+            }
+            let projects = omp_plugin::projects_of(
+                &self.settings.repos,
+                &self.settings.commit_trailers,
+                &repo,
+            );
+            let config = self.plugin_config(&repo, projects);
+            match omp_plugin::write_config(&repo, &config) {
+                Ok(()) => {
+                    if let Some(state) = omp_plugin::state(&repo, &config) {
+                        self.plugins.insert(repo, state);
+                    }
+                }
+                Err(e) => self.banner = Some(format!("omp plugin in {}: {e}", repo.display())),
+            }
+        }
     }
 
     /// Updates every out-of-date plugin, in all rooms; the first failure goes to the banner.
@@ -1997,7 +2040,8 @@ impl App {
             if self.in_stopped_distro(repo) {
                 continue;
             }
-            let projects = omp_plugin::projects_of(&self.settings.repos, repo);
+            let projects =
+                omp_plugin::projects_of(&self.settings.repos, &self.settings.commit_trailers, repo);
             match omp_plugin::state(repo, &self.plugin_config(repo, projects)) {
                 Some(state) => {
                     self.plugins.insert(repo.clone(), state);
@@ -2042,7 +2086,13 @@ impl App {
     /// projects.
     fn sync_plugins(&mut self) {
         for repo in self.plugins.keys().cloned().collect::<Vec<_>>() {
-            let result = if omp_plugin::projects_of(&self.settings.repos, &repo).is_empty() {
+            let result = if omp_plugin::projects_of(
+                &self.settings.repos,
+                &self.settings.commit_trailers,
+                &repo,
+            )
+            .is_empty()
+            {
                 omp_plugin::uninstall(&repo).map(|()| {
                     self.plugins.remove(&repo);
                     self.auto_failed.remove(&repo);
@@ -2349,6 +2399,9 @@ impl App {
             .map(|(key, _)| RoomId::of(&key.token).to_hex())
             .collect();
         self.settings.repos.retain(|key, _| {
+            settings::parse_repo_key(key).is_some_and(|(room, _)| joined.contains(room))
+        });
+        self.settings.commit_trailers.retain(|key| {
             settings::parse_repo_key(key).is_some_and(|(room, _)| joined.contains(room))
         });
         let rooms = &self.rooms;

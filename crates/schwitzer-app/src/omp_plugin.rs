@@ -15,7 +15,7 @@
 //! The app compares a repo's plugin with what it would write ([`state`]) and rewrites it on
 //! request or automatically.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -50,6 +50,9 @@ pub struct PluginProject {
     /// The room id in hex.
     pub room: String,
     pub project: u64,
+    /// Whether builds in this project need `Schwitzer-Task: #<n>` in every commit; see
+    /// [`Settings::commit_trailers`](crate::settings::Settings::commit_trailers).
+    pub commit_trailer: bool,
 }
 
 /// A repo linked to a project the plugin's repo is not linked to.
@@ -75,15 +78,22 @@ fn mcp_path(repo: &Path) -> PathBuf {
 }
 
 /// The projects (keys of `repos`, in map order) that `repo` is linked to; malformed keys are
-/// skipped.
-pub fn projects_of(repos: &BTreeMap<String, Vec<PathBuf>>, repo: &Path) -> Vec<PluginProject> {
+/// skipped. `trailers` holds the keys whose commit trailer switch is on.
+pub fn projects_of(
+    repos: &BTreeMap<String, Vec<PathBuf>>,
+    trailers: &BTreeSet<String>,
+    repo: &Path,
+) -> Vec<PluginProject> {
     repos
         .iter()
         .filter(|(_, paths)| paths.iter().any(|path| path == repo))
-        .filter_map(|(key, _)| settings::parse_repo_key(key))
-        .map(|(room, project)| PluginProject {
-            room: room.to_owned(),
-            project,
+        .filter_map(|(key, _)| {
+            let (room, project) = settings::parse_repo_key(key)?;
+            Some(PluginProject {
+                room: room.to_owned(),
+                project,
+                commit_trailer: trailers.contains(key),
+            })
         })
         .collect()
 }
@@ -93,7 +103,8 @@ pub fn projects_of(repos: &BTreeMap<String, Vec<PathBuf>>, repo: &Path) -> Vec<P
 /// `repo`'s own projects (also `repo` itself) and a repo in another WSL distro than `repo`,
 /// which the plugin cannot reach.
 pub fn other_repos(repos: &BTreeMap<String, Vec<PathBuf>>, repo: &Path) -> Vec<OtherRepo> {
-    let own = projects_of(repos, repo);
+    // Only room and project are compared here, so the trailer switches do not matter.
+    let own = projects_of(repos, &BTreeSet::new(), repo);
     let is_own = |room: &str, project| own.iter().any(|p| p.room == room && p.project == project);
     let own_paths: Vec<&PathBuf> = repos
         .iter()
@@ -226,6 +237,15 @@ pub fn install(repo: &Path, config: &PluginConfig) -> io::Result<()> {
     Ok(())
 }
 
+/// Rewrites only `schwitzer.json` in `repo`'s plugin, so a changed project switch reaches
+/// a running omp at once; `index.ts` and the lock file stay as they are.
+pub fn write_config(repo: &Path, config: &PluginConfig) -> io::Result<()> {
+    write_if_changed(
+        &plugin_dir(repo).join(CONFIG_FILE),
+        pretty(config)?.as_bytes(),
+    )
+}
+
 /// Removes the plugin from `repo`, its entries from the lock file and the `schwitzer` server
 /// from `.omp/mcp.json`. A file that omp would not read is left alone: omp skips a lock entry
 /// whose directory is gone.
@@ -334,6 +354,7 @@ mod tests {
             projects: vec![PluginProject {
                 room: "ab".repeat(32),
                 project: 1,
+                commit_trailer: false,
             }],
             other_repos: vec![],
         }
@@ -493,15 +514,24 @@ mod tests {
             ),
             ("malformed".to_owned(), vec![PathBuf::from("/code/app")]),
         ]);
-        let linked = |room: &str, project| PluginProject {
+        let linked = |room: &str, project, commit_trailer| PluginProject {
             room: room.to_owned(),
             project,
+            commit_trailer,
         };
         assert_eq!(
-            projects_of(&repos, Path::new("/code/app")),
-            [linked(&a, 1), linked(&c, 3)]
+            projects_of(&repos, &BTreeSet::new(), Path::new("/code/app")),
+            [linked(&a, 1, false), linked(&c, 3, false)]
         );
-        assert!(projects_of(&repos, Path::new("/code/other")).is_empty());
+        assert_eq!(
+            projects_of(
+                &repos,
+                &BTreeSet::from([format!("{c}/3")]),
+                Path::new("/code/app")
+            ),
+            [linked(&a, 1, false), linked(&c, 3, true)]
+        );
+        assert!(projects_of(&repos, &BTreeSet::new(), Path::new("/code/other")).is_empty());
     }
 
     #[test]

@@ -97,6 +97,14 @@ An agent in one repo may need a change in another Schwitzer project, for example
 - Before each prompt of the main agent (`before_agent_start`), the plugin calls `list_rooms` (3 s timeout) and, when this repo has a joined project and other projects exist in the joined rooms, adds the hidden `schwitzer-projects` message: the other projects with room name, room id and their local repos (`other_repos`), this repo's projects, and the rule to draft a proposal (starting with `Requested from project …` and the task number), show title and body in the chat, ask with the ask tool naming only the title, and only then call `schwitzer_propose`; a dependency that is no Schwitzer project needs the user's consent before its code changes. The message enters the context once and again after a compaction or when its text changes. Without the app, nothing is added.
 - Before an `edit`, `write` or `ast_edit` call (`tool_call`) whose `path` or `paths` lies in a repo of `other_repos` (the deepest containing repo wins, so a repo nested in this one counts as its own), the plugin asks: "Allow this edit", "Allow edits in "<project>" for this session" (stored as the session entry `schwitzer-cross-allow`) or "Block: propose it to "<project>" instead". Blocking, dismissing, and any call without a UI (print mode, `--no-ui`) block the tool with a reason that tells the agent to propose the change to that project. URLs (`xd://…`, `local://…`) are not checked, and neither are writes through `bash`; the hint covers those. When the app is down, the project is named `#<number>` and the reason passes its number to `schwitzer_propose`. An unreadable `schwitzer.json` never blocks an edit.
 
+## Task number in commits
+
+A member can switch on "Task number in commits" per project in the app (Settings, the project's section; `commit_trailers` in `settings.toml`, off by default). The app writes the switch into `schwitzer.json` of every repo of the project that has the plugin as soon as it changes, and the plugin reads that file on every check, so it takes effect at once, without an omp restart or a plugin update.
+
+- A build claim (`/schwitzer build`, the build after an approved plan, or `schwitzer_claim` with `work: build`) remembers its room, task and project in the omp process; `schwitzer_finish` and `schwitzer_unclaim` forget it.
+- Before a `bash` call (`tool_call`) of any agent whose command contains `git … commit` (git's global options such as `-C <dir>` or `-c <key=value>` may stand between) and whose `cwd` lies in this repo, the plugin calls `list_rooms` (3 s timeout) and finds the remembered build claims on a project with the switch on. When the command lacks `Schwitzer-Task: #<n>` for one of them, the call is blocked: "Schwitzer: commits while building task #<n> carry the trailer Schwitzer-Task: #<n>. Commit again with --trailer "Schwitzer-Task: #<n>" added to the git commit command (or with the trailer as the last paragraph of the message)."
+- The repo is the call's `cwd`; a directory named by `cd` or `-C` inside the command is not interpreted. An omp restart since the claim forgets it, and an unreadable `schwitzer.json` or an app that does not answer lets the commit through.
+
 ## Tools
 
 |Tool|Does|
@@ -126,7 +134,7 @@ The app writes these files into the repo:
 |---|---|
 |`.omp/plugins/node_modules/schwitzer/index.ts`|The plugin source|
 |`.omp/plugins/node_modules/schwitzer/package.json`|Name `schwitzer`, the app's version, `"omp": { "extensions": ["./index.ts"] }`|
-|`.omp/plugins/node_modules/schwitzer/schwitzer.json`|`data_dir`, `mcp_url`, `projects` (`room` hex id and `project` number of each project this repo is linked to), `other_repos` (`room`, `project` and `path` of each repo linked to a project this repo is not linked to, as the plugin sees the path: a Linux path from a WSL repo; repos in another WSL distro are left out)|
+|`.omp/plugins/node_modules/schwitzer/schwitzer.json`|`data_dir`, `mcp_url`, `projects` (`room` hex id, `project` number and `commit_trailer`, the switch "Task number in commits", of each project this repo is linked to), `other_repos` (`room`, `project` and `path` of each repo linked to a project this repo is not linked to, as the plugin sees the path: a Linux path from a WSL repo; repos in another WSL distro are left out)|
 |`.omp/plugins/omp-plugins.lock.json`|Entry `schwitzer` with the app's version; `enabled` and `enabledFeatures` are kept from an existing entry, `enabled` defaults to true|
 
 - omp started in the repo loads it as a project-scope plugin. A new version takes effect when omp starts next.

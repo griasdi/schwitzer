@@ -439,6 +439,24 @@ fn this_project(app: &App) -> Element<'_, Message> {
         .spacing(SP_2)
         .align_y(Alignment::Center),
     )
+    .push(
+        column![
+            on_off(
+                "Task number in commits",
+                "commit-trailer-on",
+                "commit-trailer-off",
+                app.selected
+                    .is_some_and(|room| app.settings.commit_trailer(&room, project.id)),
+                Message::CommitTrailers,
+            ),
+            muted(
+                "While one of your agents builds a task of this project, omp holds back a git \
+                 commit in its repo until the message carries the trailer Schwitzer-Task: \
+                 #<number>. Only your own agents are affected."
+            ),
+        ]
+        .spacing(SP_2),
+    )
     .into()
 }
 

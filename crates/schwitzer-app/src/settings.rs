@@ -1,6 +1,6 @@
 //! Persistent settings and filesystem locations.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -41,6 +41,10 @@ pub struct Settings {
     /// omp sessions in them are shared with the project's room.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub repos: BTreeMap<String, Vec<PathBuf>>,
+    /// The projects (keys like `repos`: `<room id hex>/<project id>`) whose builds by this
+    /// member's agents put `Schwitzer-Task: #<number>` into every commit.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub commit_trailers: BTreeSet<String>,
     /// Per room, the project last picked in it; the app shows it again after a restart.
     /// Keys are room ids in hex; a key that is no room id is dropped on load.
     #[serde(with = "room_map", skip_serializing_if = "BTreeMap::is_empty")]
@@ -70,6 +74,7 @@ impl Default for Settings {
             auto_restart_updates: true,
             notify_hand_ins: false,
             repos: BTreeMap::new(),
+            commit_trailers: BTreeSet::new(),
             chosen_projects: BTreeMap::new(),
             projects_dirs: None,
             wsl_distros: Vec::new(),
@@ -196,6 +201,11 @@ impl Settings {
             .map_or(&[], Vec::as_slice)
     }
 
+    /// Whether builds of `project` in `room` need `Schwitzer-Task: #<number>` in every commit.
+    pub fn commit_trailer(&self, room: &RoomId, project: u64) -> bool {
+        self.commit_trailers.contains(&repo_key(room, project))
+    }
+
     /// The projects of `room` with linked repos, and those repos, ordered by project id.
     pub fn room_project_repos(&self, room: &RoomId) -> Vec<(u64, &[PathBuf])> {
         let hex = room.to_hex();
@@ -211,16 +221,29 @@ impl Settings {
         linked
     }
 
-    /// Forgets the repos linked to, and the choice of, projects of `room` that are not in
-    /// `projects` (the room's current list) any more; `true` when anything changed.
+    /// Forgets the repos linked to, the commit trailer switch of, and the choice of, projects
+    /// of `room` that are not in `projects` (the room's current list) any more; `true` when
+    /// anything changed.
     pub fn forget_deleted_projects(&mut self, room: &RoomId, projects: &[Project]) -> bool {
         let hex = room.to_hex();
         let exists = |id: u64| projects.iter().any(|p| p.id == id);
-        let before = (self.repos.len(), self.chosen_projects.len());
+        let counts = |s: &Self| {
+            (
+                s.repos.len(),
+                s.commit_trailers.len(),
+                s.chosen_projects.len(),
+            )
+        };
+        let before = counts(self);
         self.repos.retain(|key, _| match parse_repo_key(key) {
             Some((r, id)) => r != hex || exists(id),
             None => true,
         });
+        self.commit_trailers
+            .retain(|key| match parse_repo_key(key) {
+                Some((r, id)) => r != hex || exists(id),
+                None => true,
+            });
         if self
             .chosen_projects
             .get(room)
@@ -228,7 +251,7 @@ impl Settings {
         {
             self.chosen_projects.remove(room);
         }
-        before != (self.repos.len(), self.chosen_projects.len())
+        before != counts(self)
     }
 
     /// Writes `settings.toml` into `dir` through a temporary file and a rename.
@@ -350,6 +373,7 @@ mod tests {
                 format!("{}/1", "ab".repeat(32)),
                 vec![PathBuf::from("/code/x")],
             )]),
+            commit_trailers: BTreeSet::from([format!("{}/1", "ab".repeat(32))]),
             chosen_projects: BTreeMap::from([(RoomId([0xab; 32]), 2)]),
             projects_dirs: Some(vec![PathBuf::from("/code"), PathBuf::from("/work")]),
             wsl_distros: vec!["Ubuntu".to_owned()],
@@ -464,6 +488,7 @@ mod tests {
                 (repo_key(&a, 2), vec![PathBuf::from("/old")]),
                 (repo_key(&b, 2), vec![PathBuf::from("/other")]),
             ]),
+            commit_trailers: BTreeSet::from([repo_key(&a, 1), repo_key(&a, 2), repo_key(&b, 2)]),
             chosen_projects: BTreeMap::from([(a, 2)]),
             ..Settings::default()
         };
@@ -475,6 +500,10 @@ mod tests {
         assert_eq!(
             settings.repos.keys().cloned().collect::<Vec<_>>(),
             [repo_key(&a, 1), repo_key(&b, 2)]
+        );
+        assert_eq!(
+            settings.commit_trailers,
+            BTreeSet::from([repo_key(&a, 1), repo_key(&b, 2)])
         );
         assert!(settings.chosen_projects.is_empty());
         assert!(!settings.forget_deleted_projects(&a, &projects));
