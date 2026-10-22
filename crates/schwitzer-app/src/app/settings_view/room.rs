@@ -60,24 +60,13 @@ pub fn room_page(app: &App) -> Element<'_, Message> {
                 1 => "1 repo linked".to_owned(),
                 n => format!("{n} repos linked"),
             };
-            let mut line = row![
-                icon(Icon::Folder, 16.0, Tone::Muted),
-                column![text(&project.name).size(TS_14), muted(linked)]
-                    .spacing(2)
-                    .width(Length::Fill),
-            ]
-            .spacing(SP_2)
-            .align_y(Alignment::Center);
-            if selected == Some(project.id) {
-                line = line.push(icon(Icon::Check, 16.0, Tone::Ink));
-            }
-            line = line.push(icon(Icon::ChevronRight, 16.0, Tone::Muted));
-            projects = projects.push(id_button(
+            projects = projects.push(pick_row(
                 format!("project-{}", project.id),
-                container(line).padding([SP_2, SP_2]),
-                Some(Message::OpenProject(project.id)),
-                theme::button_row,
-                Length::Fill,
+                icon(Icon::Folder, 16.0, Tone::Muted),
+                project.name.as_str(),
+                linked,
+                selected == Some(project.id),
+                Message::OpenProject(project.id),
             ));
         }
         if state.projects.is_empty() {
@@ -170,33 +159,50 @@ pub fn room_page(app: &App) -> Element<'_, Message> {
     frame("room-settings-page", name, body.into(), None)
 }
 
+/// A navigation row of a list: `leading`, a title with a caption below it, a check when
+/// `selected`, and a chevron.
+fn pick_row<'a>(
+    id: String,
+    leading: impl Into<Element<'a, Message>>,
+    title: impl text::IntoFragment<'a>,
+    caption: impl text::IntoFragment<'a>,
+    selected: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let mut line = row![
+        leading.into(),
+        column![text(title).size(TS_14), muted(caption)]
+            .spacing(2)
+            .width(Length::Fill),
+    ]
+    .spacing(SP_2)
+    .align_y(Alignment::Center);
+    if selected {
+        line = line.push(icon(Icon::Check, 16.0, Tone::Ink));
+    }
+    line = line.push(icon(Icon::ChevronRight, 16.0, Tone::Muted));
+    id_button(
+        id,
+        container(line).padding([SP_2, SP_2]),
+        Some(on_press),
+        theme::button_row,
+        Length::Fill,
+    )
+}
+
 /// All rooms to switch between, and the forms to join or create one.
 pub fn rooms_page(app: &App) -> Element<'_, Message> {
     let mut list = column![].spacing(2);
     for (key, state) in &app.rooms {
         let id = RoomId::of(&key.token);
         let online = app.servers.get(&key.server).map(|s| s.online);
-        let mut line = row![
-            dot(online),
-            column![
-                text(logic::room_label(id, state.as_ref())).size(TS_14),
-                muted(format!("{}:{}", key.server.host, key.server.port)),
-            ]
-            .spacing(2)
-            .width(Length::Fill),
-        ]
-        .spacing(SP_2)
-        .align_y(Alignment::Center);
-        if app.selected == Some(id) {
-            line = line.push(icon(Icon::Check, 16.0, Tone::Ink));
-        }
-        line = line.push(icon(Icon::ChevronRight, 16.0, Tone::Muted));
-        list = list.push(id_button(
+        list = list.push(pick_row(
             format!("room-{}", id.short()),
-            container(line).padding([SP_2, SP_2]),
-            Some(Message::OpenRoom(id)),
-            theme::button_row,
-            Length::Fill,
+            dot(online),
+            logic::room_label(id, state.as_ref()),
+            format!("{}:{}", key.server.host, key.server.port),
+            app.selected == Some(id),
+            Message::OpenRoom(id),
         ));
     }
     if app.rooms.is_empty() {
