@@ -8,7 +8,10 @@ use schwitzer_proto::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::mcp::McpStatus;
+use crate::omp_plugin::Coverage;
 use crate::sessions::LocalSession;
+use crate::theme::Dot;
 use crate::update::UpdateState;
 use crate::{settings, wsl};
 
@@ -526,6 +529,92 @@ pub fn next_check(
     Check::Ask(target)
 }
 
+/// One line of the status lamp's card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Status {
+    /// What the line is about: "Server", "MCP" or "omp".
+    pub name: &'static str,
+    pub dot: Dot,
+    /// The word beside the status bar's lamp while this line is the worst.
+    pub word: &'static str,
+    /// The line's detail in the card.
+    pub detail: String,
+}
+
+/// The status bar's lamp and its word: the worst of `statuses`, the first of equals; "ready"
+/// while every one is up.
+pub fn overall(statuses: &[Status]) -> (Dot, &'static str) {
+    let worst = statuses
+        .iter()
+        .reduce(|worst, s| if s.dot > worst.dot { s } else { worst });
+    match worst {
+        Some(s) if s.dot != Dot::Up => (s.dot, s.word),
+        _ => (Dot::Up, "ready"),
+    }
+}
+
+/// The agent port's line; `mcp` is `None` while its server starts, `port` is the port the
+/// settings ask for.
+pub fn mcp_status(mcp: Option<&McpStatus>, port: u16) -> Status {
+    let (dot, word, detail) = match mcp {
+        None => (Dot::Unknown, "starting", "Starting…".to_owned()),
+        Some(McpStatus::Listening { url }) => (Dot::Up, "ready", url.clone()),
+        Some(m @ McpStatus::PortInUse) => (
+            Dot::Down,
+            "port in use",
+            m.problem(port).unwrap_or_default(),
+        ),
+        Some(m @ McpStatus::Failed(_)) => {
+            (Dot::Down, "MCP failed", m.problem(port).unwrap_or_default())
+        }
+    };
+    Status {
+        name: "MCP",
+        dot,
+        word,
+        detail,
+    }
+}
+
+/// The omp plugin's line for the selected project's repos.
+pub fn omp_status(coverage: Coverage) -> Status {
+    let Coverage {
+        repos,
+        missing,
+        outdated,
+    } = coverage;
+    let (dot, word, detail) = if repos == 0 {
+        (Dot::Unknown, "no repo", "No repo linked".to_owned())
+    } else if outdated > 0 {
+        let detail = if repos == 1 {
+            "Plugin out of date".to_owned()
+        } else {
+            format!("Plugin out of date in {outdated} of {repos} repos")
+        };
+        (Dot::Attention, "plugin outdated", detail)
+    } else if missing > 0 {
+        let detail = if repos == 1 {
+            "Plugin missing".to_owned()
+        } else {
+            format!("Plugin missing in {missing} of {repos} repos")
+        };
+        (Dot::Attention, "plugin missing", detail)
+    } else {
+        let detail = if repos == 1 {
+            "Plugin current".to_owned()
+        } else {
+            format!("Plugin current in {repos} repos")
+        };
+        (Dot::Up, "ready", detail)
+    };
+    Status {
+        name: "omp",
+        dot,
+        word,
+        detail,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use schwitzer_proto::{Claim, Priority, Project};
@@ -534,6 +623,81 @@ mod tests {
 
     fn member(byte: u8) -> MemberId {
         MemberId([byte; 32])
+    }
+
+    fn status(dot: Dot, word: &'static str) -> Status {
+        Status {
+            name: "test",
+            dot,
+            word,
+            detail: String::new(),
+        }
+    }
+
+    #[test]
+    fn status_lamp_shows_the_worst_status_first_of_equals() {
+        let up = || status(Dot::Up, "ready");
+        assert_eq!(overall(&[up(), up(), up()]), (Dot::Up, "ready"));
+        assert_eq!(
+            overall(&[
+                status(Dot::Unknown, "connecting"),
+                up(),
+                status(Dot::Attention, "plugin missing"),
+            ]),
+            (Dot::Attention, "plugin missing")
+        );
+        assert_eq!(
+            overall(&[
+                up(),
+                status(Dot::Down, "port in use"),
+                status(Dot::Attention, "plugin missing"),
+            ]),
+            (Dot::Down, "port in use")
+        );
+        assert_eq!(
+            overall(&[
+                status(Dot::Unknown, "connecting"),
+                up(),
+                status(Dot::Unknown, "no repo"),
+            ]),
+            (Dot::Unknown, "connecting")
+        );
+    }
+
+    #[test]
+    fn omp_status_wants_a_hand_only_for_a_missing_or_outdated_plugin() {
+        let of = |repos, missing, outdated| {
+            let s = omp_status(Coverage {
+                repos,
+                missing,
+                outdated,
+            });
+            (s.dot, s.word, s.detail)
+        };
+        assert_eq!(
+            of(0, 0, 0),
+            (Dot::Unknown, "no repo", "No repo linked".to_owned())
+        );
+        assert_eq!(
+            of(1, 1, 0),
+            (
+                Dot::Attention,
+                "plugin missing",
+                "Plugin missing".to_owned()
+            )
+        );
+        assert_eq!(
+            of(2, 1, 1),
+            (
+                Dot::Attention,
+                "plugin outdated",
+                "Plugin out of date in 1 of 2 repos".to_owned()
+            )
+        );
+        assert_eq!(
+            of(2, 0, 0),
+            (Dot::Up, "ready", "Plugin current in 2 repos".to_owned())
+        );
     }
 
     #[test]

@@ -10,7 +10,7 @@ use schwitzer_proto::{Priority, Stage, Task};
 use super::Message;
 use super::icons::{Icon, Tone, icon};
 use super::logic;
-use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
+use crate::theme::{self, Dot, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 
 /// A text input with a widget id that submits with Enter.
 pub fn input<'a>(
@@ -201,6 +201,22 @@ pub fn with_tip<'a>(
     tip_at(content, tip, tooltip::Position::Top)
 }
 
+/// `content` with a card above it while the pointer rests on it: a tooltip that holds more
+/// than one line of text.
+pub fn with_card<'a>(
+    content: impl Into<Element<'a, Message>>,
+    card: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    tooltip(
+        content,
+        container(card).padding(SP_2).max_width(280),
+        tooltip::Position::Top,
+    )
+    .gap(SP_1)
+    .style(theme::tooltip)
+    .into()
+}
+
 /// `content` with a tooltip at `position`, 4 px away from it.
 fn tip_at<'a>(
     content: impl Into<Element<'a, Message>>,
@@ -278,10 +294,14 @@ pub fn pill<'a>(label: impl text::IntoFragment<'a>) -> Element<'a, Message> {
         .into()
 }
 
-/// A small round status dot: `Some(true)` up, `Some(false)` down, `None` unknown.
-pub fn dot<'a>(state: Option<bool>) -> Element<'a, Message> {
-    container(Space::new().width(8).height(8))
-        .style(theme::dot(state))
+/// Width of a status dot; a second line under a dot's label starts after it.
+pub const DOT: f32 = 8.0;
+
+/// A small round status dot; `Option<bool>` reads `Some(true)` up, `Some(false)` down, `None`
+/// unknown.
+pub fn dot<'a>(state: impl Into<Dot>) -> Element<'a, Message> {
+    container(Space::new().width(DOT).height(DOT))
+        .style(theme::dot(state.into()))
         .into()
 }
 

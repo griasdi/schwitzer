@@ -114,7 +114,7 @@ An opened task lets you:
 - add notes;
 - press the decision buttons its stage allows.
 
-The sessions panel shows the live agent sessions of the open project. The status bar shows your name, the server state and the agent port lamp.
+The sessions panel shows the live agent sessions of the open project. The status bar shows your name and one status lamp for the server, the agent port and the omp plugin; hover it to see each.
 
 |Shortcut|Action|
 |---|---|

@@ -311,7 +311,7 @@ A mint-and-green palette: a mint (day) or green-black (night) well, white or dar
 Each is a lamp tint; none is used as a surface.
 - **New, Outline Grey** (#7d8c80 / #7d9182): Proposed. Drawn as a *hollow* lamp.
 - **Idea, Faint Grey** (#869589 / #6f8374, `stage-idea`): an idea not yet written up into a proposal. Hollow lamp, fainter than New in Night: an idea is less than a proposal. Idea and New are the only stages not filled.
-- **Planning Amber** (#c98410 / #f0a630): Accepted and Planned without a ready plan; someone is writing or the plan is not final.
+- **Planning Amber** (#c98410 / #f0a630): Accepted and Planned without a ready plan; someone is writing or the plan is not final. Also the status dot when something wants a hand (the omp plugin missing or out of date).
 - **Pickable Blue** (#2f7fd6 / #5aa6f5): a plan is ready or approved and nobody builds it; the slab carries Approve on a ready plan, Pick on an approved one.
 - **Running Green** (#22a340 / #3dcb5c): a claimed task, Accepted with a plan claim or Ready with a build claim; someone is working. Also the online dot.
 - **Closed Muted** (#869589 / #738678): Done. Same day value as Idea; the filled form tells them apart.
@@ -342,7 +342,7 @@ Six hues, picked per member by a fixed hash, the same on every machine. Day: lig
 - **Shadow** (rgba(12, 28, 17, 0.18) / rgba(0, 0, 0, 0.45)): the shadow of floating cards (menu, tooltip).
 
 ### Named Rules
-**The Lamp Carries Status Rule.** Stage is shown by the lamp colour and nowhere else on a slab: no slab backgrounds, side stripes or coloured titles. A stage colour is never used for anything but a stage. The stage label (a pill) and the lamp say the same thing twice.
+**The Lamp Carries Status Rule.** Stage is shown by the lamp colour and nowhere else on a slab: no slab backgrounds, side stripes or coloured titles. A stage colour is never used for anything but a stage, except on the status dot (Running Green up, Planning Amber wants a hand). The stage label (a pill) and the lamp say the same thing twice.
 
 **The Three Greens Rule.** Green means three different things and they do not swap: *Action Green* fills actions, *Leaf Ink* writes text and the focus ring, *Running Green* marks a running agent, a lamp or a live connection. An action never takes the running hue and a lamp never takes the action hue.
 
@@ -439,7 +439,7 @@ Four kinds plus a segmented control; every button is wrapped in an id container 
 - **Name tag:** fully round, 2px 8px padding, 12px semibold; fill/text from the member's tag hue. Appears on slabs with a claim, in sessions, in notes.
 - **Pill:** quiet round label on the Mint Well with a Hairline border and Moss Grey 12px medium text: the stage label on a slab and in the head of the open task, group counts, "idle" on a session.
 - **Priority pill:** a pill with a 12px arrow and label: High (red arrow, red text), Low (muted arrow and text); none for Normal.
-- **Dot:** 8px round; running green up, red down, Sage Edge unknown. Server and agent port state in the status bar.
+- **Dot:** 8px round; Running Green up, Planning Amber wants a hand, red down, Sage Edge unknown. The status lamp in the status bar, members, rooms and the omp connection in Settings.
 
 ### Inputs / Fields
 - **Style:** raised fill, 1px Mint Hairline border, 8px radius, 8px padding, 14px text, muted placeholder; text editors the same.
@@ -452,7 +452,7 @@ Four kinds plus a segmented control; every button is wrapped in an id container 
 - **Header bar (main page):** raised, 8px padding. Left: the **room switcher**, or a muted "No room". Right: ghost invite icon (copy room key; disabled and muted without a room) and ghost settings icon with `Ctrl+,` tooltip. No button bar and no "New task" button: tasks are added with the `+` in the Proposals and Ideas group headers.
 - **Room switcher:** a pick list in the header bar, 14px semibold, flat on the raised bar until hovered (Mint Breath, Sage Edge border); opened = Mint Pressed with Leaf Ink border. Its menu is raised, hairline-bordered, 8px radius, selected entry in Action Green with on-primary text.
 - **Page header:** raised bar, 8px padding: ghost back button (tooltip "Back  (Esc)") and the title (20px semibold). Below it a hairline; footer, if any, is a raised bar under a hairline.
-- **Status bar:** 32px, raised, padding 4px 8px, on every page. Left to right: my name (12px semibold), spacer, server dot + "online/offline/connecting" (or a transient notice in Leaf Ink), agent port dot + "agent port". Both indicators have tooltips with detail.
+- **Status bar:** 32px, raised, padding 4px 8px, on every page. Left to right: my name (12px semibold), spacer, a transient notice in Leaf Ink when there is one, then the status lamp: a dot and a muted word for the worst of three statuses (server, MCP agent port, omp plugin in the selected project's repos; red before amber before grey, the first of equals; "ready" when all are green). The word hides while a notice shows. Hovering the lamp opens a card above it (tooltip style, 8px padding, at most 280px wide): per status a dot and its 12px semibold name ("Server", "MCP", "omp"), under the name its muted detail, statuses 8px apart.
 
 ### Sessions
 A 32px header ("Sessions" in the group-header style, count pill, optional ghost "Share mine"), then one static slab per session, 4px apart in 8px inset: member tag, session title (14px), a caption line (project, `#n` task link in Leaf Ink, tokens, "idle" pill) and the runtime on the right. Slabs are not buttons; they scroll with the rail beside them.

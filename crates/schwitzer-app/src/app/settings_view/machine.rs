@@ -5,6 +5,7 @@ use iced::{Alignment, Element, Length};
 
 use super::{Switch, projects_folders, repos, switch_row};
 use crate::app::icons::{Icon, Tone, icon};
+use crate::app::logic;
 use crate::app::pages::{frame, section};
 use crate::app::widgets::{dot, heading, input, muted, path_text, text_button};
 use crate::app::{App, Message};
@@ -17,7 +18,7 @@ use crate::update::{self, UpdateState};
 /// The omp connection: its port, the plugins in the shared repos, and where sessions are read.
 pub fn omp_page(app: &App) -> Element<'_, Message> {
     let port = app.settings.mcp_port;
-    let state = app.mcp.as_ref().map(McpStatus::dot);
+    let state = logic::mcp_status(app.mcp.as_ref(), port).dot;
     let status = if let Some(McpStatus::Listening { url }) = &app.mcp {
         format!("Connection on {url}")
     } else {

@@ -225,6 +225,31 @@ pub enum Lamp {
     Rejected,
 }
 
+/// What a status dot shows. The order runs from best to worst, so the worst of several is
+/// their maximum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Dot {
+    /// Up and ready.
+    Up,
+    /// Not known yet, or nothing to show.
+    Unknown,
+    /// Works, but wants a hand.
+    Attention,
+    /// Down.
+    Down,
+}
+
+impl From<Option<bool>> for Dot {
+    /// `Some(true)` up, `Some(false)` down, `None` unknown.
+    fn from(state: Option<bool>) -> Self {
+        match state {
+            Some(true) => Self::Up,
+            Some(false) => Self::Down,
+            None => Self::Unknown,
+        }
+    }
+}
+
 /// The tokens of `theme`.
 pub fn tokens(theme: &Theme) -> &'static Tokens {
     if theme.extended_palette().is_dark {
@@ -447,14 +472,16 @@ pub fn tooltip(theme: &Theme) -> container::Style {
     }
 }
 
-/// The online dot: green when up, red-ish when down, line colour when unknown.
-pub fn dot(state: Option<bool>) -> impl Fn(&Theme) -> container::Style {
+/// A status dot: running green up, planning amber when it wants a hand, red down, Sage Edge
+/// unknown.
+pub fn dot(state: Dot) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
         let t = tokens(theme);
         let fill = match state {
-            Some(true) => t.stage_running,
-            Some(false) => t.danger,
-            None => t.line_strong,
+            Dot::Up => t.stage_running,
+            Dot::Unknown => t.line_strong,
+            Dot::Attention => t.stage_planning,
+            Dot::Down => t.danger,
         };
         container::Style {
             background: Some(fill.into()),

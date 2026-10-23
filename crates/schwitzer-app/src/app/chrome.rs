@@ -2,15 +2,16 @@
 
 use std::fmt;
 
-use iced::widget::{Row, Space, container, row, text};
-use iced::{Alignment, Element, Length};
+use iced::widget::{Row, Space, column, container, row, text};
+use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::RoomId;
 
 use super::icons::{Icon, Tone, icon};
 use super::logic;
-use super::widgets::{self, bar_icon_button, bar_tip, dot, id_button, member_tag, muted, with_tip};
+use super::widgets::{
+    self, DOT, bar_icon_button, bar_tip, dot, id_button, member_tag, muted, with_card, with_tip,
+};
 use super::{App, Message};
-use crate::mcp::McpStatus;
 use crate::omp_plugin::Coverage;
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, TS_12};
 
@@ -198,27 +199,16 @@ pub fn members(app: &App) -> Option<Element<'_, Message>> {
     )
 }
 
-/// The status bar: my name, server and agent port.
+/// The status bar: my name, a notice, and one lamp for the server, the agent port and the omp
+/// plugin, whose card spells each out.
 pub fn status_bar(app: &App) -> Element<'_, Message> {
-    let server = app.selected_server_online();
-    let server_label = match server {
-        Some(true) => "online",
-        Some(false) => "offline",
-        None => "connecting",
-    };
-    let server_tip = app.selected_server_tip();
-    let (port_state, port_tip) = match &app.mcp {
-        None => (None, "Agent port starting".to_owned()),
-        Some(McpStatus::Listening { url }) => {
-            let coverage = Coverage::of(app.project_repos(), &app.plugins);
-            (coverage.ready().then_some(true), plugin_tip(url, coverage))
-        }
-        Some(McpStatus::PortInUse) => (
-            Some(false),
-            format!("Agent port {} is in use", app.settings.mcp_port),
-        ),
-        Some(McpStatus::Failed(e)) => (Some(false), format!("Agent port: {e}")),
-    };
+    let statuses = [
+        app.server_status(),
+        logic::mcp_status(app.mcp.as_ref(), app.settings.mcp_port),
+        logic::omp_status(Coverage::of(app.project_repos(), &app.plugins)),
+    ];
+    let (state, word) = logic::overall(&statuses);
+    let mut lamp = row![dot(state)].spacing(SP_1).align_y(Alignment::Center);
     let mut bar = row![
         text(&app.settings.name).size(TS_12).font(SEMIBOLD),
         Space::new().width(Length::Fill),
@@ -228,18 +218,11 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
     if let Some(notice) = &app.notice {
         bar = bar.push(text(&notice.text).size(TS_12).style(theme::text_ink));
     } else {
-        bar = bar.push(with_tip(
-            row![dot(server), muted(server_label)]
-                .spacing(SP_1)
-                .align_y(Alignment::Center),
-            server_tip,
-        ));
+        lamp = lamp.push(muted(word));
     }
-    bar = bar.push(with_tip(
-        row![dot(port_state), muted("agent port")]
-            .spacing(SP_1)
-            .align_y(Alignment::Center),
-        port_tip,
+    bar = bar.push(with_card(
+        container(lamp).id("status-lamp"),
+        status_card(statuses),
     ));
     container(bar)
         .padding([SP_1, SP_2])
@@ -250,25 +233,20 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
         .into()
 }
 
-/// The agent port's tooltip while it listens: its URL and what keeps the selected project's
-/// repos from being ready for omp agents.
-fn plugin_tip(url: &str, coverage: Coverage) -> String {
-    let Coverage {
-        repos,
-        missing,
-        outdated,
-    } = coverage;
-    if repos == 0 {
-        format!("Agent port: {url} · no repo linked")
-    } else if outdated > 0 && repos == 1 {
-        format!("Agent port: {url} · omp plugin out of date")
-    } else if outdated > 0 {
-        format!("Agent port: {url} · omp plugin out of date in {outdated} of {repos} repos")
-    } else if missing > 0 && repos == 1 {
-        format!("Agent port: {url} · omp plugin missing")
-    } else if missing > 0 {
-        format!("Agent port: {url} · omp plugin missing in {missing} of {repos} repos")
-    } else {
-        format!("Agent port: {url}")
-    }
+/// The lamp's card: per status its dot and name, and under the name its detail.
+fn status_card<'a>(statuses: [logic::Status; 3]) -> Element<'a, Message> {
+    column(statuses.into_iter().map(|s| {
+        column![
+            row![dot(s.dot), text(s.name).size(TS_12).font(SEMIBOLD)]
+                .spacing(SP_1)
+                .align_y(Alignment::Center),
+            container(muted(s.detail).wrapping(text::Wrapping::WordOrGlyph)).padding(Padding {
+                left: DOT + SP_1,
+                ..Padding::ZERO
+            }),
+        ]
+        .into()
+    }))
+    .spacing(SP_2)
+    .into()
 }

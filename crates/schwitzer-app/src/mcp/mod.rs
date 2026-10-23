@@ -25,11 +25,6 @@ pub enum McpStatus {
 }
 
 impl McpStatus {
-    /// The state of the status lamp: up while the server listens, down otherwise.
-    pub fn dot(&self) -> bool {
-        matches!(self, Self::Listening { .. })
-    }
-
     /// Why the server is down, for the pages that spell it out; `None` while it listens.
     /// `port` is the port the settings ask for.
     pub fn problem(&self, port: u16) -> Option<String> {

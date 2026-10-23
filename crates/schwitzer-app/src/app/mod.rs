@@ -47,7 +47,7 @@ use crate::omp_plugin::PluginState;
 use crate::sessions::{self, LocalSession};
 use crate::settings::{self, Settings};
 use crate::system_notify;
-use crate::theme::{self, SP_2};
+use crate::theme::{self, Dot, SP_2};
 use crate::update::{self, UpdateState};
 use crate::wsl;
 
@@ -1719,17 +1719,33 @@ impl App {
         self.servers.get(&key.server).map(|s| s.online)
     }
 
-    /// The status-bar tooltip of the selected room's server.
-    fn selected_server_tip(&self) -> String {
-        let Some(key) = self.selected_key() else {
-            return "No room selected".to_owned();
+    /// The status lamp's line for the selected room's server.
+    fn server_status(&self) -> logic::Status {
+        let (dot, word, detail) = match self.selected_key() {
+            None => (Dot::Unknown, "no room", "No room selected".to_owned()),
+            Some(key) => {
+                let server = format!("{}:{}", key.server.host, key.server.port);
+                match self.servers.get(&key.server) {
+                    Some(ServerStatus { online: true, .. }) => {
+                        (Dot::Up, "online", format!("{server} online"))
+                    }
+                    Some(ServerStatus { error: Some(e), .. }) => {
+                        (Dot::Down, "offline", format!("{server} offline: {e}"))
+                    }
+                    Some(_) => (Dot::Down, "offline", format!("{server} offline")),
+                    None => (
+                        Dot::Unknown,
+                        "connecting",
+                        format!("Connecting to {server}"),
+                    ),
+                }
+            }
         };
-        let server = format!("{}:{}", key.server.host, key.server.port);
-        match self.servers.get(&key.server) {
-            Some(ServerStatus { online: true, .. }) => format!("Server {server} online"),
-            Some(ServerStatus { error: Some(e), .. }) => format!("Server {server} offline: {e}"),
-            Some(_) => format!("Server {server} offline"),
-            None => format!("Connecting to {server}"),
+        logic::Status {
+            name: "Server",
+            dot,
+            word,
+            detail,
         }
     }
 

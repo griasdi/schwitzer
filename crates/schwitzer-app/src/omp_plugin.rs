@@ -194,11 +194,6 @@ impl Coverage {
         }
         coverage
     }
-
-    /// Whether every repo has the plugin, current; never without repos.
-    pub fn ready(&self) -> bool {
-        self.repos > 0 && self.missing == 0 && self.outdated == 0
-    }
 }
 
 /// Whether everything [`install`] would write into `repo` is already there.
@@ -586,22 +581,23 @@ mod tests {
     }
 
     #[test]
-    fn coverage_is_ready_only_when_every_repo_has_a_current_plugin() {
+    fn coverage_counts_missing_and_outdated_plugins() {
         let (a, b) = (PathBuf::from("/r/a"), PathBuf::from("/r/b"));
         let mut plugins = BTreeMap::new();
-        assert!(!Coverage::of(&[], &plugins).ready());
+        let of = |repos, missing, outdated| Coverage {
+            repos,
+            missing,
+            outdated,
+        };
+        assert_eq!(Coverage::of(&[], &plugins), of(0, 0, 0));
 
         plugins.insert(a.clone(), PluginState::Current);
-        let one_missing = Coverage::of(&[a.clone(), b.clone()], &plugins);
-        assert_eq!((one_missing.missing, one_missing.outdated), (1, 0));
-        assert!(!one_missing.ready());
+        assert_eq!(Coverage::of(&[a.clone(), b.clone()], &plugins), of(2, 1, 0));
 
         plugins.insert(b.clone(), PluginState::Outdated);
-        let one_outdated = Coverage::of(&[a.clone(), b.clone()], &plugins);
-        assert_eq!((one_outdated.missing, one_outdated.outdated), (0, 1));
-        assert!(!one_outdated.ready());
+        assert_eq!(Coverage::of(&[a.clone(), b.clone()], &plugins), of(2, 0, 1));
 
         plugins.insert(b.clone(), PluginState::Current);
-        assert!(Coverage::of(&[a, b], &plugins).ready());
+        assert_eq!(Coverage::of(&[a, b], &plugins), of(2, 0, 0));
     }
 }
