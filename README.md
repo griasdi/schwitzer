@@ -166,6 +166,7 @@ The data directory is:
 |`projects_dirs`|list of paths|filled on first start|folders searched for repos to suggest|
 |`wsl_distros`|list|empty|WSL distros whose folders were added to `projects_dirs` once|
 |`auto_update_plugins`|bool|`true`|rewrite out-of-date omp plugins automatically|
+|`update_channel`|`"release"` or `"dev"`|the build's own (dev for a dev build)|update channel; set in Settings → Updates|
 |`auto_install_updates`|bool|`true`|install a new release as soon as it is found|
 |`auto_restart_updates`|bool|`true`|restart after installing an update|
 |`notify_hand_ins`|bool|`false`|notify when your agents hand in a plan or finish a build|
@@ -180,9 +181,9 @@ Environment variables:
 
 ## Updates
 
-Release builds update themselves. Every 5 minutes they check for the highest version announced by the online servers of your rooms, or GitHub's latest release when no server announced one. Each download is checked against the sha256 digest GitHub lists. The app then swaps its own program file (the `.AppImage` itself when it runs from one), restarts, and reopens the page, task and unsaved text it showed.
+Release builds update themselves. Every 5 minutes they check for the highest version announced by the online servers of your rooms, or GitHub's latest release when no server announced one (the Release channel). On the Dev channel they instead take the newest build of GitHub's rolling `dev` prerelease, built from every commit on `main` that passed CI, and ignore announcements. Each download is checked against the sha256 digest GitHub lists. The app then swaps its own program file (the `.AppImage` itself when it runs from one), restarts, and reopens the page, task and unsaved text it showed.
 
-Settings → Updates has "Check now", "Install" and "Restart now", and the switches "Install updates" and "Restart after installing".
+Settings → Updates has the channel (Release or Dev; `update_channel` in `settings.toml`, a dev build starts on Dev), "Check now", "Install" and "Restart now", and the switches "Install updates" and "Restart after installing". Switching the channel installs the newest build of the new channel at once, even when it is older: going from Dev back to Release is a downgrade. There is no version picker.
 
 Keep the app (the AppImage too) in a folder you can write to. Builds from source without `--features self-update` never update.
 
@@ -213,8 +214,9 @@ stdout carries the single line `server url: weida://sha256:<fingerprint>@<public
 |`--public-host`|`127.0.0.1`|name clients dial; goes into the URL|
 |`--data-dir`|`./schwitzer-data`|database and identity; always pass it|
 |`--releases-url`|`https://api.github.com/repos/griasdi/schwitzer/releases`|GitHub API release list the server checks|
-|`--auto-update`|off|install new stable releases and restart into them|
-|`--version`, `--help`|||
+|`--auto-update`|off|install new releases of the `--update-channel` and restart into them|
+|`--update-channel`|`release`|with `--auto-update`: `release` installs new stable releases, `dev` every build of the rolling `dev` prerelease|
+|`--version`, `--help`||`--version` prints the build's version (`x.y.z-dev.n` for a dev build)|
 
 ### Network
 
@@ -276,9 +278,9 @@ Linger keeps the service running without a login and starts it at boot. systemd 
 
 ### Updates and protocol versions
 
-Every 2 minutes the server reads the release list and announces the newest stable release to the apps, whatever its own version. Apps with self-update install it.
+Every 2 minutes the server reads the release list and announces the newest stable release to the apps, whatever its own version and channel. Apps with self-update on the Release channel install it; apps on the Dev channel ignore it.
 
-With `--auto-update` the server installs the same release:
+With `--auto-update` the server installs the same release. With `--update-channel dev` it follows GitHub's rolling `dev` prerelease instead: every third check (about every 6 minutes) it reads `releases/tags/dev` and installs the highest `schwitzer-server-<version>-linux-<arch>.tar.gz` there, even a lower version than its own when it came from the other channel. The default `--update-channel release` is what stkn.org runs. Either way:
 
 - It downloads `schwitzer-server-<version>-linux-<arch>.tar.gz` (at most 64 MiB) and checks its size and sha256.
 - It swaps the file, closes connections (apps reconnect at once) and execs the new binary.

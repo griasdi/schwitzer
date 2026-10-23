@@ -9,7 +9,6 @@ use super::widgets::{chevron, heading, id_button, muted};
 use super::{App, Message};
 use crate::about::{self, Group};
 use crate::theme::{self, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
-use crate::update;
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let body = column![
@@ -20,7 +19,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             format!(
                 "Schwitzer {}. {}. You may use it under the MIT License or the Apache License \
                  2.0, at your option.",
-                update::CURRENT,
+                schwitzer_release::VERSION,
                 about::COPYRIGHT
             ),
         )),

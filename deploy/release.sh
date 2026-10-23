@@ -2,9 +2,10 @@
 # Releases Schwitzer: sets the workspace version (a "Release <version>" commit
 # when it changes), prints the release notes and pushes the tag v<version>,
 # which starts .github/workflows/release.yml: it builds the app for every
-# platform and the server for Linux and publishes the GitHub release. Apps and
-# servers started with `--auto-update` (stkn.org among them) update themselves
-# from it.
+# platform and the server for Linux and publishes the GitHub release. Apps on
+# the Release channel and servers started with `--auto-update` (stkn.org among
+# them) update themselves from it. The same workflow builds every commit on
+# main whose CI passed into the rolling `dev` prerelease, without this script.
 #
 # Run it on main, with HEAD pushed and no uncommitted changes to tracked files.
 #

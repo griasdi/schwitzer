@@ -61,6 +61,9 @@ pub struct Settings {
     pub auto_install_updates: bool,
     /// Whether the app restarts by itself once an update is installed.
     pub auto_restart_updates: bool,
+    /// The update channel the member chose; `None` follows this build's (dev for a dev build).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_channel: Option<schwitzer_release::Channel>,
     /// Whether a system notification tells this member that one of their agents handed in a
     /// plan or finished a build.
     pub notify_hand_ins: bool,
@@ -99,6 +102,7 @@ impl Default for Settings {
             auto_update_plugins: true,
             auto_install_updates: true,
             auto_restart_updates: true,
+            update_channel: None,
             notify_hand_ins: false,
             repos: BTreeMap::new(),
             commit_trailers: BTreeSet::new(),
@@ -503,6 +507,7 @@ mod tests {
         assert!(settings.auto_update_plugins);
         assert!(settings.auto_install_updates);
         assert!(settings.auto_restart_updates);
+        assert_eq!(settings.update_channel, None);
         assert!(!settings.notify_hand_ins);
     }
 
@@ -529,6 +534,7 @@ mod tests {
             auto_update_plugins: false,
             auto_install_updates: false,
             auto_restart_updates: false,
+            update_channel: Some(schwitzer_release::Channel::Dev),
             notify_hand_ins: true,
             repos: BTreeMap::from([(
                 format!("{}/1", "ab".repeat(32)),

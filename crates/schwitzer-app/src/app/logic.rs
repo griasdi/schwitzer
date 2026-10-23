@@ -6,13 +6,14 @@ use std::path::{Path, PathBuf};
 use schwitzer_proto::{
     ClaimToken, Decision, Member, MemberId, RoomId, RoomState, SessionInfo, Stage, Task, Work, caps,
 };
+use schwitzer_release::Channel;
 use serde::{Deserialize, Serialize};
 
 use crate::mcp::McpStatus;
 use crate::omp_plugin::Coverage;
 use crate::sessions::LocalSession;
 use crate::theme::Dot;
-use crate::update::UpdateState;
+use crate::update::{Lookup, UpdateState};
 use crate::{settings, wsl};
 
 /// A local session counts as idle when its files were last written this long ago.
@@ -536,20 +537,26 @@ pub fn ago(ms: u64) -> String {
 pub enum Check {
     /// A release already on offer is at least as new as the announced one.
     Skip,
-    /// The announced release is not newer than this build.
+    /// The announced release is not one this build installs.
     UpToDate,
-    /// Look up this release; `None` asks GitHub for its latest.
-    Ask(Option<semver::Version>),
+    /// Look up this release.
+    Ask(Lookup),
 }
 
-/// Decides a check from where the updater stands, whether the member asked for GitHub's
-/// latest release (`latest`), the release the servers announced and this build's version.
+/// Decides a check from where the updater stands, the channel it follows, whether the member
+/// asked for GitHub's latest release (`latest`), the release the servers announced and this
+/// build's version. The dev channel always asks for the newest dev build: announcements name
+/// stable releases only.
 pub fn next_check(
     updater: &UpdateState,
+    channel: Channel,
     latest: bool,
     announced: Option<semver::Version>,
     current: &semver::Version,
 ) -> Check {
+    if channel == Channel::Dev {
+        return Check::Ask(Lookup::Dev);
+    }
     let target = if latest { None } else { announced };
     if let UpdateState::Available { release, .. } = updater
         && !latest
@@ -557,10 +564,13 @@ pub fn next_check(
     {
         return Check::Skip;
     }
-    if target.as_ref().is_some_and(|version| version <= current) {
+    if target
+        .as_ref()
+        .is_some_and(|version| !schwitzer_release::is_update(current, version))
+    {
         return Check::UpToDate;
     }
-    Check::Ask(target)
+    Check::Ask(target.map_or(Lookup::Latest, Lookup::Version))
 }
 
 /// One line of the status lamp's card.
@@ -1233,34 +1243,60 @@ mod tests {
             release: release("1.2.0"),
             error: None,
         };
+        let release_channel = Channel::Release;
         // No announcement: GitHub is asked.
-        assert_eq!(next_check(&idle, false, None, &current), Check::Ask(None));
+        assert_eq!(
+            next_check(&idle, release_channel, false, None, &current),
+            Check::Ask(Lookup::Latest)
+        );
         // An announcement above this build is looked up; one at or below it is not.
         assert_eq!(
-            next_check(&idle, false, Some(v("1.1.0")), &current),
-            Check::Ask(Some(v("1.1.0")))
+            next_check(&idle, release_channel, false, Some(v("1.1.0")), &current),
+            Check::Ask(Lookup::Version(v("1.1.0")))
         );
         assert_eq!(
-            next_check(&idle, false, Some(v("1.0.0")), &current),
+            next_check(&idle, release_channel, false, Some(v("1.0.0")), &current),
+            Check::UpToDate
+        );
+        assert_eq!(
+            next_check(&idle, release_channel, false, Some(v("0.9.0")), &current),
             Check::UpToDate
         );
         // "Check now" ignores the announcement.
         assert_eq!(
-            next_check(&idle, true, Some(v("1.1.0")), &current),
-            Check::Ask(None)
+            next_check(&idle, release_channel, true, Some(v("1.1.0")), &current),
+            Check::Ask(Lookup::Latest)
         );
         // A release found above the announced one stays on offer, unless the member asks again.
         assert_eq!(
-            next_check(&offered, false, Some(v("1.1.0")), &current),
+            next_check(&offered, release_channel, false, Some(v("1.1.0")), &current),
             Check::Skip
         );
         assert_eq!(
-            next_check(&offered, true, Some(v("1.1.0")), &current),
-            Check::Ask(None)
+            next_check(&offered, release_channel, true, Some(v("1.1.0")), &current),
+            Check::Ask(Lookup::Latest)
         );
         assert_eq!(
-            next_check(&offered, false, Some(v("1.3.0")), &current),
-            Check::Ask(Some(v("1.3.0")))
+            next_check(&offered, release_channel, false, Some(v("1.3.0")), &current),
+            Check::Ask(Lookup::Version(v("1.3.0")))
         );
+        // A dev build on the release channel goes back to the announced stable release.
+        assert_eq!(
+            next_check(
+                &idle,
+                release_channel,
+                false,
+                Some(v("0.3.0")),
+                &v("0.3.1-dev.5")
+            ),
+            Check::Ask(Lookup::Version(v("0.3.0")))
+        );
+        // The dev channel asks for the dev release whatever the servers announced.
+        for announced in [None, Some(v("1.1.0")), Some(v("0.9.0"))] {
+            assert_eq!(
+                next_check(&idle, Channel::Dev, false, announced, &current),
+                Check::Ask(Lookup::Dev)
+            );
+        }
     }
 }

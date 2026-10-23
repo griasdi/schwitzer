@@ -15,15 +15,13 @@ use std::time::Duration;
 use futures::channel::oneshot;
 #[cfg(unix)]
 use schwitzer_release::replace;
-use schwitzer_release::{ApiError, Asset, PLATFORM, RELEASES_URL, sibling};
+use schwitzer_release::{ApiError, Asset, Channel, DEV_TAG, PLATFORM, RELEASES_URL, sibling};
 use serde::Deserialize;
 
 /// Whether this build updates itself: only the release builds from CI (`--features self-update`).
 pub const ENABLED: bool = cfg!(feature = "self-update");
 /// How often the app looks for a new release.
 pub const CHECK_INTERVAL: Duration = Duration::from_secs(300);
-/// The version of this build.
-pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 /// Replaces [`RELEASES_URL`], for a local test feed.
 const URL_ENV: &str = "SCHWITZER_UPDATE_URL";
 const MAX_RELEASE_JSON: u64 = 1 << 20;
@@ -97,9 +95,20 @@ pub struct Release {
     pub sha256: [u8; 32],
 }
 
-/// The version of this build, parsed.
-pub fn current() -> semver::Version {
-    CURRENT.parse().expect("CARGO_PKG_VERSION is semver")
+/// Which release a check asks GitHub for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lookup {
+    /// GitHub's latest stable release.
+    Latest,
+    /// The stable release the servers announced.
+    Version(semver::Version),
+    /// The newest build on the rolling `dev` prerelease.
+    Dev,
+}
+
+/// The channel this app follows when the member chose none: the one of this build.
+pub fn default_channel() -> Channel {
+    Channel::of(&schwitzer_release::version())
 }
 
 /// Where the updater stands, as the settings page shows it.
@@ -129,17 +138,22 @@ struct GitHubRelease {
     assets: Vec<Asset>,
 }
 
-/// The name of the release asset of `version` for `platform` and `package`.
-pub fn asset_name(version: &semver::Version, platform: &str, package: Package) -> String {
-    let ext = match package {
+/// The file extension of the release asset for `package`.
+fn package_ext(package: Package) -> &'static str {
+    match package {
         Package::AppImage => "AppImage",
         Package::Archive => ARCHIVE_EXT,
-    };
-    format!("schwitzer-{version}-{platform}.{ext}")
+    }
 }
 
-/// The release in GitHub's answer `json` for one release when it is newer than `current` and a
-/// stable version; its asset for `platform` and `package` must be there with a sha256 digest.
+/// The name of the release asset of `version` for `platform` and `package`.
+pub fn asset_name(version: &semver::Version, platform: &str, package: Package) -> String {
+    format!("schwitzer-{version}-{platform}.{}", package_ext(package))
+}
+
+/// The release in GitHub's answer `json` for one release when this build of `current` installs
+/// it ([`schwitzer_release::is_update`]) and it is a stable version; its asset for `platform` and
+/// `package` must be there with a sha256 digest.
 pub fn parse_release(
     json: &[u8],
     current: &semver::Version,
@@ -154,7 +168,7 @@ pub fn parse_release(
     let tag = latest.tag_name.as_str();
     let version = schwitzer_release::parse_tag(tag)
         .ok_or_else(|| format!("release tag {tag} is not a version"))?;
-    if !schwitzer_release::is_stable(&version) || version <= *current {
+    if !schwitzer_release::is_stable(&version) || !schwitzer_release::is_update(current, &version) {
         return Ok(None);
     }
     let name = asset_name(&version, platform, package);
@@ -172,16 +186,42 @@ pub fn parse_release(
     }))
 }
 
-/// Asks GitHub for release `version`, which a server announced, or for its latest release when no
-/// server announced one; `None` when it is not newer than this build.
-pub async fn check(
-    version: Option<semver::Version>,
+/// The newest build in GitHub's answer `json` for the rolling dev release when this build of
+/// `current` installs it; the version comes from the name of its asset for `platform` and
+/// `package`, which must have a sha256 digest.
+pub fn parse_dev(
+    json: &[u8],
+    current: &semver::Version,
+    platform: &str,
     package: Package,
 ) -> Result<Option<Release>, String> {
+    let dev: GitHubRelease =
+        serde_json::from_slice(json).map_err(|e| format!("unreadable release: {e}"))?;
+    if dev.draft {
+        return Ok(None);
+    }
+    let ext = package_ext(package);
+    let (version, asset) =
+        schwitzer_release::newest_asset(&dev.assets, "schwitzer-", &format!("-{platform}.{ext}"))
+            .ok_or_else(|| format!("the dev release has no schwitzer-<version>-{platform}.{ext}"))?;
+    if !schwitzer_release::is_update(current, &version) {
+        return Ok(None);
+    }
+    let download = asset.download_info()?;
+    Ok(Some(Release {
+        version,
+        url: download.url,
+        size: download.size,
+        sha256: download.sha256,
+    }))
+}
+
+/// Asks GitHub for the release `lookup` names; `None` when this build does not install it.
+pub async fn check(lookup: Lookup, package: Package) -> Result<Option<Release>, String> {
     let Some(platform) = PLATFORM else {
         return Err("No release is built for this platform".into());
     };
-    blocking(move || fetch_release(version, platform, package)).await
+    blocking(move || fetch_release(lookup, platform, package)).await
 }
 
 /// Downloads `release`, verifies it and puts it in place of `program`.
@@ -242,14 +282,15 @@ fn blocking<T: Send + 'static>(
 }
 
 fn fetch_release(
-    version: Option<semver::Version>,
+    lookup: Lookup,
     platform: &str,
     package: Package,
 ) -> Result<Option<Release>, String> {
     let base = std::env::var(URL_ENV).unwrap_or_else(|_| RELEASES_URL.to_owned());
-    let url = match &version {
-        Some(v) => format!("{base}/tags/v{v}"),
-        None => format!("{base}/latest"),
+    let url = match &lookup {
+        Lookup::Latest => format!("{base}/latest"),
+        Lookup::Version(v) => format!("{base}/tags/v{v}"),
+        Lookup::Dev => format!("{base}/tags/{DEV_TAG}"),
     };
     let json = schwitzer_release::api_get(
         USER_AGENT,
@@ -259,13 +300,18 @@ fn fetch_release(
         MAX_RELEASE_JSON,
     )
     .map_err(|e| match e {
-        ApiError::NotFound(_) => match version {
-            Some(v) => format!("release v{v} is not on GitHub"),
-            None => "no release is on GitHub".to_owned(),
+        ApiError::NotFound(_) => match &lookup {
+            Lookup::Latest => "no release is on GitHub".to_owned(),
+            Lookup::Version(v) => format!("release v{v} is not on GitHub"),
+            Lookup::Dev => "no dev release is on GitHub".to_owned(),
         },
         ApiError::Failed(message) => message,
     })?;
-    parse_release(&json, &current(), platform, package)
+    let current = schwitzer_release::version();
+    match lookup {
+        Lookup::Dev => parse_dev(&json, &current, platform, package),
+        Lookup::Latest | Lookup::Version(_) => parse_release(&json, &current, platform, package),
+    }
 }
 
 /// The program file in the release archive `bytes`.
@@ -448,6 +494,60 @@ mod tests {
         };
         assert_eq!(found(Package::AppImage), "https://x/img");
         assert_eq!(found(Package::Archive), "https://x/a");
+    }
+
+    #[test]
+    fn a_dev_build_goes_back_to_the_stable_release() {
+        let json = release_json(
+            "v0.3.0",
+            &asset_name(&v("0.3.0"), PLATFORM, Package::Archive),
+            Some(DIGEST),
+        );
+        let release = parse_release(&json, &v("0.3.1-dev.5"), PLATFORM, Package::Archive).unwrap();
+        assert_eq!(release.map(|r| r.version), Some(v("0.3.0")));
+    }
+
+    fn dev_json(names: &[String]) -> Vec<u8> {
+        let assets: Vec<_> = names
+            .iter()
+            .map(|name| serde_json::json!({"name": name, "browser_download_url": format!("https://x/{name}"), "size": 42, "digest": DIGEST}))
+            .collect();
+        serde_json::json!({"tag_name": "dev", "draft": false, "prerelease": true, "assets": assets})
+            .to_string()
+            .into_bytes()
+    }
+
+    #[test]
+    fn dev_takes_the_newest_build_of_the_package() {
+        let archive = |s| asset_name(&v(s), PLATFORM, Package::Archive);
+        let json = dev_json(&[
+            archive("0.3.1-dev.9"),
+            archive("0.3.1-dev.12"),
+            asset_name(&v("0.3.1-dev.13"), PLATFORM, Package::AppImage),
+            format!("schwitzer-server-0.3.1-dev.14-{PLATFORM}.tar.gz"),
+        ]);
+        let release = parse_dev(&json, &v("0.3.0"), PLATFORM, Package::Archive)
+            .unwrap()
+            .unwrap();
+        assert_eq!(release.version, v("0.3.1-dev.12"));
+        assert_eq!(
+            release.url,
+            format!("https://x/{}", archive("0.3.1-dev.12"))
+        );
+        assert_eq!(
+            parse_dev(&json, &v("0.3.1-dev.12"), PLATFORM, Package::Archive),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn dev_without_the_package_is_an_error_naming_it() {
+        let json = dev_json(&[asset_name(&v("0.3.1-dev.9"), PLATFORM, Package::Archive)]);
+        let error = parse_dev(&json, &v("0.3.0"), PLATFORM, Package::AppImage).unwrap_err();
+        assert_eq!(
+            error,
+            format!("the dev release has no schwitzer-<version>-{PLATFORM}.AppImage")
+        );
     }
 
     #[cfg(target_os = "linux")]

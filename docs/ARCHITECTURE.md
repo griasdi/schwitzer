@@ -37,10 +37,10 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |---|---|---|---|
 |`schwitzer` desktop app|each member's machine (Linux, Windows, macOS)|task list, decisions, settings; MCP server for the member's agents; session scanner; plugin keeper; self-update|room servers over weida/QUIC; omp through the plugin files and the MCP server; GitHub over HTTPS|
 |omp + the Schwitzer plugin|the member's machine, in every repo linked to a project|the coding agent; `/schwitzer plan · build · propose · idea` and the `schwitzer_*` tools|the app's MCP server on `127.0.0.1`|
-|`schwitzer-server`|anyone's host, UDP (default `0.0.0.0:7444`)|rooms, projects, tasks, claims, notes; fans out events; holds live sessions in memory; announces the newest release|apps over weida/QUIC; the GitHub releases API|
-|stkn.org|the shared server, `weida://…@stkn.org:7444`|`schwitzer-server --auto-update` as the systemd user unit `schwitzer-server`, set up once by the maintainer with `deploy/deploy.sh stkn`; it installs every published release itself; other people use it, so a protocol break cuts off their older apps until they update|apps|
+|`schwitzer-server`|anyone's host, UDP (default `0.0.0.0:7444`)|rooms, projects, tasks, claims, notes; fans out events; holds live sessions in memory; announces the newest stable release|apps over weida/QUIC; the GitHub releases API|
+|stkn.org|the shared server, `weida://…@stkn.org:7444`|`schwitzer-server --auto-update` as the systemd user unit `schwitzer-server`, set up once by the maintainer with `deploy/deploy.sh stkn`; it installs every published release itself (release channel); other people use it, so a protocol break cuts off their older apps until they update|apps|
 |GitHub Releases + releases API|github.com|release assets with sha256 digests; the server polls `RELEASES_URL` every 120 s, the app downloads from it|apps, servers|
-|GitHub Actions|github.com|`ci.yml` (gate), `release.yml` (assets on `v*` tags), `site.yml` (product site)|GitHub Releases, GitHub Pages|
+|GitHub Actions|github.com|`ci.yml` (gate), `release.yml` (assets on `v*` tags; the rolling `dev` prerelease after CI passed on `main`), `site.yml` (product site)|GitHub Releases, GitHub Pages|
 |Product site|`site/`, GitHub Pages|the product page and downloads|nothing|
 
 ## 3. Workspace and crates
@@ -50,7 +50,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `RoomState`, `DebugSession`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (8), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
 |`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `release.rs`, `update.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
 |`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
-|`schwitzer-release`|what both updaters share: `RELEASES_URL`, `PLATFORM`, `Asset`/`Download` with the `sha256:` digest parsing, `parse_tag`/`is_stable`, `api_get` and `download` (bounded HTTPS), `verify`, `extract_tar_gz`, `sibling`, `replace` (Unix swap)|iced, SQLite, weida, tokio|
+|`schwitzer-release`|what both updaters share: `RELEASES_URL`, `PLATFORM`, `Asset`/`Download` with the `sha256:` digest parsing, `parse_tag`/`is_stable`, `VERSION`/`version()` (this build's version: `SCHWITZER_VERSION` at build time, else the workspace version), `is_update` (newer always, older only across stable/dev), `Channel` (`release`/`dev`), `DEV_TAG`, `newest_asset`, `api_get` and `download` (bounded HTTPS), `verify`, `extract_tar_gz`, `sibling`, `replace` (Unix swap)|iced, SQLite, weida, tokio|
 |`schwitzer-app`|the `schwitzer` binary: UI, MCP server, plugin writer, session scanner, updater, WSL support|SQLite, weida: it talks to room servers only through `schwitzer-client`; the self-update speaks HTTPS to GitHub itself (§10)|
 
 ```mermaid
@@ -184,7 +184,8 @@ The client holds one `Requester` per endpoint, so two QUIC connections per serve
 |`--public-host`|`127.0.0.1`; must be the name clients dial|
 |`--data-dir`|`./schwitzer-data`|
 |`--releases-url`|`https://api.github.com/repos/griasdi/schwitzer/releases`|
-|`--auto-update`|off; installs new stable releases and restarts in place (see Auto update below)|
+|`--auto-update`|off; installs new releases of the `--update-channel` and restarts in place (see Auto update below)|
+|`--update-channel`|`release`; `release` or `dev`, requires `--auto-update`: stable releases, or every build of the rolling `dev` prerelease|
 
 stdout carries only the `server url: weida://sha256:…@host:port` line; logs go to stderr.
 
@@ -241,9 +242,9 @@ sequenceDiagram
 
 Enums are stored as explicit integers (`stage_to_int`: `Proposed 0`, `Accepted 1`, `Planned 2`, `Ready 3`, `Done 4`, `Rejected 5`, `Idea 6`), never as their postcard encoding.
 
-**Release check** (`release.rs`): every 120 s it reads the release list from `--releases-url`, picks the newest stable release (no draft, no prerelease, valid semver) and sends `Event::Release` to everyone when it changes, whatever the server's own version.
+**Release check** (`release.rs`): every 120 s it reads the release list from `--releases-url`, picks the newest stable release (no draft, no prerelease, valid semver) and sends `Event::Release` to everyone when it changes, whatever the server's own version and channel. On `--update-channel dev` it also asks `{releases-url}/tags/dev` (`newest_dev`) every third check, about every 6 minutes, which keeps a dev server under GitHub's 60 unauthenticated requests per hour; the dev release is no announcement.
 
-**Auto update** (`update.rs`, `--auto-update`, Linux x86_64 and aarch64): at startup `AutoUpdate::prepare` notes the program file and checks that its folder is writable, else the server refuses to start. When the release check sees a stable release newer than the server's own version, it takes `schwitzer-server-<version>-linux-<arch>.tar.gz` from that release's assets, downloads it (at most 64 MiB), checks size and the sha256 digest GitHub lists, swaps the binary in beside the program file (download, check and swap are `schwitzer-release`, shared with the app's updater) and reports the version; `Server::stopped` returns `Stop::Updated`, `main` shuts the endpoints down and execs the new program with the same arguments (same PID, so systemd sees no exit). A failed install of a version is retried after 30 minutes.
+**Auto update** (`update.rs`, `--auto-update`, Linux x86_64 and aarch64): at startup `AutoUpdate::prepare` notes the program file and checks that its folder is writable, else the server refuses to start. `--update-channel` picks the target: on `release` the newest stable release, on `dev` the highest `schwitzer-server-<version>-linux-<arch>.tar.gz` on the `dev` prerelease. When it is an update (`schwitzer_release::is_update`: newer, or of the other kind, so switching from dev to release goes back to the release), the server takes that `schwitzer-server-<version>-linux-<arch>.tar.gz` from the release's assets, downloads it (at most 64 MiB), checks size and the sha256 digest GitHub lists, swaps the binary in beside the program file (download, check and swap are `schwitzer-release`, shared with the app's updater) and reports the version; `Server::stopped` returns `Stop::Updated`, `main` shuts the endpoints down and execs the new program with the same arguments (same PID, so systemd sees no exit). A failed install of a version is retried after 30 minutes.
 
 **What the server holds.** Tasks, plans, notes, room and project names and member names, in plain text in its database; TLS protects them only on the wire. Shared sessions (title, model, token counts, linked task) and running debug sessions only in memory; debug log bytes and instructions it relays without keeping them. It never sees code, the MCP token, or sessions outside the repos a member linked.
 
@@ -295,7 +296,7 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |session scanner, 5 s|`sessions.rs`, see [9.7](#97-live-sessions)|
 |WSL distros, 5 s|Windows only: the running distros (`wsl.rs`)|
 |MCP server|while a token exists (`mcp/serve.rs`)|
-|update check, 300 s|feature `self-update` only (`update.rs`)|
+|update check, 300 s|feature `self-update` only (`update.rs`; on the dev channel it asks `releases/tags/dev`)|
 
 ```mermaid
 flowchart LR
@@ -329,6 +330,7 @@ flowchart LR
 |`projects_dirs`|folders whose subfolders are matched against project names|
 |`wsl_distros`|WSL distros whose default projects folders were entered|
 |`auto_update_plugins`, `auto_install_updates`, `auto_restart_updates`|all three default `true`|
+|`update_channel`|`"release"` or `"dev"`; absent follows this build's version (dev for a dev build); set on Settings → Updates|
 |`notify_hand_ins`|system notification when one of the member's agents hands in a plan or finishes a build; default `false`|
 |`commit_trailers`|`"<room id hex>/<project id>"` set: projects whose builds by the member's agents put `Schwitzer-Task: #<n>` into every commit; default empty|
 
@@ -514,29 +516,37 @@ flowchart TB
   classDef ext fill:#222d26,stroke:#627568,color:#e4eee6
   rel["deploy/release.sh x.y.z"]:::ext --> tag["tag v*"]:::ext
   tag --> yml["release.yml<br/>app: 4 platforms, --features self-update;<br/>server: Linux musl x86_64, aarch64;<br/>deploy/package.sh"]:::ext
+  main["push to main, CI green"]:::ext --> yml
   yml --> gh["GitHub release<br/>assets + sha256 digests,<br/>notes from deploy/changelog.sh"]:::ext
+  yml --> devgh["GitHub prerelease dev (rolling)<br/>x.y.z-dev.n assets, tag dev moved"]:::ext
   gh --> check["schwitzer-server release check, 2 min"]:::server
+  devgh --> devcheck["--update-channel dev: releases/tags/dev,<br/>every third check"]:::server
   check --> self["--auto-update: install the server asset,<br/>exec it in place (stkn.org)"]:::server
-  check --> ev["Event::Release"]:::server
-  ev --> target["App::release_target (app/updates.rs)<br/>highest announced by the kept rooms' servers,<br/>else GitHub latest"]:::app
+  devcheck --> self
+  check --> ev["Event::Release<br/>(newest stable, both channels)"]:::server
+  ev --> target["App::release_target (app/updates.rs)<br/>Release channel: highest announced by the kept rooms' servers,<br/>else GitHub latest"]:::app
   target --> upd["update::check<br/>releases/tags/v-version"]:::app
+  devgh --> devupd["Dev channel: update::check Lookup::Dev<br/>releases/tags/dev every 5 min,<br/>highest asset, announcements ignored"]:::app
   upd --> dl["download, at most 256 MiB<br/>sha256 = asset digest"]:::app
+  devupd --> dl
   dl --> swap["swap the program file<br/>the AppImage itself when run from one"]:::app
   swap --> resume["resume.json, restart"]:::app
   resume --> back["page, room, task, drafts<br/>and focus restored"]:::app
 ```
 
+- Channels: the Release channel follows the stable releases, the Dev channel the rolling `dev` prerelease. `release.yml` also runs on `workflow_run` of CI succeeding for a push to `main`: the `version` job computes `<major>.<minor>.<patch+1>-dev.<git rev-list --count HEAD>`, the build jobs get it as `SCHWITZER_VERSION` (`schwitzer_release::VERSION`, which replaces the Cargo package version as the build's version), and `publish-dev` force-moves the tag `dev`, edits or creates the `dev` prerelease and replaces its assets (uploads the new ones first, then deletes those of other versions). A dev build starts on the Dev channel; `update_channel` in `settings.toml` (Settings → Updates, Release/Dev) overrides that.
+- Switching the channel installs the newest build of the new channel at once, even an older one (`schwitzer_release::is_update`: newer always, older only across stable/dev); dev to release is the downgrade. There is no version picker, and a check result of the other channel is dropped. Dev-channel apps ignore `Event::Release`.
 - Asset names: `schwitzer-<version>-<platform>.<tar.gz|zip|AppImage>` for `linux-x86_64`, `linux-aarch64`, `macos-aarch64`, `windows-x86_64`, and a per-user Windows installer `…-setup.exe` (Inno Setup, `deploy/schwitzer.iss`).
 - The release API request, the download, the size and sha256 check, the `.tar.gz` member and the Unix swap are `schwitzer-release`, used by the app's `update.rs` and the server's `update.rs`; the app adds the zip, the AppImage, the Windows swap and the restart, the server the release list and the exec.
 - On Windows the running executable cannot be overwritten, so the swap goes through `.old` and `.new` files.
-- `SCHWITZER_UPDATE_URL` (app) and `--releases-url` (server) point at a local test feed. Builds without the feature `self-update` never update themselves.
+- `SCHWITZER_UPDATE_URL` (app) and `--releases-url` (server) point at a local test feed (the `dev` release is `<url>/tags/dev`). Builds without the feature `self-update` never update themselves.
 
 ## 11. Build, CI and deployment
 
 |Piece|What it does|
 |---|---|
 |`.github/workflows/ci.yml`|on every push to `main` and every pull request: the gate on ubuntu-24.04 (fmt, clippy with and without `schwitzer-app/remote`, tests), `cargo deny`, and app clippy plus the `update::` tests on macos-14 and windows-latest|
-|`.github/workflows/release.yml`|on `v*` tags: builds the app for four platforms and the server for Linux (musl, x86_64 and aarch64), packs them with `deploy/package.sh` and publishes the GitHub release|
+|`.github/workflows/release.yml`|on `v*` tags: builds the app for four platforms and the server for Linux (musl, x86_64 and aarch64), packs them with `deploy/package.sh` and publishes the GitHub release; also after CI succeeded for a push to `main`: the same builds at `<next patch>-dev.<commit count>` (`SCHWITZER_VERSION`) replace the assets of the rolling `dev` prerelease|
 |`.github/workflows/site.yml`|publishes `site/` to GitHub Pages|
 |`deploy/deploy.sh stkn`|the maintainer's installer, never run by agents: builds the committed `HEAD` (uncommitted work is ignored), copies it to stkn.org with rsync, installs the systemd user unit `schwitzer-server` on `[::]:7444` with `--auto-update`, restarts it only when the binary or unit changed, and waits for its `server url:` line; after that the service updates itself from each release|
 

@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 
 use super::logic::Group;
 use super::{App, Expanded, Forms, Page, PendingFocus, Placement, TaskDraft};
-use crate::update;
 
 /// The file in the data directory; written just before the restart, removed when read.
 const FILE: &str = "resume.json";
@@ -238,7 +237,7 @@ impl App {
     /// What the window shows now; `focus` is the focused widget.
     pub(super) fn snapshot(&self, focus: Option<&Id>, placement: Option<Placement>) -> Resume {
         Resume {
-            from_version: update::CURRENT.to_owned(),
+            from_version: schwitzer_release::VERSION.to_owned(),
             written_ms: now_ms(),
             page: self.page,
             selected: self.selected,
@@ -307,8 +306,8 @@ impl App {
             forms.mcp_port = std::mem::take(&mut self.forms.mcp_port);
         }
         self.forms = forms;
-        if r.from_version != update::CURRENT {
-            self.notify(&format!("Updated to {}", update::CURRENT));
+        if r.from_version != schwitzer_release::VERSION {
+            self.notify(&format!("Updated to {}", schwitzer_release::VERSION));
         }
         let focus = r
             .focus

@@ -237,9 +237,11 @@ pub enum Message {
     CheckUpdate,
     /// "Check now": asks GitHub for its latest release, whatever the servers announce.
     CheckLatestUpdate,
-    /// `latest` is true when the check asked GitHub's latest release because of "Check now".
+    /// `latest` is true when the check asked GitHub's latest release because of "Check now";
+    /// `channel` is the one the check followed.
     UpdateChecked {
         latest: bool,
+        channel: schwitzer_release::Channel,
         result: Result<Option<update::Release>, String>,
     },
     InstallUpdate,
@@ -249,6 +251,8 @@ pub enum Message {
     /// The focused widget and the window's place just before a restart.
     Restart(Option<iced::advanced::widget::Id>, Option<Placement>),
     AutoInstallUpdates(bool),
+    /// The member picked an update channel on the Updates page.
+    UpdateChannel(schwitzer_release::Channel),
     AutoRestartUpdates(bool),
     /// Whether the element to focus after a restart is laid out yet.
     ResumeFocus(bool),
@@ -1048,7 +1052,11 @@ impl App {
             }
             Message::CheckUpdate => self.check_update(false),
             Message::CheckLatestUpdate => self.check_update(true),
-            Message::UpdateChecked { latest, result } => self.update_checked(latest, result),
+            Message::UpdateChecked {
+                latest,
+                channel,
+                result,
+            } => self.update_checked(latest, channel, result),
             Message::InstallUpdate => match &self.updater {
                 UpdateState::Available { release, .. } => {
                     let release = release.clone();
@@ -1081,6 +1089,7 @@ impl App {
                     _ => Task::none(),
                 }
             }
+            Message::UpdateChannel(channel) => self.set_update_channel(channel),
             Message::AutoRestartUpdates(on) => {
                 self.settings.auto_restart_updates = on;
                 self.save_settings();

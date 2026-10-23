@@ -12,7 +12,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// GitHub API URL of the schwitzer release list.
@@ -73,6 +73,77 @@ pub fn parse_tag(tag: &str) -> Option<semver::Version> {
 /// Whether `version` is a stable one: no pre-release part.
 pub fn is_stable(version: &semver::Version) -> bool {
     version.pre.is_empty()
+}
+
+/// This build's version: `SCHWITZER_VERSION` at build time (the dev builds' `x.y.z-dev.n`),
+/// else the workspace version.
+pub const VERSION: &str = match option_env!("SCHWITZER_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+/// [`VERSION`], parsed.
+pub fn version() -> semver::Version {
+    VERSION.parse().expect("the build version is semver")
+}
+
+/// Whether a build of `current` installs `offered`, the newest build of the channel it follows:
+/// a newer one always; an older one only when it is of the other kind (stable or dev), which
+/// is how switching the channel goes back to it.
+pub fn is_update(current: &semver::Version, offered: &semver::Version) -> bool {
+    offered != current && (offered > current || is_stable(current) != is_stable(offered))
+}
+
+/// What updates follow: the stable releases, or the rolling `dev` prerelease built from every
+/// commit on main that passed CI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Channel {
+    #[default]
+    Release,
+    Dev,
+}
+
+/// The tag of the rolling dev prerelease.
+pub const DEV_TAG: &str = "dev";
+
+impl Channel {
+    /// The channel of a build of `version`: dev for a pre-release version.
+    pub fn of(version: &semver::Version) -> Channel {
+        if is_stable(version) {
+            Channel::Release
+        } else {
+            Channel::Dev
+        }
+    }
+}
+
+impl std::str::FromStr for Channel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "release" => Ok(Channel::Release),
+            "dev" => Ok(Channel::Dev),
+            _ => Err(format!("unknown channel {s}: release or dev")),
+        }
+    }
+}
+
+/// The highest version among the `assets` named `<prefix><version><suffix>`, with its asset.
+/// Names whose middle is no version are skipped.
+pub fn newest_asset<'a>(
+    assets: &'a [Asset],
+    prefix: &str,
+    suffix: &str,
+) -> Option<(semver::Version, &'a Asset)> {
+    assets
+        .iter()
+        .filter_map(|a| {
+            let middle = a.name.strip_prefix(prefix)?.strip_suffix(suffix)?;
+            Some((middle.parse::<semver::Version>().ok()?, a))
+        })
+        .max_by(|(a, _), (b, _)| a.cmp(b))
 }
 
 /// Why a request to the GitHub API failed; the message is the one to show.
@@ -236,6 +307,68 @@ mod tests {
                 sha256: [1; 32],
             })
         );
+    }
+
+    fn v(s: &str) -> semver::Version {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn is_update_goes_up_or_switches_kind() {
+        let cases = [
+            ("0.3.0", "0.4.0", true),
+            ("0.4.0", "0.3.0", false),
+            ("0.3.0", "0.3.0", false),
+            ("0.3.1-dev.5", "0.3.0", true),
+            ("0.4.0", "0.3.1-dev.9", true),
+            ("0.3.1-dev.9", "0.3.1-dev.8", false),
+            ("0.3.1-dev.8", "0.3.1-dev.12", true),
+        ];
+        for (current, offered, expected) in cases {
+            assert_eq!(
+                is_update(&v(current), &v(offered)),
+                expected,
+                "{current} -> {offered}"
+            );
+        }
+    }
+
+    fn named(name: &str) -> Asset {
+        Asset {
+            name: name.into(),
+            browser_download_url: format!("https://example.org/{name}"),
+            size: 1,
+            digest: None,
+        }
+    }
+
+    #[test]
+    fn newest_asset_takes_the_highest_matching_version() {
+        let assets = [
+            named("schwitzer-0.3.1-dev.9-linux-x86_64.tar.gz"),
+            named("schwitzer-0.3.1-dev.12-linux-x86_64.tar.gz"),
+            named("schwitzer-server-0.3.1-dev.13-linux-x86_64.tar.gz"),
+            named("schwitzer-0.3.1-dev.14-linux-x86_64.AppImage"),
+        ];
+        let (version, asset) = newest_asset(&assets, "schwitzer-", "-linux-x86_64.tar.gz").unwrap();
+        assert_eq!(version, v("0.3.1-dev.12"));
+        assert_eq!(asset.name, "schwitzer-0.3.1-dev.12-linux-x86_64.tar.gz");
+        assert_eq!(
+            newest_asset(&assets, "schwitzer-", "-macos-aarch64.zip"),
+            None
+        );
+    }
+
+    #[test]
+    fn channel_parses_and_follows_the_build() {
+        assert_eq!("release".parse(), Ok(Channel::Release));
+        assert_eq!("dev".parse(), Ok(Channel::Dev));
+        assert_eq!(
+            "nightly".parse::<Channel>(),
+            Err("unknown channel nightly: release or dev".to_string())
+        );
+        assert_eq!(Channel::of(&v("0.3.0")), Channel::Release);
+        assert_eq!(Channel::of(&v("0.3.1-dev.5")), Channel::Dev);
     }
 
     #[test]

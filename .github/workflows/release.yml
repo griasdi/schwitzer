@@ -1,15 +1,50 @@
+# Tags v* build every package and publish the GitHub release. Every commit on main whose CI
+# passed builds them too, with the version <next patch>-dev.<commits on main>, and replaces the
+# downloads of the rolling `dev` prerelease.
 name: Release
 on:
   push:
     tags: ['v*']
   # Builds every package without publishing, to check them before a tag.
   workflow_dispatch:
+  # Every commit on main whose CI passed: the rolling `dev` prerelease.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 permissions:
   contents: read
+concurrency:
+  group: release-${{ github.event_name == 'workflow_run' && 'dev' || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_run' }}
 env:
   CARGO_TERM_COLOR: always
 jobs:
+  version:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      sha: ${{ steps.v.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - id: v
+        shell: bash
+        run: |
+          base=$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)
+          if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
+            IFS=. read -r major minor patch <<<"$base"
+            version="$major.$minor.$((patch + 1))-dev.$(git rev-list --count HEAD)"
+          else
+            version=$base
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
   build:
+    needs: version
     strategy:
       fail-fast: true
       matrix:
@@ -23,6 +58,8 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.version.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev
@@ -34,16 +71,19 @@ jobs:
         shell: bash
         run: test "v$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)" = "$GITHUB_REF_NAME"
       - run: cargo build --release --locked -p schwitzer-app --features self-update
+        env:
+          SCHWITZER_VERSION: ${{ needs.version.outputs.version }}
       - if: runner.os == 'Windows'
         run: choco install innosetup -y --no-progress
       - shell: bash
-        run: deploy/package.sh ${{ matrix.platform }} "$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
+        run: deploy/package.sh ${{ matrix.platform }} "${{ needs.version.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: schwitzer-${{ matrix.platform }}
           path: dist/*
           if-no-files-found: error
   server:
+    needs: version
     strategy:
       fail-fast: true
       matrix:
@@ -53,6 +93,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.version.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.arch }}-unknown-linux-musl
@@ -64,14 +106,16 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: test "v$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)" = "$GITHUB_REF_NAME"
       - run: cargo build --release --locked -p schwitzer-server --target ${{ matrix.arch }}-unknown-linux-musl
-      - run: deploy/package.sh server-linux-${{ matrix.arch }} "$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
+        env:
+          SCHWITZER_VERSION: ${{ needs.version.outputs.version }}
+      - run: deploy/package.sh server-linux-${{ matrix.arch }} "${{ needs.version.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: schwitzer-server-linux-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
   publish:
-    needs: [build, server]
+    needs: [version, build, server]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     permissions:
@@ -103,3 +147,44 @@ jobs:
           Keep the app (the AppImage too) in a folder you can write to: it installs new releases in place and restarts.
           EOF
           gh release create "$GITHUB_REF_NAME" dist/* --title "Schwitzer ${GITHUB_REF_NAME#v}" --notes-file notes.md
+  publish-dev:
+    needs: [version, build, server]
+    if: github.event_name == 'workflow_run'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: schwitzer-*
+          merge-multiple: true
+          path: dist
+      - name: Move the dev tag and replace the downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          SHA: ${{ needs.version.outputs.sha }}
+        run: |
+          git tag -f dev "$SHA"
+          git push -f origin refs/tags/dev
+          cat >notes.md <<EOF
+          Development build $VERSION of $SHA: every commit on main that passed CI lands here. It can break.
+
+          The app installs it on the Dev update channel (Settings, Updates); a server with \`--auto-update --update-channel dev\`. Downloads have the same names as in a release.
+          EOF
+          if gh release view dev >/dev/null 2>&1; then
+            gh release edit dev --prerelease --title "Schwitzer dev" --notes-file notes.md
+          else
+            gh release create dev --prerelease --title "Schwitzer dev" --notes-file notes.md --verify-tag
+          fi
+          # New files first, then the old ones go: a check in between sees both and takes the newest.
+          gh release upload dev dist/* --clobber
+          gh release view dev --json assets --jq '.assets[].name' | while read -r name; do
+            case $name in
+            *"-$VERSION-"*) ;;
+            *) gh release delete-asset dev "$name" --yes ;;
+            esac
+          done

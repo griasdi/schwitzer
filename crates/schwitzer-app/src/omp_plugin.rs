@@ -215,7 +215,7 @@ fn matches(repo: &Path, config: &PluginConfig) -> bool {
             lock.get("plugins")
                 .and_then(|plugins| plugins.get(NAME))
                 .and_then(|entry| entry.get("version"))
-                == Some(&json!(env!("CARGO_PKG_VERSION")))
+                == Some(&json!(schwitzer_release::VERSION))
         }
         _ => false,
     }
@@ -225,7 +225,7 @@ fn matches(repo: &Path, config: &PluginConfig) -> bool {
 fn package() -> Value {
     json!({
         "name": NAME,
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": schwitzer_release::VERSION,
         "private": true,
         "description": "Plan Schwitzer tasks from omp. Written by the Schwitzer app; edits are overwritten.",
         "omp": { "extensions": ["./index.ts"] },
@@ -245,7 +245,7 @@ pub fn install(repo: &Path, config: &PluginConfig) -> io::Result<()> {
     {
         let old = plugins.get(NAME);
         let entry = json!({
-            "version": env!("CARGO_PKG_VERSION"),
+            "version": schwitzer_release::VERSION,
             "enabledFeatures": old.and_then(|o| o.get("enabledFeatures")).cloned().unwrap_or(Value::Null),
             "enabled": old.and_then(|o| o.get("enabled")).and_then(Value::as_bool).unwrap_or(true),
         });
@@ -373,7 +373,7 @@ mod tests {
                 "plugins": { "schwitzer": {
                     "enabled": true,
                     "enabledFeatures": null,
-                    "version": env!("CARGO_PKG_VERSION"),
+                    "version": schwitzer_release::VERSION,
                 } },
                 "settings": {},
             })
@@ -403,7 +403,7 @@ mod tests {
         assert_eq!(lock["plugins"]["schwitzer"]["enabled"], json!(false));
         assert_eq!(
             lock["plugins"]["schwitzer"]["version"],
-            json!(env!("CARGO_PKG_VERSION"))
+            json!(schwitzer_release::VERSION)
         );
     }
 

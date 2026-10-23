@@ -1053,7 +1053,7 @@ impl Tools {
 impl ServerHandler for Tools {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("schwitzer", env!("CARGO_PKG_VERSION")))
+            .with_server_info(Implementation::new("schwitzer", schwitzer_release::VERSION))
             .with_instructions(
                 "schwitzer is a task manager for coding agents and their humans. A room holds \
                  projects, and every task belongs to one of them. Anyone proposes a task \

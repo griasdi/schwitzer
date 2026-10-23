@@ -1,19 +1,20 @@
 //! The pages of this machine: the omp connection, the projects folders, and the updates.
 
-use iced::widget::{column, row, text};
+use iced::widget::{column, container, row, text};
 use iced::{Alignment, Element, Length};
+use schwitzer_release::Channel;
 
 use super::{Switch, projects_folders, repos, switch_row};
 use crate::app::icons::{Icon, Tone, icon};
 use crate::app::logic;
 use crate::app::pages::{frame, section};
-use crate::app::widgets::{dot, heading, input, muted, path_text, text_button};
+use crate::app::widgets::{dot, heading, id_button, input, muted, path_text, text_button};
 use crate::app::{App, Message};
 use crate::mcp::McpStatus;
 use crate::omp_plugin::count_outdated;
 use crate::settings;
-use crate::theme::{self, SP_2, SP_4, TS_14};
-use crate::update::{self, UpdateState};
+use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
+use crate::update::UpdateState;
 
 /// The omp connection: its port, the plugins in the shared repos, and where sessions are read.
 pub fn omp_page(app: &App) -> Element<'_, Message> {
@@ -171,6 +172,33 @@ pub fn updates_page(app: &App) -> Element<'_, Message> {
             ),
         ),
     };
+    let dev = app.channel() == Channel::Dev;
+    let segment = |id: &'static str, label: &'static str, value: Channel| {
+        id_button(
+            id,
+            container(text(label).size(TS_12).font(MEDIUM)).padding([SP_1, SP_3]),
+            Some(Message::UpdateChannel(value)),
+            theme::button_segment(app.channel() == value),
+            Length::Shrink,
+        )
+    };
+    let channel = column![
+        row![
+            heading("Channel").width(Length::Fill),
+            segment("channel-release", "Release", Channel::Release),
+            segment("channel-dev", "Dev", Channel::Dev),
+        ]
+        .spacing(SP_1)
+        .align_y(Alignment::Center),
+        muted(if dev {
+            "A build of every commit on main that passed CI; it can break. Switching here \
+             installs the newest dev build."
+        } else {
+            "Tested releases. Switching here from dev installs the newest release, even when it \
+             is older."
+        }),
+    ]
+    .spacing(SP_2);
     let version = column![
         heading("This version"),
         row![
@@ -183,8 +211,13 @@ pub fn updates_page(app: &App) -> Element<'_, Message> {
         .spacing(SP_2)
         .align_y(Alignment::Center),
         muted(format!(
-            "Schwitzer {}. Check now asks GitHub for its latest release.",
-            update::CURRENT
+            "Schwitzer {}. Check now asks GitHub for {}.",
+            schwitzer_release::VERSION,
+            if dev {
+                "the newest dev build"
+            } else {
+                "its latest release"
+            }
         )),
     ]
     .spacing(SP_2);
@@ -195,8 +228,12 @@ pub fn updates_page(app: &App) -> Element<'_, Message> {
                 "auto-install-toggle",
                 Switch::Flat,
                 "Install updates",
-                "The newest release your servers announce, or GitHub's latest one; checked every \
-                 5 minutes.",
+                if dev {
+                    "The newest dev build on GitHub; checked every 5 minutes."
+                } else {
+                    "The newest release your servers announce, or GitHub's latest one; checked \
+                     every 5 minutes."
+                },
                 app.settings.auto_install_updates,
                 Message::AutoInstallUpdates,
             ),
@@ -212,6 +249,6 @@ pub fn updates_page(app: &App) -> Element<'_, Message> {
         .spacing(2),
     ]
     .spacing(SP_2);
-    let body = column![section(version), section(automatic)].spacing(SP_4);
+    let body = column![section(channel), section(version), section(automatic)].spacing(SP_4);
     frame("updates-page", "Updates", body.into(), None)
 }

@@ -1,13 +1,13 @@
-//! `--auto-update`: installs the newest stable release's server binary for this platform over the
-//! running program file and restarts into it in place (exec, same PID), so a supervisor such as
-//! systemd sees no exit.
+//! `--auto-update`: installs the newest server binary of the channel it follows (stable releases,
+//! or the rolling `dev` prerelease) for this platform over the running program file and restarts
+//! into it in place (exec, same PID), so a supervisor such as systemd sees no exit.
 
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use schwitzer_release::{Asset, Download, sibling};
+use schwitzer_release::{Asset, Channel, Download, sibling};
 
 use crate::USER_AGENT;
 
@@ -54,12 +54,13 @@ fn unpack_and_replace(exe: &Path, _bytes: &[u8]) -> Result<(), String> {
 pub struct AutoUpdate {
     exe: PathBuf,
     platform: &'static str,
+    channel: Channel,
 }
 
 impl AutoUpdate {
     /// Checks at startup what an update needs later: a server release for this platform and a
-    /// program folder this process may write to.
-    pub fn prepare() -> anyhow::Result<AutoUpdate> {
+    /// program folder this process may write to. Updates follow `channel`.
+    pub fn prepare(channel: Channel) -> anyhow::Result<AutoUpdate> {
         let Some(platform) = platform() else {
             bail!("no server release is built for this platform");
         };
@@ -69,7 +70,21 @@ impl AutoUpdate {
         std::fs::write(&probe, b"")
             .and_then(|()| std::fs::remove_file(&probe))
             .with_context(|| format!("cannot write beside {}", exe.display()))?;
-        Ok(AutoUpdate { exe, platform })
+        Ok(AutoUpdate {
+            exe,
+            platform,
+            channel,
+        })
+    }
+
+    /// The channel the updates follow.
+    pub(crate) fn channel(&self) -> Channel {
+        self.channel
+    }
+
+    /// The platform name in the server's release assets.
+    pub(crate) fn platform(&self) -> &'static str {
+        self.platform
     }
 
     /// Downloads the server of release `version` for this platform from its `assets`, verifies it

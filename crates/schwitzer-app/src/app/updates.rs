@@ -1,12 +1,20 @@
 //! The self-update: which release to look for, the check, the install and what follows.
 
 use iced::Task;
+use schwitzer_release::Channel;
 
 use super::logic::{self, Check};
 use super::{App, Message};
 use crate::update::{self, UpdateState};
 
 impl App {
+    /// The update channel: the member's choice, else the one of this build.
+    pub(crate) fn channel(&self) -> Channel {
+        self.settings
+            .update_channel
+            .unwrap_or_else(update::default_channel)
+    }
+
     /// The release to update to: the highest one the online servers of the kept rooms announced;
     /// `None` makes the check ask GitHub for its latest release.
     pub(super) fn release_target(&self) -> Option<semver::Version> {
@@ -18,18 +26,19 @@ impl App {
             .cloned()
     }
 
-    /// Checks again when the target moved.
+    /// Checks again when the target moved; announcements steer only the release channel.
     pub(super) fn follow_release(&mut self, before: Option<semver::Version>) -> Task<Message> {
-        if update::ENABLED && self.release_target() != before {
+        if update::ENABLED && self.channel() == Channel::Release && self.release_target() != before
+        {
             self.check_update(false)
         } else {
             Task::none()
         }
     }
 
-    /// Looks up the release the servers announced, or GitHub's latest one when none did or
-    /// `latest` asks for it, unless a check or an install is under way, or an update waits for
-    /// its restart.
+    /// Looks up the newest dev build on the dev channel; on the release channel the release the
+    /// servers announced, or GitHub's latest one when none did or `latest` asks for it. Not while
+    /// a check or an install is under way, or an update waits for its restart.
     pub(super) fn check_update(&mut self, latest: bool) -> Task<Message> {
         if !update::ENABLED
             || matches!(
@@ -44,38 +53,48 @@ impl App {
             return Task::none();
         };
         let package = program.package;
+        let channel = self.channel();
         match logic::next_check(
             &self.updater,
+            channel,
             latest,
             self.release_target(),
-            &update::current(),
+            &schwitzer_release::version(),
         ) {
             Check::Skip => Task::none(),
             Check::UpToDate => {
                 self.updater = UpdateState::UpToDate;
                 Task::none()
             }
-            Check::Ask(target) => {
+            Check::Ask(lookup) => {
                 self.updater = UpdateState::Checking;
-                Task::perform(update::check(target, package), move |result| {
-                    Message::UpdateChecked { latest, result }
+                Task::perform(update::check(lookup, package), move |result| {
+                    Message::UpdateChecked {
+                        latest,
+                        channel,
+                        result,
+                    }
                 })
             }
         }
     }
 
+    /// The answer to a check for `channel`; dropped when the channel changed since, whose own
+    /// check is under way.
     pub(super) fn update_checked(
         &mut self,
         latest: bool,
+        channel: Channel,
         result: Result<Option<update::Release>, String>,
     ) -> Task<Message> {
-        if self.updater != UpdateState::Checking {
+        if self.updater != UpdateState::Checking || channel != self.channel() {
             return Task::none();
         }
         match result {
             Ok(None) => self.updater = UpdateState::UpToDate,
             Ok(Some(release))
                 if !latest
+                    && channel == Channel::Release
                     && self
                         .release_target()
                         .is_some_and(|target| target != release.version) =>
@@ -111,6 +130,26 @@ impl App {
         };
         self.updater = UpdateState::Installing(release.clone());
         Task::perform(update::install(release, program), Message::UpdateInstalled)
+    }
+
+    /// Follows `channel` from now on and looks up its newest build at once; with auto-install
+    /// that installs it, also an older one.
+    pub(super) fn set_update_channel(&mut self, channel: Channel) -> Task<Message> {
+        if self.settings.update_channel == Some(channel) {
+            return Task::none();
+        }
+        self.settings.update_channel = Some(channel);
+        self.save_settings();
+        if matches!(
+            self.updater,
+            UpdateState::Checking
+                | UpdateState::UpToDate
+                | UpdateState::Failed(_)
+                | UpdateState::Available { .. }
+        ) {
+            self.updater = UpdateState::Idle;
+        }
+        self.check_update(false)
     }
 
     pub(super) fn update_installed(

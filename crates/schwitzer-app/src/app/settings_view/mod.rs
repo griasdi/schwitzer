@@ -121,7 +121,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             "settings-about",
             Icon::Info,
             "About Schwitzer",
-            Status::Plain(format!("Version {} · licenses", update::CURRENT)),
+            Status::Plain(format!("Version {} · licenses", schwitzer_release::VERSION)),
             Message::OpenLicenses,
         ),
     ]
@@ -237,9 +237,11 @@ fn folders_status(app: &App) -> Status {
 /// The version and what the update check found.
 fn updates_status(app: &App) -> Status {
     match &app.updater {
-        UpdateState::Idle => Status::Plain(format!("Version {}", update::CURRENT)),
+        UpdateState::Idle => Status::Plain(format!("Version {}", schwitzer_release::VERSION)),
         UpdateState::Checking => Status::Plain("Checking…".to_owned()),
-        UpdateState::UpToDate => Status::Plain(format!("Up to date · {}", update::CURRENT)),
+        UpdateState::UpToDate => {
+            Status::Plain(format!("Up to date · {}", schwitzer_release::VERSION))
+        }
         UpdateState::Failed(_) => Status::Problem("Cannot check for updates".to_owned()),
         UpdateState::Available {
             release,

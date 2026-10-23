@@ -10,7 +10,11 @@ use schwitzer_server::{AutoUpdate, Options, Stop, start};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "schwitzer-server", version, about = "schwitzer server")]
+#[command(
+    name = "schwitzer-server",
+    version = schwitzer_release::VERSION,
+    about = "schwitzer server"
+)]
 struct Cli {
     /// UDP address to listen on.
     #[arg(long, default_value = "0.0.0.0:7444")]
@@ -24,10 +28,15 @@ struct Cli {
     /// GitHub API URL of the release list the server checks for app updates.
     #[arg(long, default_value = RELEASES_URL)]
     releases_url: String,
-    /// Install new stable releases from GitHub and restart into them in place (Linux x86_64 and
-    /// aarch64; the program's folder must be writable).
+    /// Install new releases from GitHub (see --update-channel) and restart into them in place
+    /// (Linux x86_64 and aarch64; the program's folder must be writable).
     #[arg(long)]
     auto_update: bool,
+    /// With --auto-update: `release` installs new stable releases, `dev` every build of the
+    /// rolling `dev` prerelease. Switching installs the other channel's newest build, even an
+    /// older one.
+    #[arg(long, default_value = "release", requires = "auto_update")]
+    update_channel: schwitzer_release::Channel,
 }
 
 #[tokio::main]
@@ -41,7 +50,7 @@ async fn main() -> ExitCode {
         .with_writer(std::io::stderr)
         .init();
     let auto_update = if cli.auto_update {
-        match AutoUpdate::prepare() {
+        match AutoUpdate::prepare(cli.update_channel) {
             Ok(update) => Some(update),
             Err(e) => {
                 tracing::error!("--auto-update: {e:#}");
