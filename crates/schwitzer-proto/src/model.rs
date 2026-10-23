@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ClaimToken, MemberId, RoomId};
+use crate::{ClaimToken, DebugId, MemberId, RoomId, caps};
 
 // Postcard is positional: enum variants are append-only.
 
@@ -135,6 +135,38 @@ pub struct SessionInfo {
     pub projects: Vec<u64>,
 }
 
+/// A running debug session of a room; held in the server's memory only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebugSession {
+    pub id: DebugId,
+    /// Stays the master while offline.
+    pub master: MemberId,
+    /// The members currently joined, in join order; the master while joined.
+    pub members: Vec<MemberId>,
+    pub started_ms: u64,
+}
+
+/// An instruction of the master to participants; a human there decides whether an agent runs it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebugInstruction {
+    pub id: u64,
+    pub from: MemberId,
+    pub to: Vec<MemberId>,
+    pub text: String,
+    pub sent_ms: u64,
+}
+
+/// Whether `name` may name a debug stream (a file in the out folder): 1 to
+/// [`caps::DEBUG_STREAM`] bytes of `[A-Za-z0-9._-]`, not starting with `.`.
+pub fn valid_stream_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= caps::DEBUG_STREAM
+        && !name.starts_with('.')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomState {
     pub id: RoomId,
@@ -144,4 +176,6 @@ pub struct RoomState {
     pub members: Vec<Member>,
     pub tasks: Vec<Task>,
     pub sessions: Vec<(MemberId, Vec<SessionInfo>)>,
+    /// The running debug session; the server keeps it in memory only.
+    pub debug: Option<DebugSession>,
 }

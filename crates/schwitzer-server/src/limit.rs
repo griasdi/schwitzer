@@ -1,5 +1,5 @@
 //! Per-member request budget, in memory: a member may send `BURST` requests at once and
-//! regains one per `INTERVAL`.
+//! regains one per `INTERVAL`. Debug logs have their own budget in bytes, [`ByteBudget`].
 
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
@@ -40,6 +40,43 @@ impl Limits {
             return Err(ahead - allowed);
         }
         full_at.insert(member, at + INTERVAL);
+        Ok(())
+    }
+}
+
+/// Debug log bytes a member regains per second.
+const LOG_RATE: u64 = 256 * 1024;
+/// Debug log bytes a member may send at once.
+const LOG_BURST: u64 = 1024 * 1024;
+
+/// Per-member budget of debug log bytes: `LOG_BURST` at once, `LOG_RATE` per second
+/// (GCRA over bytes).
+#[derive(Default)]
+pub struct ByteBudget {
+    full_at: Mutex<HashMap<MemberId, Instant>>,
+}
+
+impl ByteBudget {
+    /// Spends `bytes` of `member`'s budget at `now`; `Err(wait)` when that would overdraw it,
+    /// with the time until it is allowed. A refused request spends nothing.
+    pub fn take(&self, member: MemberId, bytes: usize, now: Instant) -> Result<(), Duration> {
+        let tolerance = Duration::from_nanos(LOG_BURST * 1_000_000_000 / LOG_RATE);
+        let cost = Duration::from_nanos(bytes as u64 * 1_000_000_000 / LOG_RATE);
+        let mut full_at = self.full_at.lock().unwrap_or_else(PoisonError::into_inner);
+        if full_at.len() >= PRUNE_AT {
+            full_at.retain(|_, at| *at > now);
+        }
+        let at = full_at
+            .get(&member)
+            .copied()
+            .filter(|at| *at > now)
+            .unwrap_or(now);
+        let new = at + cost;
+        let ahead = new - now;
+        if ahead > tolerance {
+            return Err(ahead - tolerance);
+        }
+        full_at.insert(member, new);
         Ok(())
     }
 }
@@ -100,5 +137,21 @@ mod tests {
             Ok(())
         );
         assert_eq!(limits.full_at.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn log_bytes_have_a_burst_then_a_rate() {
+        let budget = ByteBudget::default();
+        let t0 = Instant::now();
+        let m = MemberId([1; 32]);
+        assert_eq!(budget.take(m, 1024 * 1024, t0), Ok(()));
+        assert_eq!(
+            budget.take(m, 64 * 1024, t0),
+            Err(Duration::from_millis(250))
+        );
+        let t1 = t0 + Duration::from_secs(1);
+        assert_eq!(budget.take(m, 256 * 1024, t1), Ok(()));
+        assert!(budget.take(m, 1, t1).is_err());
+        assert_eq!(budget.take(MemberId([2; 32]), 1024 * 1024, t1), Ok(()));
     }
 }

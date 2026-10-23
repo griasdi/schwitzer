@@ -19,9 +19,7 @@ pub use room::{room_page, rooms_page};
 use super::icons::{Icon, Tone, icon};
 use super::logic::{self, folder_label};
 use super::pages::{frame, section};
-use super::widgets::{
-    heading, icon_button, icon_text_button, id_button, input, muted, path_text, text_button,
-};
+use super::widgets::{heading, icon_button, id_button, input, muted, path_text, text_button};
 use super::{App, FolderFor, Message, Page};
 use crate::omp_plugin::{Coverage, count_outdated};
 use crate::settings::tilde;
@@ -457,36 +455,6 @@ fn group_label<'a>(label: &'a str) -> Element<'a, Message> {
     container(text(label).size(TS_12).font(SEMIBOLD))
         .padding([0.0, SP_1])
         .into()
-}
-
-/// A danger action asked in place: the question, Cancel, and the action.
-fn confirm_row<'a>(
-    question: String,
-    confirm_id: &'static str,
-    glyph: Icon,
-    label: &'static str,
-    action: Message,
-) -> Element<'a, Message> {
-    row![
-        text(question).size(TS_14).font(MEDIUM).width(Length::Fill),
-        text_button(
-            "confirm-cancel",
-            "Cancel",
-            Some(Message::CancelConfirm),
-            theme::button_secondary
-        ),
-        icon_text_button(
-            confirm_id,
-            glyph,
-            Tone::Danger,
-            label,
-            Some(action),
-            theme::button_danger
-        ),
-    ]
-    .spacing(SP_2)
-    .align_y(Alignment::Center)
-    .into()
 }
 
 /// "1 repo", "2 repos".

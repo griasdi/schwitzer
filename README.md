@@ -52,8 +52,9 @@ omp agents work through the omp plugin the app installs into linked repositories
 - `/schwitzer build new`: open a fresh session with `/schwitzer build` in its editor.
 - `/schwitzer propose [text]`: the agent drafts a proposal (or writes up an open idea), asks, then sends it.
 - `/schwitzer idea <text>`: note an idea in a project right away, without an agent turn.
+- `/schwitzer debug [stop]`: start or join the room's debug session, or leave it (see below).
 
-The plugin also gives the agent these tools: `schwitzer_list_rooms`, `schwitzer_list_tasks`, `schwitzer_get_task`, `schwitzer_propose`, `schwitzer_add_idea`, `schwitzer_claim`, `schwitzer_submit_plan`, `schwitzer_finish`, `schwitzer_unclaim`, `schwitzer_add_note`.
+The plugin also gives the agent these tools: `schwitzer_list_rooms`, `schwitzer_list_tasks`, `schwitzer_get_task`, `schwitzer_propose`, `schwitzer_add_idea`, `schwitzer_claim`, `schwitzer_submit_plan`, `schwitzer_finish`, `schwitzer_unclaim`, `schwitzer_add_note`, `schwitzer_debug_status`, `schwitzer_debug_instruct`.
 
 The app writes the plugin into a linked repo under `.omp/plugins/` (`node_modules/schwitzer/{index.ts,package.json,schwitzer.json}` and `omp-plugins.lock.json`). The app does not edit `.gitignore`, so these files show up as untracked until you ignore them.
 
@@ -64,6 +65,14 @@ The plugin talks to the running app at `http://127.0.0.1:<mcp_port>/mcp` (defaul
 "Task number in commits" (project page, "Your agents") makes omp hold back a `git commit` during a build claim until the message carries `Schwitzer-Task: #<number>`.
 
 Details in [the plugin's README](crates/schwitzer-app/omp-plugin/README.md).
+
+### Debug sessions
+
+Members test a networked app together, for example a stream from one machine to another, with omp and Schwitzer running on each machine. One member starts a debug session in a room (the bug button in the header, or `/schwitzer debug`) and becomes its master; others join it the same way.
+
+- Every participant's app streams the files in its `out` folder (`<data dir>/debug/<session>/out`) to all other participants, whose apps write them to `in/<member>-<id>/`. Write a log there, for example `your-app 2>&1 | tee <out>/app.log`. Who joins late gets only what is written after.
+- The master's agent sends instructions with `schwitzer_debug_instruct`. On a participant's machine an instruction appears as a dialog in the omp session that ran `/schwitzer debug`; only "Put it into the editor" places it there, and the human presses Enter. Nothing runs by itself.
+- The server relays logs and instructions in memory while the session runs and stores nothing. The master leaving ends the session for everyone.
 
 ### Live sessions and privacy
 

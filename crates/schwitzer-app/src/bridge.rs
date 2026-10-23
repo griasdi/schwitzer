@@ -32,7 +32,8 @@ impl Hash for ClientKey {
 }
 
 /// Stream of client events as application messages, starting with the events buffered
-/// since start-up. A receiver that lags asks for a [`Message::Resync`].
+/// since start-up. A receiver that lags asks for a [`Message::Resync`]. Debug log bytes stay
+/// out of the message loop: the debug worker reads them from its own receiver.
 pub fn client_events(key: &ClientKey) -> impl Stream<Item = Message> + use<> {
     let client = key.client.clone();
     let backlog = key
@@ -44,6 +45,7 @@ pub fn client_events(key: &ClientKey) -> impl Stream<Item = Message> + use<> {
         let mut rx = backlog.unwrap_or_else(|| client.subscribe());
         loop {
             let message = match rx.recv().await {
+                Ok(ClientEvent::DebugLog { .. }) => continue,
                 Ok(event) => Message::Client(event),
                 Err(RecvError::Lagged(_)) => Message::Resync,
                 Err(RecvError::Closed) => break,

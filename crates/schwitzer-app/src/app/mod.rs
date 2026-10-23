@@ -1,6 +1,7 @@
 //! The application: state, messages and `update`. The views live in the submodules.
 
 mod chrome;
+mod debug_view;
 mod gpu;
 mod icons;
 mod licenses_view;
@@ -30,7 +31,7 @@ use iced::widget::operation::AbsoluteOffset;
 use iced::widget::selector::{self, Target};
 use iced::widget::{column, container, markdown, operation, stack, text_editor};
 use iced::{Element, Length, Subscription, Task, Theme};
-use schwitzer_client::{Client, ClientError, ClientEvent};
+use schwitzer_client::{Client, ClientError, ClientEvent, InboxEntry};
 use schwitzer_proto::{
     Decision, Priority, Project, Request, Response, RoomId, RoomKey, RoomState, ServerAddr,
     SessionInfo, Stage, Task as RoomTask, Work, caps, now_ms,
@@ -42,6 +43,7 @@ use self::icons::{Icon, Tone};
 use self::logic::Group;
 use self::rooms::Rooms;
 use crate::bridge::{self, ClientKey, call, fire};
+use crate::debug;
 use crate::mcp::{self, McpStatus};
 use crate::omp_plugin::PluginState;
 use crate::sessions::{self, LocalSession};
@@ -137,6 +139,17 @@ pub enum Message {
     /// Forgets the selected room on this machine without asking its server, which does not
     /// answer; after the member confirmed it.
     RemoveRoom,
+    /// Starts a debug session in the selected room.
+    DebugStart,
+    /// Joins the selected room's debug session.
+    DebugJoin,
+    /// Leaves the selected room's debug session; the master ends it, after confirming.
+    DebugLeave,
+    DebugDone(Result<(), String>),
+    /// A debug worker's counts changed.
+    DebugTraffic(debug::Traffic),
+    /// Puts a text of the debug page on the clipboard.
+    CopyDebug(String),
     NameInput(String),
     SubmitName,
     McpPortInput(String),
@@ -283,6 +296,8 @@ pub enum Page {
     ProjectsFolders,
     /// This build's version and the self-update.
     Updates,
+    /// The debug session of the selected room.
+    Debug,
 }
 
 impl Page {
@@ -290,7 +305,7 @@ impl Page {
     fn parent(self) -> Option<Page> {
         match self {
             Page::Main | Page::FirstStart => None,
-            Page::Settings => Some(Page::Main),
+            Page::Settings | Page::Debug => Some(Page::Main),
             _ => Some(Page::Settings),
         }
     }
@@ -302,6 +317,7 @@ pub enum Confirm {
     LeaveRoom,
     RemoveRoom,
     DeleteProject,
+    EndDebug,
 }
 
 /// The one element open in place in the task list.
@@ -495,6 +511,10 @@ pub struct App {
     now_ms: u64,
     /// The graphics device-lost rule: when the probe is shown and when to restart.
     gpu: gpu::Watch,
+    /// What each joined debug session's worker moved.
+    debug_traffic: HashMap<RoomId, debug::Traffic>,
+    /// The debug instructions each room's session brought.
+    debug_inbox: HashMap<RoomId, Vec<InboxEntry>>,
 }
 
 impl App {
@@ -608,6 +628,8 @@ impl App {
             resume_focus: None,
             now_ms: now,
             gpu: gpu::Watch::new(now),
+            debug_traffic: HashMap::new(),
+            debug_inbox: HashMap::new(),
         };
         app.read_project_dirs();
         if update::ENABLED
@@ -665,9 +687,24 @@ impl App {
         ];
         if let Some(token) = &self.mcp_token {
             subs.push(
-                mcp::subscription(self.client.clone(), self.settings.mcp_port, token.clone())
-                    .map(Message::Mcp),
+                mcp::subscription(
+                    self.client.clone(),
+                    self.settings.mcp_port,
+                    token.clone(),
+                    self.data_dir.clone(),
+                )
+                .map(Message::Mcp),
             );
+        }
+        let me = self.client.member();
+        for (id, _, state) in self.rooms.iter() {
+            let Some(state) = state else { continue };
+            if let Some(session) = state.debug.as_ref().filter(|s| s.members.contains(&me)) {
+                subs.push(
+                    debug::subscription(self.client.clone(), self.data_dir.clone(), id, session.id)
+                        .map(Message::DebugTraffic),
+                );
+            }
         }
         if update::ENABLED {
             subs.push(iced::time::every(update::CHECK_INTERVAL).map(|_| Message::CheckUpdate));
@@ -697,6 +734,7 @@ impl App {
             Page::Omp => settings_view::omp_page(self),
             Page::ProjectsFolders => settings_view::folders_page(self),
             Page::Updates => settings_view::updates_page(self),
+            Page::Debug => debug_view::page(self),
         };
         let window = container(
             page.push(container(body).height(Length::Fill))
@@ -1233,6 +1271,44 @@ impl App {
                 self.sync_rooms();
                 self.notify("Room removed from this app");
                 self.leave_room_page()
+            }
+            Message::DebugStart | Message::DebugJoin | Message::DebugLeave => {
+                let leave = matches!(message, Message::DebugLeave);
+                if leave {
+                    self.confirm = None;
+                }
+                let Some(room) = self.selected else {
+                    return Task::none();
+                };
+                let client = self.client.clone();
+                match message {
+                    Message::DebugStart => call(
+                        async move { client.debug_start(room).await.map(drop) },
+                        Message::DebugDone,
+                    ),
+                    Message::DebugJoin => call(
+                        async move { client.debug_join(room).await.map(drop) },
+                        Message::DebugDone,
+                    ),
+                    _ => call(
+                        async move { client.debug_leave(room).await },
+                        Message::DebugDone,
+                    ),
+                }
+            }
+            Message::DebugDone(result) => {
+                if let Err(e) = result {
+                    self.banner = Some(e);
+                }
+                Task::none()
+            }
+            Message::DebugTraffic(traffic) => {
+                self.debug_traffic.insert(traffic.room, traffic);
+                Task::none()
+            }
+            Message::CopyDebug(text) => {
+                self.notify("Copied");
+                iced::clipboard::write(text)
             }
             Message::NameInput(s) => {
                 self.forms.name = s;
@@ -2303,9 +2379,11 @@ impl App {
                 let me = self.client.member();
                 let notify = self.settings.notify_hand_ins;
                 let mut shown_notices: Vec<Task<Message>> = Vec::new();
+                let mut debug_notice = None;
                 match self.rooms.set_state(id, *state) {
                     Some(old) => {
                         if let (Some(old), Some(state)) = (old, self.rooms.state(id)) {
+                            debug_notice = logic::debug_change(&old, state, &me);
                             let now = now_ms();
                             for n in logic::approved_between(&old, state) {
                                 self.handoffs.insert((id, n), now);
@@ -2326,6 +2404,12 @@ impl App {
                     }
                     None => self.sync_rooms(),
                 }
+                if let Some((text, ended)) = debug_notice {
+                    if ended {
+                        self.debug_traffic.remove(&id);
+                    }
+                    self.notify(&text);
+                }
                 if self.selected == Some(id) && self.selected_project().map(|p| p.id) != shown {
                     self.sync_project_form();
                 }
@@ -2340,6 +2424,32 @@ impl App {
                 self.sync_rooms();
                 self.follow_release(before)
             }
+            ClientEvent::DebugInbox { room } => {
+                let entries = self.client.debug_inbox(room);
+                let seen: HashSet<u64> = self
+                    .debug_inbox
+                    .get(&room)
+                    .map(|old| old.iter().map(|e| e.instruction.id).collect())
+                    .unwrap_or_default();
+                let fresh = entries
+                    .iter()
+                    .rev()
+                    .find(|e| e.for_me && !seen.contains(&e.instruction.id))
+                    .map(|e| {
+                        let from = self.rooms.state(room).map_or_else(
+                            || e.instruction.from.short(),
+                            |s| logic::member_name(&s.members, &e.instruction.from),
+                        );
+                        format!("Debug instruction #{} from {from}", e.instruction.id)
+                    });
+                self.debug_inbox.insert(room, entries);
+                if let Some(text) = fresh {
+                    self.notify(&text);
+                }
+                Task::none()
+            }
+            // The bridge keeps log bytes out of the message loop; the debug worker reads them.
+            ClientEvent::DebugLog { .. } => Task::none(),
             ClientEvent::Release { server, version } => {
                 let Ok(version) = version.parse::<semver::Version>() else {
                     tracing::warn!(

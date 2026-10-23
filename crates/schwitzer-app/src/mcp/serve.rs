@@ -4,6 +4,7 @@
 use std::hash::{Hash, Hasher};
 use std::io::ErrorKind;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use axum::extract::State;
@@ -26,13 +27,14 @@ const MAX_BODY_BYTES: usize = 256 * 1024;
 /// Pause between bind attempts while the port cannot be bound.
 const BIND_RETRY: Duration = Duration::from_secs(10);
 
-/// Identity of the server subscription: a new port or token restarts it. The client is not
-/// part of the identity (one per process). No `Debug`, so the token never prints.
+/// Identity of the server subscription: a new port, token or data directory restarts it. The
+/// client is not part of the identity (one per process). No `Debug`, so the token never prints.
 #[derive(Clone)]
 struct McpKey {
     client: Client,
     port: u16,
     token: String,
+    data_dir: PathBuf,
 }
 
 impl Hash for McpKey {
@@ -40,16 +42,24 @@ impl Hash for McpKey {
         0x7363_6d70_u32.hash(h);
         self.port.hash(h);
         self.token.hash(h);
+        self.data_dir.hash(h);
     }
 }
 
 /// The MCP server as an iced subscription; it reports its status and serves until dropped.
-pub fn subscription(client: Client, port: u16, token: String) -> Subscription<McpStatus> {
+/// `data_dir` is where the debug folders live.
+pub fn subscription(
+    client: Client,
+    port: u16,
+    token: String,
+    data_dir: PathBuf,
+) -> Subscription<McpStatus> {
     Subscription::run_with(
         McpKey {
             client,
             port,
             token,
+            data_dir,
         },
         serve,
     )
@@ -79,7 +89,7 @@ fn serve(key: &McpKey) -> impl Stream<Item = McpStatus> + use<> {
         };
         let ct = CancellationToken::new();
         let _stop = ct.clone().drop_guard();
-        let tools = Tools::new(key.client.clone());
+        let tools = Tools::new(key.client.clone(), key.data_dir.clone());
         // The default config keeps rmcp's loopback Host allowlist.
         let service = StreamableHttpService::new(
             move || Ok(tools.clone()),

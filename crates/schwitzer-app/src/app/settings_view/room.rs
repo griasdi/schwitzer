@@ -5,11 +5,11 @@ use iced::widget::{column, container, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::RoomId;
 
-use super::{confirm_row, view};
+use super::view;
 use crate::app::icons::{Icon, Tone, icon};
 use crate::app::pages::{frame, section};
 use crate::app::widgets::{
-    dot, heading, icon_text_button, id_button, input, muted, path_text, text_button,
+    confirm_row, dot, heading, icon_text_button, id_button, input, muted, path_text, text_button,
 };
 use crate::app::{App, Confirm, Message, logic};
 use crate::theme::{self, SP_2, SP_4, TS_14};

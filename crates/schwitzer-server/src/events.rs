@@ -135,6 +135,10 @@ async fn handle(state: State, mut request: IncomingRequest) {
                         },
                     );
                 }
+                for (room, session) in st.debug.remove_member_everywhere(&member) {
+                    let ids = store::room_member_ids(conn, &room)?;
+                    st.hub.publish(&ids, &Event::Debug { room, session });
+                }
                 st.announce(conn, &member)
             })
             .await;

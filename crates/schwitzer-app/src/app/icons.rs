@@ -52,6 +52,7 @@ icons! {
     Info => "info",
     Download => "download",
     DoorOpen => "door-open",
+    Bug => "bug",
 }
 
 /// How an icon is coloured; resolved against the theme when drawn.

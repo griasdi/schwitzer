@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Decision, MemberId, Priority, Project, RoomId, RoomToken, SessionInfo, Stage, Task, Work,
+    DebugId, DebugInstruction, DebugSession, Decision, MemberId, Priority, Project, RoomId,
+    RoomToken, SessionInfo, Stage, Task, Work,
 };
 
 // Postcard is positional: enum variants are append-only.
@@ -127,6 +128,34 @@ pub enum Request {
         task: u64,
         waits_for: Vec<u64>,
     },
+    /// Starts a debug session in the room with the caller as master.
+    DebugStart {
+        room: RoomId,
+    },
+    DebugJoin {
+        room: RoomId,
+        session: DebugId,
+    },
+    /// A participant leaves; the master leaving ends the session for everyone.
+    DebugLeave {
+        room: RoomId,
+        session: DebugId,
+    },
+    /// Bytes of the caller's file `stream`, starting at byte `offset` of that file.
+    DebugLog {
+        room: RoomId,
+        session: DebugId,
+        stream: String,
+        offset: u64,
+        data: Vec<u8>,
+    },
+    /// `to` empty: every participant except the master.
+    DebugInstruct {
+        room: RoomId,
+        session: DebugId,
+        to: Vec<MemberId>,
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,6 +166,8 @@ pub enum Response {
     Task(Task),
     Claimed(Option<Task>),
     Project(Project),
+    Debug(DebugSession),
+    DebugInstruction(DebugInstruction),
 }
 
 /// Shown verbatim by the UI and over MCP.
@@ -170,6 +201,16 @@ pub enum ApiError {
     ProjectNotEmpty,
     #[error("the task waits for #{0}, which is not done yet")]
     Waiting(u64),
+    #[error("no debug session is running in this room")]
+    NoDebugSession,
+    #[error("a debug session is already running in this room")]
+    DebugRunning,
+    #[error("you have not joined the debug session")]
+    NotInDebugSession,
+    #[error("only the master of the debug session can do this")]
+    NotDebugMaster,
+    #[error("too much log data, try again in {0} s")]
+    LogBudget(u64),
 }
 
 pub type Reply = Result<Response, ApiError>;

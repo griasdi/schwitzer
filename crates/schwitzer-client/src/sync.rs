@@ -13,7 +13,7 @@ use weida::TransferMeta;
 
 use crate::backoff::Backoff;
 use crate::conn::{ServerConn, Session};
-use crate::{Client, ClientError, ClientEvent, Entry, lock};
+use crate::{Client, ClientError, ClientEvent, Entry, INBOX_CAP, InboxEntry, lock};
 
 const FIRST_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
@@ -139,6 +139,7 @@ impl Client {
                     ready = true;
                     backoff.reset();
                     self.drop_unseen(&conn.addr, &seen);
+                    self.rejoin_debug(&conn.addr);
                 }
                 event => self.apply(&conn.addr, event, &mut seen),
             }
@@ -216,6 +217,56 @@ impl Client {
                 });
                 return;
             }
+            Event::DebugLog {
+                room,
+                session,
+                from,
+                stream,
+                offset,
+                data,
+            } => {
+                self.emit(ClientEvent::DebugLog {
+                    room,
+                    session,
+                    from,
+                    stream,
+                    offset,
+                    data: data.into(),
+                });
+                return;
+            }
+            Event::DebugInstruction {
+                room,
+                session,
+                instruction,
+            } => {
+                let entry = InboxEntry {
+                    for_me: instruction.to.contains(&self.member()),
+                    taken: false,
+                    instruction,
+                };
+                {
+                    let mut inboxes = lock(&self.0.debug_inbox);
+                    let inbox = inboxes.entry(room).or_insert((session, Vec::new()));
+                    if inbox.0 != session {
+                        *inbox = (session, Vec::new());
+                    }
+                    inbox.1.push(entry);
+                    if inbox.1.len() > INBOX_CAP {
+                        let excess = inbox.1.len() - INBOX_CAP;
+                        inbox.1.drain(..excess);
+                    }
+                }
+                self.emit(ClientEvent::DebugInbox { room });
+                return;
+            }
+            Event::Debug { room, session } => {
+                if !self.update(room, |state| state.debug = session) {
+                    return;
+                }
+                self.sync_debug(room);
+                room
+            }
             Event::Room(state) => {
                 seen.insert(state.id);
                 let room = state.id;
@@ -226,6 +277,7 @@ impl Client {
                         state,
                     },
                 );
+                self.sync_debug(room);
                 room
             }
             Event::Task { room, task } => {
@@ -285,6 +337,63 @@ impl Client {
                 true
             }
             None => false,
+        }
+    }
+
+    /// Drops the inbox and the rejoin wish of `room` when they belong to a session that is
+    /// not the room's current one.
+    fn sync_debug(&self, room: RoomId) {
+        let current = lock(&self.0.rooms)
+            .get(&room)
+            .and_then(|entry| entry.state.debug.as_ref().map(|s| s.id));
+        let dropped = {
+            let mut inboxes = lock(&self.0.debug_inbox);
+            match inboxes.get(&room) {
+                Some((id, entries)) if Some(*id) != current => {
+                    let had = !entries.is_empty();
+                    inboxes.remove(&room);
+                    had
+                }
+                _ => false,
+            }
+        };
+        {
+            let mut rejoin = lock(&self.0.debug_rejoin);
+            if rejoin.get(&room).is_some_and(|id| Some(*id) != current) {
+                rejoin.remove(&room);
+            }
+        }
+        if dropped {
+            self.emit(ClientEvent::DebugInbox { room });
+        }
+    }
+
+    /// Joins again the debug sessions of `server`'s rooms that this member had joined and
+    /// lost through a disconnect: their human already agreed to them.
+    fn rejoin_debug(&self, server: &ServerAddr) {
+        let me = self.member();
+        let pending: Vec<(RoomId, schwitzer_proto::DebugId)> = {
+            let rejoin = lock(&self.0.debug_rejoin);
+            lock(&self.0.rooms)
+                .iter()
+                .filter(|(_, entry)| entry.server == *server)
+                .filter_map(|(room, entry)| {
+                    let session = entry.state.debug.as_ref()?;
+                    (rejoin.get(room) == Some(&session.id) && !session.members.contains(&me))
+                        .then_some((*room, session.id))
+                })
+                .collect()
+        };
+        for (room, session) in pending {
+            let client = self.clone();
+            self.0.handle.spawn(async move {
+                if let Err(e) = client
+                    .request(room, Request::DebugJoin { room, session })
+                    .await
+                {
+                    tracing::warn!("rejoining the debug session failed: {e}");
+                }
+            });
         }
     }
 

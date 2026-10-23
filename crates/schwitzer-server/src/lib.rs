@@ -60,6 +60,10 @@ pub(crate) struct Shared {
     pub release: Mutex<Option<semver::Version>>,
     /// Request budget per member.
     pub limits: limit::Limits,
+    /// The running debug sessions.
+    pub debug: hub::DebugRuns,
+    /// Debug log bytes per member.
+    pub log_budget: limit::ByteBudget,
 }
 
 /// What a room snapshot (`Event::Room`) may take. Name changes are not checked; the 64 KiB
@@ -100,6 +104,7 @@ impl Shared {
             member.online = self.hub.is_online(&member.id);
         }
         state.sessions = self.sessions.of_room(room);
+        state.debug = self.debug.of_room(room);
         Ok(state)
     }
 
@@ -228,6 +233,8 @@ pub async fn start(opts: Options) -> anyhow::Result<Server> {
         sessions: Sessions::default(),
         release: Mutex::new(None),
         limits: limit::Limits::default(),
+        debug: hub::DebugRuns::default(),
+        log_budget: limit::ByteBudget::default(),
     });
     let mut tasks: JoinSet<&'static str> = JoinSet::new();
     macro_rules! spawn {

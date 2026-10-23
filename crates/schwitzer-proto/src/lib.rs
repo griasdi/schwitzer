@@ -14,13 +14,14 @@ use serde::{Serialize, de::DeserializeOwned};
 pub use addr::{AddrParseError, RoomKey, ServerAddr};
 pub use events::{Event, Subscribe};
 pub use frame::{FrameError, HEADER_LEN, encode_frame, read_frame};
-pub use ids::{ClaimToken, IdParseError, MemberId, RoomId, RoomToken};
+pub use ids::{ClaimToken, DebugId, IdParseError, MemberId, RoomId, RoomToken};
 pub use model::{
-    Claim, Decision, Member, Note, Priority, Project, RoomState, SessionInfo, Stage, Task, Work,
+    Claim, DebugInstruction, DebugSession, Decision, Member, Note, Priority, Project, RoomState,
+    SessionInfo, Stage, Task, Work, valid_stream_name,
 };
 pub use rpc::{ApiError, Reply, Request, Response};
 
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 pub const PATH_RPC: &str = "/rpc";
 pub const PATH_EVENTS: &str = "/events";
@@ -45,6 +46,14 @@ pub mod caps {
     pub const SESSION_PROJECTS: usize = 64;
     /// Tasks one task may wait for.
     pub const WAITS_FOR: usize = 32;
+    /// Log bytes of one `DebugLog`.
+    pub const DEBUG_CHUNK: usize = 64 * 1024;
+    /// Bytes of a debug stream (file) name.
+    pub const DEBUG_STREAM: usize = 64;
+    /// Bytes of a debug instruction.
+    pub const INSTRUCTION: usize = 16 * 1024;
+    /// Members of one debug session.
+    pub const DEBUG_MEMBERS: usize = 16;
 
     /// `text` cut to at most `max` bytes at a character boundary.
     pub fn cut(text: &str, max: usize) -> &str {

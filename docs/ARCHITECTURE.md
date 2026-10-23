@@ -47,7 +47,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 
 |Crate|Owns|Must not know about|
 |---|---|---|
-|`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `RoomState`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (7), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
+|`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `RoomState`, `DebugSession`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (8), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
 |`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `release.rs`, `update.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
 |`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
 |`schwitzer-release`|what both updaters share: `RELEASES_URL`, `PLATFORM`, `Asset`/`Download` with the `sha256:` digest parsing, `parse_tag`/`is_stable`, `api_get` and `download` (bounded HTTPS), `verify`, `extract_tar_gz`, `sibling`, `replace` (Unix swap)|iced, SQLite, weida, tokio|
@@ -159,7 +159,7 @@ weida is a QUIC framework with mutual TLS; Schwitzer pins it to an exact revisio
 
 The client holds one `Requester` per endpoint, so two QUIC connections per server (`conn.rs`).
 
-`Request` has 22 variants:
+`Request` has 27 variants:
 
 |Group|Variants|
 |---|---|
@@ -170,8 +170,9 @@ The client holds one `Requester` per endpoint, so two QUIC connections per serve
 |work|`Claim`, `SubmitPlan`, `Finish`, `Unclaim`|
 |projects|`CreateProject`, `RenameProject`, `DeleteProject` (only a project without tasks in any stage; its id is never given again)|
 |live|`PublishSessions`|
+|debug|`DebugStart`, `DebugJoin`, `DebugLeave`, `DebugLog`, `DebugInstruct`|
 
-`Event` has 9: `Room` (a full room snapshot), `Ready`, `Task`, `Member`, `Sessions`, `Left`, `Project`, `Release`, `ProjectDeleted`. postcard is positional, so variants are append-only; a change old peers cannot read bumps `PROTOCOL_VERSION`. `ApiError` texts are shown verbatim in the UI and over MCP.
+`Event` has 12: `Room` (a full room snapshot), `Ready`, `Task`, `Member`, `Sessions`, `Left`, `Project`, `Release`, `ProjectDeleted`, `Debug`, `DebugLog`, `DebugInstruction`. postcard is positional, so variants are append-only; a change old peers cannot read bumps `PROTOCOL_VERSION`. `ApiError` texts are shown verbatim in the UI and over MCP.
 
 ## 6. Room server
 
@@ -219,8 +220,10 @@ sequenceDiagram
 
 **Hub** (`hub.rs`): every event is encoded once into an `Arc<[u8]>` frame shared by all receivers. Each stream has a queue of `QUEUE = 1024` frames; a full queue drops the stream, and the client reconnects and gets a fresh snapshot instead of a gap. A member may hold `MAX_SUBS_PER_MEMBER = 8` streams; the oldest goes when another opens. A member is online while at least one stream is open. `Sessions` (the shared agent sessions, per room and member) live only in memory.
 
+**Debug sessions** (`hub.rs`, `DebugRuns`): at most one per room, in memory only, and part of the room snapshot (`RoomState::debug`). `DebugStart` makes the caller master and first member; `DebugJoin` adds a member (at most `caps::DEBUG_MEMBERS = 16`); `DebugLeave` of the master, or the last member leaving, ends it. A member who leaves the room or whose last stream ends is dropped from `members`; the master stays master while offline. Every change goes to the room as `Event::Debug`. `DebugLog` (a stream name of `[A-Za-z0-9._-]`, at most 64 KiB of bytes at a file offset) goes as `Event::DebugLog` to the other members only; `DebugInstruct`, master only, goes as `Event::DebugInstruction` to the addressees and the master, numbered per session. The server keeps no log bytes and no instructions.
+
 **Limits**: every refusal is an `ApiError::Invalid`, shown as `invalid request: …`.
-- Request budget (`limit.rs`, in memory, GCRA): a member may send `BURST = 60` requests at once and regains one per second; `Hello` and `JoinRoom`, which every reconnect sends, are free, everything else (also a refused or malformed request) spends one. Refusal: `too many requests, try again in N s`.
+- Request budget (`limit.rs`, in memory, GCRA): a member may send `BURST = 60` requests at once and regains one per second; `Hello` and `JoinRoom`, which every reconnect sends, are free, everything else (also a refused or malformed request) spends one. Refusal: `too many requests, try again in N s`. `DebugLog` spends from its own budget in bytes (`ByteBudget`): 1 MiB at once, 256 KiB per second; refusal `ApiError::LogBudget`, `too much log data, try again in N s`.
 - Room and task size (`lib.rs`): a room snapshot (`Event::Room`) stays under `ROOM_BYTES = MAX_EVENT_FRAME − 64 KiB`, a task under `TASK_BYTES = MAX_RPC_BYTES − 16`, so the snapshot and the task reply always fit their frames. Every task mutation (`mutate`) checks both, a project mutation, a first `JoinRoom` and a non-empty `PublishSessions` check the room, inside the transaction, so a refusal rolls back. The 64 KiB headroom covers name changes, which are not checked. Refusals: `the room is full: its tasks, notes, members and sessions must stay under 4 MiB`, `the task is full: with its notes it must stay under 1 MiB`. The server has no delete; a full room still takes edits that shorten bodies or plans.
 - Rooms per member (`rpc.rs`): `MAX_ROOMS_PER_MEMBER = 50` memberships; `CreateRoom` and a first `JoinRoom` above it are refused with `you are in 50 rooms already; leave one to create or join another`. Leaving frees a slot; the left room stays on disk.
 
@@ -242,7 +245,7 @@ Enums are stored as explicit integers (`stage_to_int`: `Proposed 0`, `Accepted 1
 
 **Auto update** (`update.rs`, `--auto-update`, Linux x86_64 and aarch64): at startup `AutoUpdate::prepare` notes the program file and checks that its folder is writable, else the server refuses to start. When the release check sees a stable release newer than the server's own version, it takes `schwitzer-server-<version>-linux-<arch>.tar.gz` from that release's assets, downloads it (at most 64 MiB), checks size and the sha256 digest GitHub lists, swaps the binary in beside the program file (download, check and swap are `schwitzer-release`, shared with the app's updater) and reports the version; `Server::stopped` returns `Stop::Updated`, `main` shuts the endpoints down and execs the new program with the same arguments (same PID, so systemd sees no exit). A failed install of a version is retried after 30 minutes.
 
-**What the server holds.** Tasks, plans, notes, room and project names and member names, in plain text in its database; TLS protects them only on the wire. Shared sessions (title, model, token counts, linked task) only in memory. It never sees code, the MCP token, or sessions outside the repos a member linked.
+**What the server holds.** Tasks, plans, notes, room and project names and member names, in plain text in its database; TLS protects them only on the wire. Shared sessions (title, model, token counts, linked task) and running debug sessions only in memory; debug log bytes and instructions it relays without keeping them. It never sees code, the MCP token, or sessions outside the repos a member linked.
 
 ## 7. Client
 
@@ -391,8 +394,11 @@ The plugin turns failures into one line: "no MCP token in <dir>; start the Schwi
 |`finish`|`room?`, `task`, `note`|`Finish`|
 |`unclaim`|`room?`, `task`, `note`|`Unclaim`|
 |`add_note`|`room?`, `task`, `text`, `agent?`|`AddNote`|
+|`debug_status`|`room?`|the room's debug session: members with their `in` folder names, the `out` and `in` folders relative to the data dir (the plugin makes them absolute), the file sizes there|
+|`debug_instruct`|`room?`, `text`, `to?`|`DebugInstruct` (master only); `to` names participants, omitted every participant|
+|`debug_start`, `debug_join`, `debug_leave`, `debug_inbox`|`room?`|for the plugin's `/schwitzer debug` only, not in its `TOOLS`: start, join, leave; `debug_inbox` takes the oldest instruction for this member no omp session has taken yet|
 
-`room` may be left out when the app has joined one room; otherwise it matches a room name or at least 4 hex digits of the room id. The plugin registers each tool as `schwitzer_<name>`, with approval tier `read` for `list_rooms`, `list_tasks` and `get_task` and `write` for the rest. **There is no accept, reject, approve, replan or reopen tool, and none for `EditTask`, `SetPriority`, `MoveTask`, `SetWaits`, projects or rooms.**
+`room` may be left out when the app has joined one room; otherwise it matches a room name or at least 4 hex digits of the room id. The plugin registers each tool of its `TOOLS` as `schwitzer_<name>`, with approval tier `read` for `list_rooms`, `list_tasks`, `get_task` and `debug_status` and `write` for the rest. **There is no accept, reject, approve, replan or reopen tool, and none for `EditTask`, `SetPriority`, `MoveTask`, `SetWaits`, projects or rooms.**
 
 ### 9.5 One task, end to end
 
@@ -479,6 +485,7 @@ What is shared, per session (`SessionInfo`): id, title (≤ 200 bytes), `project
 - `/schwitzer propose [text]` hands the agent a drafting task: it looks into the repo without changing anything, writes a title and a Markdown body, shows both in its chat reply, asks the user with the ask tool in a question that names only the title (the dialog cuts long text off), and only then calls `schwitzer_propose`. With open ideas, the user may pick one instead; the agent then writes it up with `idea: N` (`ProposeIdea`), and the idea keeps its number.
 - Other projects: before each prompt of the main agent, the plugin adds a hidden `schwitzer-projects` message listing the other projects of the joined rooms and their local repos, with the rule to propose a change there instead of making it; such a proposal's body starts with `Requested from project "<p>" in room "<r>"`. An `edit`, `write` or `ast_edit` call into another project's repo is held by a `tool_call` guard: "Allow this edit", "Allow edits in "<project>" for this session" or "Block: propose it to "<project>" instead"; without a UI it is blocked.
 - Task number in commits: a per-member switch per project (`Settings::commit_trailers`, the project's settings page). `App::write_plugin_configs` rewrites only `schwitzer.json` in the project's repos when it changes, so omp sees it at the next commit. While a build claim of the omp process is on such a project, a `tool_call` guard blocks a `bash` `git commit` in the repo whose command lacks `Schwitzer-Task: #<n>` and tells the agent to add `--trailer "Schwitzer-Task: #<n>"`.
+- `/schwitzer debug [stop]` (UI only) asks for the room when several qualify, then offers to start a debug session (the caller becomes master) or to join the running one, and sends a `schwitzer-debug` message with the session's folders and rules into the next turn. A participant's omp process then polls `debug_inbox` every 2 s while the agent is idle; each instruction becomes a dialog, and only "Put it into the editor" places it there (`setEditorText`) for the human to send. The plugin never sends an instruction to the agent itself. `stop` leaves, or as master ends the session after asking. The app's side is `debug.rs`: per joined session a worker sends the new bytes of each file in `<data dir>/debug/<session>/out` every 500 ms and writes received bytes to `in/<member dir>/<stream>`; the client joins again after a reconnect (`debug_rejoin`).
 
 Every message text is in [the plugin README](../crates/schwitzer-app/omp-plugin/README.md).
 

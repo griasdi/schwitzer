@@ -156,7 +156,7 @@ pub fn bar_icon_button<'a>(
     id: impl Into<String>,
     glyph: Icon,
     tone: Tone,
-    tip: &'a str,
+    tip: impl text::IntoFragment<'a>,
     on_press: Option<Message>,
     style: impl Fn(&Theme, button::Status) -> button::Style + 'a,
 ) -> Element<'a, Message> {
@@ -353,5 +353,35 @@ pub fn banner(message: &str) -> Element<'_, Message> {
     .padding([SP_1, SP_2])
     .width(Length::Fill)
     .style(theme::alert)
+    .into()
+}
+
+/// A danger action asked in place: the question, Cancel, and the action.
+pub fn confirm_row<'a>(
+    question: String,
+    confirm_id: &'static str,
+    glyph: Icon,
+    label: &'static str,
+    action: Message,
+) -> Element<'a, Message> {
+    row![
+        text(question).size(TS_14).font(MEDIUM).width(Length::Fill),
+        text_button(
+            "confirm-cancel",
+            "Cancel",
+            Some(Message::CancelConfirm),
+            theme::button_secondary
+        ),
+        icon_text_button(
+            confirm_id,
+            glyph,
+            Tone::Danger,
+            label,
+            Some(action),
+            theme::button_danger
+        ),
+    ]
+    .spacing(SP_2)
+    .align_y(Alignment::Center)
     .into()
 }

@@ -324,6 +324,40 @@ pub fn member_hue(id: &MemberId) -> usize {
     usize::from(id.0[0] ^ id.0[31]) % 6
 }
 
+/// A byte count for people: `812 B`, `12.3 KiB`, `4.1 MiB`.
+pub fn bytes(n: u64) -> String {
+    const UNITS: [&str; 3] = ["KiB", "MiB", "GiB"];
+    if n < 1024 {
+        return format!("{n} B");
+    }
+    let mut value = n as f64 / 1024.0;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
+}
+
+/// What to tell `me` about the change of a room's debug session from `old` to `new`: someone
+/// else started one, or the one `me` was in ended (`true`).
+pub fn debug_change(old: &RoomState, new: &RoomState, me: &MemberId) -> Option<(String, bool)> {
+    match (&old.debug, &new.debug) {
+        (None, Some(s)) if s.master != *me => Some((
+            format!(
+                "{} started a debug session in {}",
+                member_name(&new.members, &s.master),
+                new.name
+            ),
+            false,
+        )),
+        (Some(s), None) if s.members.contains(me) => {
+            Some((format!("The debug session in {} ended", new.name), true))
+        }
+        _ => None,
+    }
+}
+
 /// The members of a room as the member list shows them: online first, then by name
 /// regardless of case, ties by id.
 pub fn members_by_presence(members: &[Member]) -> Vec<&Member> {
@@ -621,6 +655,14 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn byte_counts_switch_unit_at_1024() {
+        assert_eq!(bytes(1023), "1023 B");
+        assert_eq!(bytes(1024), "1.0 KiB");
+        assert_eq!(bytes(12_595), "12.3 KiB");
+        assert_eq!(bytes(4_299_161), "4.1 MiB");
+    }
+
     fn member(byte: u8) -> MemberId {
         MemberId([byte; 32])
     }
@@ -784,6 +826,7 @@ mod tests {
             members: Vec::new(),
             tasks,
             sessions: Vec::new(),
+            debug: None,
         }
     }
 

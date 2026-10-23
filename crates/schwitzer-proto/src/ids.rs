@@ -95,9 +95,15 @@ byte_id!(
     ClaimToken,
     16
 );
+byte_id!(
+    /// A debug session; random, never reused.
+    DebugId,
+    16
+);
 
 random_id!(RoomToken);
 random_id!(ClaimToken);
+random_id!(DebugId);
 
 impl RoomId {
     pub fn of(token: &RoomToken) -> Self {

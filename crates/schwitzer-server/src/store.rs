@@ -422,6 +422,7 @@ pub fn room_state(conn: &Connection, room: &RoomId) -> R<RoomState> {
         projects: read_projects(conn, room)?,
         tasks: read_tasks(conn, room)?,
         sessions: Vec::new(),
+        debug: None,
     })
 }
 

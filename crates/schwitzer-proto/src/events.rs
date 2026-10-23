@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Member, MemberId, Project, RoomId, RoomState, SessionInfo, Task};
+use crate::{
+    DebugId, DebugInstruction, DebugSession, Member, MemberId, Project, RoomId, RoomState,
+    SessionInfo, Task,
+};
 
 /// Opens the stream. The server knows the member's rooms.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,5 +49,26 @@ pub enum Event {
     ProjectDeleted {
         room: RoomId,
         project: u64,
+    },
+    /// The room's debug session changed; `None`: it ended. Sent to every member of the room.
+    Debug {
+        room: RoomId,
+        session: Option<DebugSession>,
+    },
+    /// Log bytes of `from`'s file `stream`, starting at byte `offset` of that file. Sent to
+    /// the other participants.
+    DebugLog {
+        room: RoomId,
+        session: DebugId,
+        from: MemberId,
+        stream: String,
+        offset: u64,
+        data: Vec<u8>,
+    },
+    /// Sent to the addressees and the master.
+    DebugInstruction {
+        room: RoomId,
+        session: DebugId,
+        instruction: DebugInstruction,
     },
 }

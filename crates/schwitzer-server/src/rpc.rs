@@ -9,9 +9,9 @@ use std::time::Instant;
 
 use rusqlite::Connection;
 use schwitzer_proto::{
-    ApiError, Event, MAX_RPC_BYTES, Member, MemberId, PROTOCOL_VERSION, Project, RPC_TIMEOUT,
-    Reply, Request, Response, RoomId, RoomToken, SessionInfo, Stage, Task, caps, from_bytes,
-    now_ms, to_bytes,
+    ApiError, DebugId, DebugSession, Event, MAX_RPC_BYTES, Member, MemberId, PROTOCOL_VERSION,
+    Project, RPC_TIMEOUT, Reply, Request, Response, RoomId, RoomToken, SessionInfo, Stage, Task,
+    caps, from_bytes, now_ms, to_bytes, valid_stream_name,
 };
 use tokio::time::timeout;
 use weida::{ErrorCode, IncomingRequest, Replier, TransferMeta};
@@ -116,9 +116,13 @@ fn too_many_rooms() -> ApiError {
 }
 
 /// Whether `req` spends from the caller's request budget: everything except `Hello` and
-/// `JoinRoom`, which every reconnect sends (one `JoinRoom` per room).
+/// `JoinRoom`, which every reconnect sends (one `JoinRoom` per room), and `DebugLog`, which
+/// spends from the log budget instead.
 fn limited(req: &Request) -> bool {
-    !matches!(req, Request::Hello { .. } | Request::JoinRoom { .. })
+    !matches!(
+        req,
+        Request::Hello { .. } | Request::JoinRoom { .. } | Request::DebugLog { .. }
+    )
 }
 
 async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
@@ -346,6 +350,22 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             })
             .await
         }
+        Request::DebugStart { room } => debug_start(state, caller, room).await,
+        Request::DebugJoin { room, session } => debug_join(state, caller, room, session).await,
+        Request::DebugLeave { room, session } => debug_leave(state, caller, room, session).await,
+        Request::DebugLog {
+            room,
+            session,
+            stream,
+            offset,
+            data,
+        } => debug_log(state, caller, room, session, stream, offset, data),
+        Request::DebugInstruct {
+            room,
+            session,
+            to,
+            text,
+        } => debug_instruct(state, caller, room, session, to, text).await,
     }
 }
 
@@ -577,13 +597,14 @@ async fn leave_room(state: &State, caller: MemberId, room: RoomId) -> Reply {
         move |st, conn, _| {
             store::remove_member(conn, &room, &caller)?;
             st.sessions.clear(&room, &caller);
-            Ok(Member {
+            let member = Member {
                 id: caller,
                 name: store::person_name(conn, &caller)?,
                 online: false,
-            })
+            };
+            Ok((member, st.debug.remove_member(&room, &caller)))
         },
-        move |hub, others, member| {
+        move |hub, others, (member, debug)| {
             hub.publish(&[caller], &Event::Left { room });
             hub.publish(
                 others,
@@ -600,6 +621,15 @@ async fn leave_room(state: &State, caller: MemberId, room: RoomId) -> Reply {
                     sessions: Vec::new(),
                 },
             );
+            if let Some(session) = debug {
+                hub.publish(
+                    others,
+                    &Event::Debug {
+                        room,
+                        session: session.clone(),
+                    },
+                );
+            }
         },
     )
     .await?;
@@ -661,5 +691,137 @@ async fn publish_sessions(
             Ok(())
         })
         .await?;
+    Ok(Response::Ok)
+}
+
+/// Runs `change` as a member of `room`, then publishes the event it returns to the room's
+/// members. The debug sessions live in memory; the store only checks membership and lists
+/// the members, and its lock keeps the events in order.
+async fn in_debug<T, C>(
+    state: &State,
+    caller: MemberId,
+    room: RoomId,
+    change: C,
+) -> Result<T, ApiError>
+where
+    T: Send + 'static,
+    C: FnOnce(&Shared) -> Result<(T, Option<Event>), ApiError> + Send + 'static,
+{
+    let st = state.clone();
+    state
+        .store
+        .run(move |conn| {
+            store::require_member(conn, &room, &caller)?;
+            let (out, event) = change(&st)?;
+            if let Some(event) = event {
+                let members = store::room_member_ids(conn, &room)?;
+                st.hub.publish(&members, &event);
+            }
+            Ok(out)
+        })
+        .await
+}
+
+fn debug_event(room: RoomId, session: Option<DebugSession>) -> Option<Event> {
+    Some(Event::Debug { room, session })
+}
+
+async fn debug_start(state: &State, caller: MemberId, room: RoomId) -> Reply {
+    let session = in_debug(state, caller, room, move |st| {
+        let s = st.debug.start(room, caller, now_ms())?;
+        Ok((s.clone(), debug_event(room, Some(s))))
+    })
+    .await?;
+    Ok(Response::Debug(session))
+}
+
+async fn debug_join(state: &State, caller: MemberId, room: RoomId, session: DebugId) -> Reply {
+    let session = in_debug(state, caller, room, move |st| {
+        let (s, changed) = st.debug.join(&room, session, caller)?;
+        let event = changed.then(|| Event::Debug {
+            room,
+            session: Some(s.clone()),
+        });
+        Ok((s, event))
+    })
+    .await?;
+    Ok(Response::Debug(session))
+}
+
+async fn debug_leave(state: &State, caller: MemberId, room: RoomId, session: DebugId) -> Reply {
+    in_debug(state, caller, room, move |st| {
+        let after = st.debug.leave(&room, session, caller)?;
+        Ok(((), debug_event(room, after)))
+    })
+    .await?;
+    Ok(Response::Ok)
+}
+
+async fn debug_instruct(
+    state: &State,
+    caller: MemberId,
+    room: RoomId,
+    session: DebugId,
+    to: Vec<MemberId>,
+    text: String,
+) -> Reply {
+    let st = state.clone();
+    let instruction = state
+        .store
+        .run(move |conn| {
+            store::require_member(conn, &room, &caller)?;
+            let (instruction, publish) =
+                st.debug
+                    .instruct(&room, session, caller, to, text, now_ms())?;
+            st.hub.publish(
+                &publish,
+                &Event::DebugInstruction {
+                    room,
+                    session,
+                    instruction: instruction.clone(),
+                },
+            );
+            Ok(instruction)
+        })
+        .await?;
+    Ok(Response::DebugInstruction(instruction))
+}
+
+/// Relays log bytes to the session's other members. Membership of the session implies
+/// membership of the room (leaving the room leaves the session), so the store is not asked.
+fn debug_log(
+    state: &State,
+    caller: MemberId,
+    room: RoomId,
+    session: DebugId,
+    stream: String,
+    offset: u64,
+    data: Vec<u8>,
+) -> Reply {
+    if !valid_stream_name(&stream) {
+        return Err(ApiError::Invalid("invalid stream name".into()));
+    }
+    if data.is_empty() || data.len() > caps::DEBUG_CHUNK {
+        return Err(ApiError::Invalid(format!(
+            "log data must hold 1 to {} bytes",
+            caps::DEBUG_CHUNK
+        )));
+    }
+    let targets = state.debug.log_targets(&room, session, &caller)?;
+    state
+        .log_budget
+        .take(caller, data.len(), Instant::now())
+        .map_err(|wait| ApiError::LogBudget(wait.as_secs().max(1)))?;
+    state.hub.publish(
+        &targets,
+        &Event::DebugLog {
+            room,
+            session,
+            from: caller,
+            stream,
+            offset,
+            data,
+        },
+    );
     Ok(Response::Ok)
 }

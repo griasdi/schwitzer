@@ -78,7 +78,7 @@ fn project(response: Response) -> Project {
     }
 }
 
-fn api_error(result: Result<Response, ClientError>) -> ApiError {
+fn api_error<T: std::fmt::Debug>(result: Result<T, ClientError>) -> ApiError {
     match result {
         Err(ClientError::Api(e)) => e,
         other => panic!("expected an API error, got {other:?}"),
@@ -535,7 +535,7 @@ async fn a_member_who_sends_too_fast_is_told_to_wait() {
         assert!(sent < 200, "never refused");
         match a.request(room, set_priority()).await {
             Ok(_) => sent += 1,
-            Err(e) => break api_error(Err(e)),
+            Err(e) => break api_error::<()>(Err(e)),
         }
     };
     assert_eq!(
@@ -600,7 +600,7 @@ async fn a_full_room_refuses_more_and_its_snapshot_still_arrives() {
             plan: "x".repeat(caps::PLAN),
         };
         if let Err(e) = a.request(room, edit).await {
-            refused = Some((i, api_error(Err(e)), proposal.number));
+            refused = Some((i, api_error::<()>(Err(e)), proposal.number));
             break;
         }
     }
@@ -675,6 +675,121 @@ async fn an_empty_project_is_deleted_for_every_member() {
 
     a.shutdown();
     b.shutdown();
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_debug_session_relays_logs_and_instructions_while_it_runs() {
+    let data = TempDir::new().unwrap();
+    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
+    let dirs = [(); 3].map(|()| TempDir::new().unwrap());
+    let a = Client::start(dirs[0].path(), "alice".into()).unwrap();
+    let b = Client::start(dirs[1].path(), "bob".into()).unwrap();
+    let c = Client::start(dirs[2].path(), "carol".into()).unwrap();
+    let (mut rx_a, mut rx_b, mut rx_c) = (a.subscribe(), b.subscribe(), c.subscribe());
+
+    let key = a
+        .create_room(server.addr.clone(), "crew".into())
+        .await
+        .unwrap();
+    let room = RoomId::of(&key.token);
+    b.join_room(key.clone()).await.unwrap();
+    c.join_room(key).await.unwrap();
+
+    let session = a.debug_start(room).await.unwrap();
+    assert_eq!(session.members, [a.member()]);
+    room_where(&mut rx_b, |s| s.debug.is_some()).await;
+    let joined = b.debug_join(room).await.unwrap();
+    assert_eq!(joined.members, [a.member(), b.member()]);
+    room_where(&mut rx_c, |s| {
+        s.debug.as_ref().is_some_and(|d| d.members.len() == 2)
+    })
+    .await;
+
+    b.debug_log(
+        room,
+        session.id,
+        "sender.log".into(),
+        0,
+        b"hello\n".to_vec(),
+    )
+    .await
+    .unwrap();
+    let log = tokio::time::timeout(WAIT, async {
+        loop {
+            if let Ok(ClientEvent::DebugLog {
+                from,
+                stream,
+                offset,
+                data,
+                ..
+            }) = rx_a.recv().await
+            {
+                return (from, stream, offset, data);
+            }
+        }
+    })
+    .await
+    .expect("alice got no log");
+    assert_eq!(log.0, b.member());
+    assert_eq!(
+        (log.1.as_str(), log.2, &*log.3),
+        ("sender.log", 0, &b"hello\n"[..])
+    );
+    let carol_got_log = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if let Ok(ClientEvent::DebugLog { .. }) = rx_c.recv().await {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(carol_got_log.is_err(), "carol is not in the session");
+    assert!(matches!(
+        api_error(
+            b.debug_log(room, session.id, "../x".into(), 0, b"x".to_vec())
+                .await
+        ),
+        ApiError::Invalid(_)
+    ));
+
+    assert_eq!(
+        api_error(b.debug_instruct(room, vec![], "do it".into()).await),
+        ApiError::NotDebugMaster
+    );
+    let sent = a
+        .debug_instruct(room, vec![], "run it".into())
+        .await
+        .unwrap();
+    assert_eq!((sent.id, sent.to.as_slice()), (1, &[b.member()][..]));
+    tokio::time::timeout(WAIT, async {
+        loop {
+            if let Ok(ClientEvent::DebugInbox { .. }) = rx_b.recv().await {
+                return;
+            }
+        }
+    })
+    .await
+    .expect("bob got no instruction");
+    assert_eq!(b.take_debug_instruction(room), Some(sent.clone()));
+    assert_eq!(b.take_debug_instruction(room), None);
+    assert!(c.debug_inbox(room).is_empty());
+
+    a.debug_leave(room).await.unwrap();
+    room_where(&mut rx_c, |s| s.debug.is_none()).await;
+    room_where(&mut rx_b, |s| s.debug.is_none()).await;
+    assert!(b.debug_inbox(room).is_empty());
+    assert_eq!(
+        api_error(
+            b.debug_log(room, session.id, "sender.log".into(), 6, b"more\n".to_vec())
+                .await
+        ),
+        ApiError::NoDebugSession
+    );
+
+    a.shutdown();
+    b.shutdown();
+    c.shutdown();
     server.shutdown().await;
 }
 

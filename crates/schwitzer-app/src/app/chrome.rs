@@ -11,7 +11,7 @@ use super::logic;
 use super::widgets::{
     self, DOT, bar_icon_button, bar_tip, dot, id_button, member_tag, muted, with_card, with_tip,
 };
-use super::{App, Message};
+use super::{App, Message, Page};
 use crate::omp_plugin::Coverage;
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, TS_12};
 
@@ -69,8 +69,8 @@ impl ProjectChoice {
     }
 }
 
-/// The header bar: room and project switchers on the left; members, invite and settings on the
-/// right.
+/// The header bar: room and project switchers on the left; members, invite, debug session and
+/// settings on the right.
 pub fn header(app: &App) -> Element<'_, Message> {
     let in_room = app.selected_state().is_some();
     let choices: Vec<RoomChoice> = app.room_choices();
@@ -127,6 +127,20 @@ pub fn header(app: &App) -> Element<'_, Message> {
             .id("project-picker"),
         );
     }
+    let debug = app.selected_state().and_then(|s| {
+        s.debug.as_ref().map(|d| {
+            format!(
+                "Debug session: {} is master, {} joined",
+                logic::member_name(&s.members, &d.master),
+                d.members.len()
+            )
+        })
+    });
+    let debug_tone = if debug.is_some() {
+        Tone::Ink
+    } else {
+        Tone::Text
+    };
     container(
         bar.push(Space::new().width(Length::Fill))
             .push(members)
@@ -136,6 +150,14 @@ pub fn header(app: &App) -> Element<'_, Message> {
                 Tone::Text,
                 "Copy room key to invite someone",
                 in_room.then_some(Message::CopyKey),
+                theme::button_ghost,
+            ))
+            .push(bar_icon_button(
+                "debug",
+                Icon::Bug,
+                debug_tone,
+                debug.unwrap_or_else(|| "Debug session".to_owned()),
+                in_room.then_some(Message::OpenPage(Page::Debug)),
                 theme::button_ghost,
             ))
             .push(bar_icon_button(

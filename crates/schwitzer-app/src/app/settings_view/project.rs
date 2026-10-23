@@ -4,12 +4,12 @@
 use iced::widget::{column, row, text};
 use iced::{Alignment, Element, Length};
 
-use super::{Switch, confirm_row, switch_row, view};
+use super::{Switch, switch_row, view};
 use crate::app::icons::{Icon, Tone, icon};
 use crate::app::logic;
 use crate::app::pages::{frame, section};
 use crate::app::widgets::{
-    heading, icon_button, icon_text_button, input, muted, path_text, text_button,
+    confirm_row, heading, icon_button, icon_text_button, input, muted, path_text, text_button,
 };
 use crate::app::{App, Confirm, FolderFor, Message};
 use crate::omp_plugin::PluginState;

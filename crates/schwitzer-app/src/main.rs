@@ -11,6 +11,7 @@ mod about;
 mod app;
 mod brand;
 mod bridge;
+mod debug;
 mod mcp;
 mod omp_plugin;
 mod sessions;
