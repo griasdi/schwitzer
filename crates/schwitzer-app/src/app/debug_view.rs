@@ -1,6 +1,7 @@
 //! The Debug session page of the selected room: start or join, the people in it, this
 //! machine's out and in folders, what was sent and received, and the instructions.
 
+use iced::widget::text::Wrapping;
 use iced::widget::{Column, column, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::{DebugSession, MemberId, RoomState, caps};
@@ -14,10 +15,15 @@ use super::widgets::{
 };
 use super::{App, Confirm, Message};
 use crate::debug;
-use crate::theme::{self, SP_1, SP_2, SP_3, TS_14};
+use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, TS_14};
 
 /// Bytes of an instruction shown on the page; the copy button takes all of it.
 const INSTRUCTION_PREVIEW: usize = 300;
+
+/// The omp command that starts, joins or picks up the debug session.
+const OMP_DEBUG: &str = "/schwitzer debug";
+/// The omp command that leaves the session; the master's ends it for everyone.
+const OMP_DEBUG_STOP: &str = "/schwitzer debug stop";
 
 pub fn page(app: &App) -> Element<'_, Message> {
     let Some(state) = app.selected_state() else {
@@ -31,11 +37,22 @@ pub fn page(app: &App) -> Element<'_, Message> {
     let me = app.client.member();
     let (body, footer) = match &state.debug {
         None => (
-            section(muted(
-                "Test a networked app together. Everyone who joins streams the files in their \
-                 out folder to the others. The master's agent can send instructions; on each \
-                 machine a human decides whether their agent runs one.",
-            )),
+            column![
+                section(muted(
+                    "Test a networked app together. Everyone who joins streams the files in \
+                     their out folder to the others. The master's agent can send instructions; \
+                     on each machine a human decides whether their agent runs one.",
+                )),
+                in_omp(vec![command(
+                    "Or start it from an omp session in one of this room's repos, with you as \
+                     master:"
+                        .to_owned(),
+                    OMP_DEBUG,
+                    "debug-copy-command",
+                )]),
+            ]
+            .spacing(SP_3)
+            .into(),
             text_button(
                 "debug-start",
                 "Start debug session",
@@ -43,25 +60,36 @@ pub fn page(app: &App) -> Element<'_, Message> {
                 theme::button_primary,
             ),
         ),
-        Some(session) if !session.members.contains(&me) => (
-            section(
+        Some(session) if !session.members.contains(&me) => {
+            let master = logic::member_name(&state.members, &session.master);
+            (
                 column![
-                    text(format!(
-                        "{} started a debug session",
-                        logic::member_name(&state.members, &session.master)
-                    ))
-                    .size(TS_14),
-                    tags(state, &session.members),
+                    section(
+                        column![
+                            text(format!("{master} started a debug session")).size(TS_14),
+                            tags(state, &session.members),
+                        ]
+                        .spacing(SP_2),
+                    ),
+                    in_omp(vec![command(
+                        format!(
+                            "Or join from omp; instructions from {master} then wait there for \
+                             your OK:"
+                        ),
+                        OMP_DEBUG,
+                        "debug-copy-command",
+                    )]),
                 ]
-                .spacing(SP_2),
-            ),
-            text_button(
-                "debug-join",
-                "Join",
-                Some(Message::DebugJoin),
-                theme::button_primary,
-            ),
-        ),
+                .spacing(SP_3)
+                .into(),
+                text_button(
+                    "debug-join",
+                    "Join",
+                    Some(Message::DebugJoin),
+                    theme::button_primary,
+                ),
+            )
+        }
         Some(session) => (joined(app, state, session, me), leave(app, session, me)),
     };
     frame("debug-page", "Debug session", body, Some(footer))
@@ -104,15 +132,16 @@ fn joined<'a>(
     let dir = debug::session_dir(&app.data_dir, session.id);
     let out = dir.join("out").display().to_string();
     let inn = dir.join("in").display().to_string();
+    let example = dir.join("out").join("app.log").display().to_string();
     let folders = column![
         heading("Your folders"),
-        folder(
-            "Out: files here go to everyone",
-            out.clone(),
-            "debug-copy-out"
-        ),
+        folder("Out: files here go to everyone", out, "debug-copy-out"),
         folder("In: what the others send", inn, "debug-copy-in"),
-        muted(format!("Example: your-app 2>&1 | tee \"{out}/app.log\"")),
+        muted(format!(
+            "Example: your-app 2>&1 | tee \"{}\"",
+            logic::breakable_path(&example)
+        ))
+        .wrapping(Wrapping::WordOrGlyph),
     ]
     .spacing(SP_2);
 
@@ -123,7 +152,11 @@ fn joined<'a>(
             None => col = col.push(muted("Nothing yet")),
             Some(map) => {
                 for (name, n) in map {
-                    col = col.push(text(format!("{name} · {}", logic::bytes(*n))).size(TS_14));
+                    col = col.push(
+                        text(format!("{name} · {}", logic::bytes(*n)))
+                            .size(TS_14)
+                            .wrapping(Wrapping::WordOrGlyph),
+                    );
                 }
             }
         }
@@ -131,7 +164,12 @@ fn joined<'a>(
     };
     let mut sending = counts("Sending", traffic.map(|t| &t.sent));
     if let Some(e) = traffic.and_then(|t| t.error.as_ref()) {
-        sending = sending.push(text(e).size(TS_14).style(theme::text_danger));
+        sending = sending.push(
+            text(e)
+                .size(TS_14)
+                .style(theme::text_danger)
+                .wrapping(Wrapping::WordOrGlyph),
+        );
     }
     let mut receiving = counts("Receiving", traffic.map(|t| &t.received));
     if traffic.is_some_and(|t| t.lost) {
@@ -182,6 +220,7 @@ fn joined<'a>(
                     text(format!("#{} {shown}", i.id))
                         .size(TS_14)
                         .width(Length::Fill)
+                        .wrapping(Wrapping::WordOrGlyph)
                 ]
                 .spacing(SP_1)
                 .width(Length::Fill),
@@ -198,14 +237,39 @@ fn joined<'a>(
             .align_y(Alignment::Start),
         );
     }
-    if !master {
-        instructions = instructions.push(muted(
-            "Run /schwitzer debug in an omp session to get instructions there for your OK.",
-        ));
-    }
+
+    let master_name = logic::member_name(&state.members, &session.master);
+    let omp = if master {
+        in_omp(vec![
+            command(
+                "Run in omp so your agent gets the folders and can send instructions:".to_owned(),
+                OMP_DEBUG,
+                "debug-copy-command",
+            ),
+            command(
+                "Ends the session for everyone:".to_owned(),
+                OMP_DEBUG_STOP,
+                "debug-copy-stop",
+            ),
+        ])
+    } else {
+        in_omp(vec![
+            command(
+                format!("Run in omp to get {master_name}'s instructions there for your OK:"),
+                OMP_DEBUG,
+                "debug-copy-command",
+            ),
+            command(
+                "Leaves the session:".to_owned(),
+                OMP_DEBUG_STOP,
+                "debug-copy-stop",
+            ),
+        ])
+    };
 
     Column::with_children([
         section(people),
+        omp,
         section(folders),
         section(sending),
         section(receiving),
@@ -235,6 +299,37 @@ fn folder<'a>(label: &'a str, path: String, id: &'static str) -> Element<'a, Mes
     ]
     .spacing(2)
     .into()
+}
+
+/// An omp command: what it does, then the command with a copy button.
+fn command<'a>(label: String, command: &'static str, id: &'static str) -> Element<'a, Message> {
+    column![
+        muted(label).wrapping(Wrapping::WordOrGlyph),
+        row![
+            text(command).size(TS_14).font(MEDIUM).width(Length::Fill),
+            icon_button(
+                id,
+                Icon::Copy,
+                Tone::Text,
+                "Copy",
+                Some(Message::CopyDebug(command.to_owned())),
+                theme::button_ghost,
+            ),
+        ]
+        .spacing(SP_2)
+        .align_y(Alignment::Center),
+    ]
+    .spacing(2)
+    .into()
+}
+
+/// The "In omp" slab with its commands.
+fn in_omp<'a>(commands: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    let mut col = column![heading("In omp")].spacing(SP_2);
+    for c in commands {
+        col = col.push(c);
+    }
+    section(col)
 }
 
 /// The participant's Leave, or the master's End session with its confirmation.
