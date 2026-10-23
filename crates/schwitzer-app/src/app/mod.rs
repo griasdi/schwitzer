@@ -179,6 +179,8 @@ pub enum Message {
     RemoveRepo(usize),
     /// Index into the selected project's repos.
     InstallPlugin(usize),
+    /// Closes the plugin prompt without installing.
+    SkipPluginPrompt,
     /// Index into the selected project's repos.
     RemovePlugin(usize),
     /// Index into the selected project's repos.
@@ -475,6 +477,9 @@ pub struct App {
     auto_failed: BTreeSet<PathBuf>,
     /// When the plugins were last checked.
     plugins_checked_ms: u64,
+    /// The repo just linked from the main page, whose plugin prompt is open until the plugin is
+    /// installed or the member presses "Not now".
+    plugin_prompt: Option<PathBuf>,
     /// This program's file as it was at start (the AppImage when it runs from one); the restart
     /// after an update runs it. (On Linux, `current_exe` reads `… (deleted)` once the file is
     /// replaced.)
@@ -595,6 +600,7 @@ impl App {
             plugins: BTreeMap::new(),
             auto_failed: BTreeSet::new(),
             plugins_checked_ms: 0,
+            plugin_prompt: None,
             program: update::Program::current(),
             updater: UpdateState::Idle,
             update_failed: None,
@@ -715,6 +721,7 @@ impl App {
             (Some(state), _) => match self.selected_project() {
                 None => self.no_projects(),
                 Some(project) if self.project_repos().is_empty() => self.link_view(project),
+                Some(project) if self.prompted_plugin().is_some() => self.plugin_view(project),
                 Some(project) => column![
                     container(list::view(self, state, project)).height(Length::Fill),
                     widgets::hrule(),
@@ -791,6 +798,48 @@ impl App {
             ]
             .spacing(SP_2)
             .align_y(iced::Alignment::Center)
+            .into(),
+        )
+    }
+
+    /// A repo was just linked from the main page: offer to install the omp plugin into it.
+    fn plugin_view<'a>(&'a self, project: &'a Project) -> Element<'a, Message> {
+        let index = self.prompted_plugin().unwrap_or_default();
+        let repo = self
+            .project_repos()
+            .get(index)
+            .map(|repo| repo.display().to_string())
+            .unwrap_or_default();
+        list::empty(
+            Icon::Plug,
+            format!("Set up omp in {}", project.name),
+            "omp agents started in this repo reach Schwitzer through the plugin: /schwitzer \
+             plan, build, propose and idea.",
+            column![
+                iced::widget::row![
+                    icons::icon(Icon::Folder, 16.0, Tone::Muted),
+                    widgets::path_text(&repo),
+                ]
+                .spacing(SP_2)
+                .align_y(iced::Alignment::Center),
+                iced::widget::row![
+                    widgets::text_button(
+                        "plugin-prompt-skip",
+                        "Not now",
+                        Some(Message::SkipPluginPrompt),
+                        theme::button_ghost,
+                    ),
+                    widgets::text_button(
+                        "plugin-prompt-install",
+                        "Install plugin",
+                        Some(Message::InstallPlugin(index)),
+                        theme::button_primary,
+                    ),
+                ]
+                .spacing(SP_2),
+            ]
+            .spacing(SP_2)
+            .align_x(iced::Alignment::Center)
             .into(),
         )
     }
@@ -1259,6 +1308,18 @@ impl App {
             }
             Message::InstallPlugin(index) => {
                 self.write_plugin(index, plugins::Write::Install);
+                // Installed: the prompt is done for good, also once the plugin is removed again.
+                if self
+                    .plugin_prompt
+                    .as_ref()
+                    .is_some_and(|repo| self.plugins.contains_key(repo))
+                {
+                    self.plugin_prompt = None;
+                }
+                Task::none()
+            }
+            Message::SkipPluginPrompt => {
+                self.plugin_prompt = None;
                 Task::none()
             }
             Message::RemovePlugin(index) => {
@@ -2001,9 +2062,24 @@ impl App {
                 return None;
             }
         };
-        self.settings.link_repo(&room, project, path);
+        let from_main = self.page == Page::Main;
+        self.settings.link_repo(&room, project, path.clone());
         self.save_settings();
+        // Reads whether the repo carries the plugin already, so the prompt and the agent dot
+        // are right at once.
+        self.check_plugins();
+        self.plugin_prompt = (from_main && !self.plugins.contains_key(&path)).then_some(path);
         Some(self.publish())
+    }
+
+    /// Index in [`Self::project_repos`] of the repo whose plugin prompt is open: linked to the
+    /// selected project and still without the plugin.
+    fn prompted_plugin(&self) -> Option<usize> {
+        let repo = self.plugin_prompt.as_ref()?;
+        if self.plugins.contains_key(repo) {
+            return None;
+        }
+        self.project_repos().iter().position(|r| r == repo)
     }
 
     fn propose(&mut self) -> Task<Message> {

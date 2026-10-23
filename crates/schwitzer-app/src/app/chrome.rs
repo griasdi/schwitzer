@@ -11,6 +11,7 @@ use super::logic;
 use super::widgets::{self, bar_icon_button, bar_tip, dot, id_button, member_tag, muted, with_tip};
 use super::{App, Message};
 use crate::mcp::McpStatus;
+use crate::omp_plugin::Coverage;
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, TS_12};
 
 /// A room as the switcher lists it.
@@ -206,12 +207,17 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
         None => "connecting",
     };
     let server_tip = app.selected_server_tip();
-    let port_state = app.mcp.as_ref().map(McpStatus::dot);
-    let port_tip = match &app.mcp {
-        None => "Agent port starting".to_owned(),
-        Some(McpStatus::Listening { url }) => format!("Agent port: {url}"),
-        Some(McpStatus::PortInUse) => format!("Agent port {} is in use", app.settings.mcp_port),
-        Some(McpStatus::Failed(e)) => format!("Agent port: {e}"),
+    let (port_state, port_tip) = match &app.mcp {
+        None => (None, "Agent port starting".to_owned()),
+        Some(McpStatus::Listening { url }) => {
+            let coverage = Coverage::of(app.project_repos(), &app.plugins);
+            (coverage.ready().then_some(true), plugin_tip(url, coverage))
+        }
+        Some(McpStatus::PortInUse) => (
+            Some(false),
+            format!("Agent port {} is in use", app.settings.mcp_port),
+        ),
+        Some(McpStatus::Failed(e)) => (Some(false), format!("Agent port: {e}")),
     };
     let mut bar = row![
         text(&app.settings.name).size(TS_12).font(SEMIBOLD),
@@ -242,4 +248,27 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
         .width(Length::Fill)
         .style(theme::bar)
         .into()
+}
+
+/// The agent port's tooltip while it listens: its URL and what keeps the selected project's
+/// repos from being ready for omp agents.
+fn plugin_tip(url: &str, coverage: Coverage) -> String {
+    let Coverage {
+        repos,
+        missing,
+        outdated,
+    } = coverage;
+    if repos == 0 {
+        format!("Agent port: {url} · no repo linked")
+    } else if outdated > 0 && repos == 1 {
+        format!("Agent port: {url} · omp plugin out of date")
+    } else if outdated > 0 {
+        format!("Agent port: {url} · omp plugin out of date in {outdated} of {repos} repos")
+    } else if missing > 0 && repos == 1 {
+        format!("Agent port: {url} · omp plugin missing")
+    } else if missing > 0 {
+        format!("Agent port: {url} · omp plugin missing in {missing} of {repos} repos")
+    } else {
+        format!("Agent port: {url}")
+    }
 }

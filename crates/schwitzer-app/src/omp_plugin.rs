@@ -168,6 +168,39 @@ pub fn count_outdated<'a>(states: impl IntoIterator<Item = &'a PluginState>) -> 
         .count()
 }
 
+/// How the plugin stands in a set of repos: how many there are, how many lack it and how
+/// many have it out of date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Coverage {
+    pub repos: usize,
+    pub missing: usize,
+    pub outdated: usize,
+}
+
+impl Coverage {
+    /// `repos` against `plugins`, the installed plugins by repo.
+    pub fn of(repos: &[PathBuf], plugins: &BTreeMap<PathBuf, PluginState>) -> Self {
+        let mut coverage = Self {
+            repos: repos.len(),
+            missing: 0,
+            outdated: 0,
+        };
+        for repo in repos {
+            match plugins.get(repo) {
+                None => coverage.missing += 1,
+                Some(PluginState::Outdated) => coverage.outdated += 1,
+                Some(PluginState::Current) => {}
+            }
+        }
+        coverage
+    }
+
+    /// Whether every repo has the plugin, current; never without repos.
+    pub fn ready(&self) -> bool {
+        self.repos > 0 && self.missing == 0 && self.outdated == 0
+    }
+}
+
 /// Whether everything [`install`] would write into `repo` is already there.
 fn matches(repo: &Path, config: &PluginConfig) -> bool {
     let dir = plugin_dir(repo);
@@ -550,5 +583,25 @@ mod tests {
         lock["plugins"]["schwitzer"]["version"] = json!("0.0.1");
         write(&lock_path(repo.path()), &lock.to_string());
         assert_eq!(state(repo.path(), &config()), Some(PluginState::Outdated));
+    }
+
+    #[test]
+    fn coverage_is_ready_only_when_every_repo_has_a_current_plugin() {
+        let (a, b) = (PathBuf::from("/r/a"), PathBuf::from("/r/b"));
+        let mut plugins = BTreeMap::new();
+        assert!(!Coverage::of(&[], &plugins).ready());
+
+        plugins.insert(a.clone(), PluginState::Current);
+        let one_missing = Coverage::of(&[a.clone(), b.clone()], &plugins);
+        assert_eq!((one_missing.missing, one_missing.outdated), (1, 0));
+        assert!(!one_missing.ready());
+
+        plugins.insert(b.clone(), PluginState::Outdated);
+        let one_outdated = Coverage::of(&[a.clone(), b.clone()], &plugins);
+        assert_eq!((one_outdated.missing, one_outdated.outdated), (0, 1));
+        assert!(!one_outdated.ready());
+
+        plugins.insert(b.clone(), PluginState::Current);
+        assert!(Coverage::of(&[a, b], &plugins).ready());
     }
 }

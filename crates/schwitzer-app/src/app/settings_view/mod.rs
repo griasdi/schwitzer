@@ -23,7 +23,7 @@ use super::widgets::{
     heading, icon_button, icon_text_button, id_button, input, muted, path_text, text_button,
 };
 use super::{App, FolderFor, Message, Page};
-use crate::omp_plugin::count_outdated;
+use crate::omp_plugin::{Coverage, count_outdated};
 use crate::settings::tilde;
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 use crate::update::{self, UpdateState};
@@ -188,20 +188,22 @@ fn room_slab<'a>(app: &'a App, key: &'a RoomKey) -> Element<'a, Message> {
 
 /// The selected project's repos on this machine and their omp plugin.
 fn project_status(app: &App) -> Status {
-    let linked = app.project_repos();
-    let n = linked.len();
-    let states: Vec<_> = linked.iter().map(|repo| app.plugins.get(repo)).collect();
-    let outdated = count_outdated(states.iter().copied().flatten());
-    let missing = states.iter().filter(|s| s.is_none()).count();
+    let coverage = Coverage::of(app.project_repos(), &app.plugins);
+    let n = coverage.repos;
     if n == 0 {
         Status::Notice("No repo linked on this machine".to_owned())
-    } else if outdated > 0 {
+    } else if coverage.outdated > 0 {
         Status::Notice(format!(
-            "omp plugin out of date in {outdated} of {}",
+            "omp plugin out of date in {} of {}",
+            coverage.outdated,
             repos(n)
         ))
-    } else if missing > 0 {
-        Status::Plain(format!("{} · omp plugin missing in {missing}", repos(n)))
+    } else if coverage.missing > 0 {
+        Status::Plain(format!(
+            "{} · omp plugin missing in {}",
+            repos(n),
+            coverage.missing
+        ))
     } else {
         Status::Plain(format!("{} · omp plugin installed", repos(n)))
     }
