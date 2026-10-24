@@ -1,7 +1,8 @@
 //! The task list: foldable groups of raised slabs, each with its stage lamp, labels, the
 //! worker's name tag and its next-step button; the open task or draft sits in place among them.
 
-use iced::widget::{Space, column, container, responsive, row, scrollable, text};
+use iced::keyboard::{Key, key::Named};
+use iced::widget::{Space, column, container, responsive, row, scrollable, text, text_editor};
 use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{Decision, Project, RoomState, Stage, Task};
 
@@ -13,7 +14,7 @@ use super::widgets::{
     member_tag, muted, priority_pill, with_tip,
 };
 use super::{App, Expanded, Message};
-use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
+use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
 
 /// The widget id of the task list's scrollable.
 pub const LIST_ID: &str = "tasks";
@@ -64,6 +65,43 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, project: &'a Project) -> Ele
             .style(theme::scroll)
             .into()
     })
+    .into()
+}
+
+/// The quick idea bar between the task list and the sessions: Enter adds the text as an idea
+/// (first line the title, the rest its details), Shift+Enter breaks the line.
+pub fn idea_bar(app: &App) -> Element<'_, Message> {
+    let editor = text_editor(&app.forms.quick_idea)
+        .id("quick-idea")
+        .placeholder("Note an idea, Enter adds it  (Ctrl+I)")
+        .max_height(120.0)
+        .padding(SP_2)
+        .size(TS_14)
+        .on_action(Message::QuickIdea)
+        .key_binding(|kp| {
+            if matches!(kp.status, text_editor::Status::Focused { .. })
+                && matches!(kp.key.as_ref(), Key::Named(Named::Enter))
+                && !kp.modifiers.shift()
+            {
+                Some(text_editor::Binding::Custom(Message::NoteIdea))
+            } else {
+                text_editor::Binding::from_key_press(kp)
+            }
+        })
+        .style(theme::editor);
+    // Level with the middle of the editor's first line.
+    let lamp_box = container(lamp(Lamp::Idea)).padding(Padding {
+        top: 12.0,
+        ..Padding::ZERO
+    });
+    container(
+        row![lamp_box, editor]
+            .spacing(SP_2)
+            .align_y(Alignment::Start),
+    )
+    .padding([SP_2, SP_2])
+    .width(Length::Fill)
+    .style(theme::bar)
     .into()
 }
 

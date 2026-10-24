@@ -207,6 +207,12 @@ pub enum Message {
     ProposalBody(text_editor::Action),
     Propose,
     Proposed(Result<Response, String>),
+    QuickIdea(text_editor::Action),
+    /// Adds the quick idea field's text as an idea.
+    NoteIdea,
+    IdeaNoted(Result<Response, String>),
+    /// Ctrl+I: opens the main page and focuses the quick idea field.
+    FocusIdea,
     Pick(u64),
     Picked(Result<(String, RoomTask), String>),
 
@@ -367,6 +373,9 @@ struct Forms {
     proposal_title: String,
     #[serde(with = "resume::editor")]
     proposal_body: text_editor::Content,
+    /// The quick idea field above the sessions.
+    #[serde(default, with = "resume::editor")]
+    quick_idea: text_editor::Content,
     note: String,
 }
 
@@ -469,6 +478,8 @@ pub struct App {
     plan_folded: bool,
     /// The task whose pick is under way.
     picking: Option<u64>,
+    /// The text of the quick idea being sent; Enter does nothing while it is under way.
+    noting_idea: Option<String>,
     /// Tasks seen approved (Planned → Ready, unclaimed), with the local time, while the
     /// planning omp session claims the build.
     handoffs: HashMap<(RoomId, u64), u64>,
@@ -578,6 +589,7 @@ impl App {
                 new_projects_dir: String::new(),
                 proposal_title: String::new(),
                 proposal_body: text_editor::Content::new(),
+                quick_idea: text_editor::Content::new(),
                 note: String::new(),
             },
             project_dirs: Vec::new(),
@@ -609,6 +621,7 @@ impl App {
             proposal_folded: false,
             plan_folded: false,
             picking: None,
+            noting_idea: None,
             handoffs: HashMap::new(),
             folder_dialog: false,
             task_draft: None,
@@ -766,6 +779,8 @@ impl App {
                 Some(project) if self.prompted_plugin().is_some() => self.plugin_view(project),
                 Some(project) => column![
                     container(list::view(self, state, project)).height(Length::Fill),
+                    widgets::hrule(),
+                    list::idea_bar(self),
                     widgets::hrule(),
                     live::view(self, state, project.id),
                 ]
@@ -1124,6 +1139,19 @@ impl App {
                     &Group::Proposals
                 });
                 Task::batch([operation::focus("proposal-title"), reveal("new-task")])
+            }
+            Message::FocusIdea => {
+                if self.page == Page::FirstStart
+                    || self.selected_project().is_none()
+                    || self.project_repos().is_empty()
+                {
+                    return Task::none();
+                }
+                if self.page != Page::Main {
+                    self.page = Page::Main;
+                    self.reset_drafts();
+                }
+                operation::focus("quick-idea")
             }
             Message::OpenSettings => self.open_page(Page::Settings),
             Message::OpenPage(page) => self.open_page(page),
@@ -1631,6 +1659,28 @@ impl App {
                         }
                         let idea = matches!(&response, Response::Task(t) if t.stage == Stage::Idea);
                         self.notify(if idea { "Idea added" } else { "Task proposed" });
+                    }
+                    Err(e) => self.banner = Some(e),
+                }
+                Task::none()
+            }
+            Message::QuickIdea(action) => {
+                self.forms.quick_idea.perform(action);
+                Task::none()
+            }
+            Message::NoteIdea => self.note_idea(),
+            Message::IdeaNoted(result) => {
+                let sent = self.noting_idea.take();
+                match result {
+                    Ok(response) => {
+                        // Text typed while the request ran stays in the field.
+                        if Some(self.forms.quick_idea.text()) == sent {
+                            self.forms.quick_idea = text_editor::Content::new();
+                        }
+                        match response {
+                            Response::Task(t) => self.notify(&format!("Idea #{} added", t.number)),
+                            _ => self.notify("Idea added"),
+                        }
                     }
                     Err(e) => self.banner = Some(e),
                 }
@@ -2217,6 +2267,31 @@ impl App {
         call(self.request(room, req), Message::Proposed)
     }
 
+    /// Sends the quick idea field's text as an idea: the first line is the title, the rest the
+    /// details.
+    fn note_idea(&mut self) -> Task<Message> {
+        if self.noting_idea.is_some() {
+            return Task::none();
+        }
+        let text = self.forms.quick_idea.text();
+        let Some((title, body)) = logic::split_idea(&text) else {
+            return Task::none();
+        };
+        let (Some(room), Some(project)) = (self.selected, self.selected_project().map(|p| p.id))
+        else {
+            return Task::none();
+        };
+        let req = Request::AddIdea {
+            room,
+            project,
+            title: title.to_owned(),
+            body: body.to_owned(),
+        };
+        let task = call(self.request(room, req), Message::IdeaNoted);
+        self.noting_idea = Some(text);
+        task
+    }
+
     /// Claims the build of an approved task for this member and hands back the room name and the
     /// claimed task for the prompt.
     fn pick(&mut self, number: u64) -> Task<Message> {
@@ -2692,6 +2767,7 @@ fn key_message(event: keyboard::Event) -> Option<Message> {
         Key::Named(Named::Tab) if modifiers.shift() => Some(Message::FocusPrevious),
         Key::Named(Named::Tab) => Some(Message::FocusNext),
         Key::Character("n") if modifiers.command() => Some(Message::OpenNewTask { idea: false }),
+        Key::Character("i") if modifiers.command() => Some(Message::FocusIdea),
         Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
         _ => None,
     }

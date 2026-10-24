@@ -422,6 +422,17 @@ fn in_repos(cwd: &Path, repos: &[PathBuf]) -> bool {
     !cwd.as_os_str().is_empty() && repos.iter().any(|repo| cwd.starts_with(repo))
 }
 
+/// The title and details of a quick idea: the first line and the rest, each trimmed;
+/// `None` when nothing but whitespace was typed.
+pub fn split_idea(text: &str) -> Option<(&str, &str)> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let (title, body) = text.split_once('\n').unwrap_or((text, ""));
+    Some((title.trim(), body.trim()))
+}
+
 /// What the picker pastes into their agent: the task, the claim marker that links the agent's
 /// session to the task, and the tool calls that finish it.
 pub fn pick_prompt(room: &str, task: &Task, token: &ClaimToken) -> String {
@@ -664,6 +675,16 @@ mod tests {
     use schwitzer_proto::{Claim, Priority, Project};
 
     use super::*;
+
+    #[test]
+    fn split_idea_takes_the_first_line_as_title() {
+        assert_eq!(split_idea("  \n "), None);
+        assert_eq!(split_idea("Idea"), Some(("Idea", "")));
+        assert_eq!(
+            split_idea("\n Title \r\nline 1\nline 2\n"),
+            Some(("Title", "line 1\nline 2"))
+        );
+    }
 
     #[test]
     fn byte_counts_switch_unit_at_1024() {

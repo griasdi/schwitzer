@@ -22,7 +22,7 @@ const MAX_AGE_MS: u64 = 120_000;
 const FOCUS_WAIT_MS: u64 = 30_000;
 
 /// The ids of the inputs whose focus survives a restart.
-pub const FOCUSABLE: [&str; 15] = [
+pub const FOCUSABLE: [&str; 16] = [
     "proposal-title",
     "proposal-body",
     "task-title",
@@ -38,9 +38,10 @@ pub const FOCUSABLE: [&str; 15] = [
     "server-url",
     "room-name",
     "room-key",
+    "quick-idea",
 ];
 /// The text editors among [`FOCUSABLE`]; they keep their cursor, text inputs resume at the end.
-pub const EDITORS: [&str; 3] = ["proposal-body", "task-body", "plan-editor"];
+pub const EDITORS: [&str; 4] = ["proposal-body", "task-body", "plan-editor", "quick-idea"];
 
 /// What the window showed when the app restarted for an update: the new process opens there.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,6 +367,7 @@ mod tests {
                 new_projects_dir: String::new(),
                 proposal_title: "Restart test".to_owned(),
                 proposal_body: text("hello\nworld", 1, 2, None).content(),
+                quick_idea: text_editor::Content::new(),
                 note: "half a note".to_owned(),
             },
             task_draft: Some(("Title".to_owned(), text("body", 0, 4, Some((0, 1))))),
