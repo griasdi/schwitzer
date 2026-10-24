@@ -211,7 +211,7 @@ pub enum Message {
     /// Adds the quick idea field's text as an idea.
     NoteIdea,
     IdeaNoted(Result<Response, String>),
-    /// Ctrl+I: opens the main page and focuses the quick idea field.
+    /// Ctrl+L: opens the main page and focuses the quick idea field.
     FocusIdea,
     Pick(u64),
     Picked(Result<(String, RoomTask), String>),
@@ -2767,7 +2767,7 @@ fn key_message(event: keyboard::Event) -> Option<Message> {
         Key::Named(Named::Tab) if modifiers.shift() => Some(Message::FocusPrevious),
         Key::Named(Named::Tab) => Some(Message::FocusNext),
         Key::Character("n") if modifiers.command() => Some(Message::OpenNewTask { idea: false }),
-        Key::Character("i") if modifiers.command() => Some(Message::FocusIdea),
+        Key::Character("l") if modifiers.command() => Some(Message::FocusIdea),
         Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
         _ => None,
     }

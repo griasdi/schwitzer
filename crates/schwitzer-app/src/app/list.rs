@@ -73,7 +73,7 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, project: &'a Project) -> Ele
 pub fn idea_bar(app: &App) -> Element<'_, Message> {
     let editor = text_editor(&app.forms.quick_idea)
         .id("quick-idea")
-        .placeholder("Note an idea, Enter adds it  (Ctrl+I)")
+        .placeholder("Note an idea, Enter adds it  (Ctrl+L)")
         .max_height(120.0)
         .padding(SP_2)
         .size(TS_14)
