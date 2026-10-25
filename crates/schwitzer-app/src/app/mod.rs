@@ -757,14 +757,33 @@ impl App {
         root.into()
     }
 
+    /// Whether the main page shows the task list: a project is selected, it has a linked repo
+    /// and the plugin prompt is not open.
+    fn shows_list(&self) -> bool {
+        self.selected_project().is_some()
+            && !self.project_repos().is_empty()
+            && self.prompted_plugin().is_none()
+    }
+
+    /// Brings up the main page for Ctrl+N and Ctrl+L, which type into its list; false when it
+    /// shows no list (first start, no project, no repo, the plugin prompt).
+    fn show_main_for_input(&mut self) -> bool {
+        if self.page == Page::FirstStart || !self.shows_list() {
+            return false;
+        }
+        if self.page != Page::Main {
+            self.page = Page::Main;
+            self.reset_drafts();
+        }
+        true
+    }
+
     /// The main page below the header bar: list and sessions, or an empty state.
     fn main(&self) -> Element<'_, Message> {
         match (self.selected_state(), self.selected) {
             (Some(state), _) => match self.selected_project() {
                 None => self.no_projects(),
-                Some(project) if self.project_repos().is_empty() => self.link_view(project),
-                Some(project) if self.prompted_plugin().is_some() => self.plugin_view(project),
-                Some(project) => column![
+                Some(project) if self.shows_list() => column![
                     container(list::view(self, state, project)).height(Length::Fill),
                     widgets::hrule(),
                     list::idea_bar(self),
@@ -772,6 +791,8 @@ impl App {
                     live::view(self, state, project.id),
                 ]
                 .into(),
+                Some(project) if self.project_repos().is_empty() => self.link_view(project),
+                Some(project) => self.plugin_view(project),
             },
             (None, Some(_)) => {
                 let (title, hint) = match self.selected_key() {
@@ -1106,15 +1127,8 @@ impl App {
             }
 
             Message::OpenNewTask { idea } => {
-                if self.page == Page::FirstStart
-                    || self.selected_project().is_none()
-                    || self.project_repos().is_empty()
-                {
+                if !self.show_main_for_input() {
                     return Task::none();
-                }
-                if self.page != Page::Main {
-                    self.page = Page::Main;
-                    self.reset_drafts();
                 }
                 if matches!(self.expanded, Some(Expanded::Task(_))) {
                     self.reset_drafts();
@@ -1128,15 +1142,8 @@ impl App {
                 Task::batch([operation::focus("proposal-title"), reveal("new-task")])
             }
             Message::FocusIdea => {
-                if self.page == Page::FirstStart
-                    || self.selected_project().is_none()
-                    || self.project_repos().is_empty()
-                {
+                if !self.show_main_for_input() {
                     return Task::none();
-                }
-                if self.page != Page::Main {
-                    self.page = Page::Main;
-                    self.reset_drafts();
                 }
                 operation::focus("quick-idea")
             }
