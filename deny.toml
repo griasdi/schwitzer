@@ -13,7 +13,7 @@ all-features = true
 unmaintained = "workspace"
 
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
-# The same list as crates/schwitzer-app/about.toml: licenses that let the app ship under
+# The same list as crates/schwitzer-app/about.toml (the CI deny job diffs the two): licenses that let the app ship under
 # MIT OR Apache-2.0. GPL and LGPL are not allowed; a crate offering them among others
 # passes on its permissive option.
 [licenses]

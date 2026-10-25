@@ -28,6 +28,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+      - name: deny.toml and about.toml accept the same licences
+        run: |
+          licences() {
+            ids=$(sed -n "/^$2 = \[/,/^\]/p" "$1" | grep -v '^ *#' | grep -o '"[^"]*"' | sort)
+            test -n "$ids" || { echo "no licences found under $2 in $1" >&2; return 1; }
+            printf '%s\n' "$ids"
+          }
+          diff <(licences deny.toml allow) <(licences crates/schwitzer-app/about.toml accepted)
       - uses: EmbarkStudios/cargo-deny-action@v2
   app:
     strategy:

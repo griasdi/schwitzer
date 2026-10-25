@@ -1,7 +1,7 @@
 # cargo-about 0.9.2 configuration of the licenses example (examples/licenses.rs):
 # https://embarkstudios.github.io/cargo-about/cli/generate/config.html
 # `accepted` is a preference order: a crate under "MIT OR Apache-2.0" is listed under MIT,
-# the shorter text without Apache's NOTICE duty. Same set as deny.toml's [licenses].
+# the shorter text without Apache's NOTICE duty. Same set as deny.toml's [licenses] (the CI deny job diffs the two).
 accepted = [
     "MIT",
     "Apache-2.0",
