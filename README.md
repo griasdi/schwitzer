@@ -47,12 +47,14 @@ An agent claims one task at a time. Claims never expire; anyone in the room can 
 
 omp agents work through the omp plugin the app installs into linked repositories:
 
-- `/schwitzer plan`: pick an accepted, unclaimed task, claim it for planning, start plan mode.
-- `/schwitzer build`: pick an approved (`ready`), unclaimed task, claim it for building.
+- `/schwitzer plan [#n]`: pick an accepted, unclaimed task (or take task `#n`), claim it for planning, start plan mode.
+- `/schwitzer build [#n]`: pick an approved (`ready`), unclaimed task (or take task `#n`), claim it for building.
 - `/schwitzer build new`: open a fresh session with `/schwitzer build` in its editor.
-- `/schwitzer propose [text]`: the agent drafts a proposal (or writes up an open idea), asks, then sends it.
+- `/schwitzer propose [#n | text]`: the agent drafts a proposal (or writes up an open idea, or idea `#n`), asks, then sends it.
 - `/schwitzer idea <text>`: note an idea in a project right away, without an agent turn.
 - `/schwitzer debug [stop]`: start or join the room's debug session, or leave it (see below).
+
+`/sw` is short for `/schwitzer` and takes the same subcommands.
 
 The plugin also gives the agent these tools: `schwitzer_list_rooms`, `schwitzer_list_tasks`, `schwitzer_get_task`, `schwitzer_propose`, `schwitzer_add_idea`, `schwitzer_claim`, `schwitzer_submit_plan`, `schwitzer_finish`, `schwitzer_unclaim`, `schwitzer_add_note`, `schwitzer_debug_status`, `schwitzer_debug_instruct`.
 

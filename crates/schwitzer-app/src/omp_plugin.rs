@@ -3,9 +3,10 @@
 //! The app writes the plugin (`omp-plugin/index.ts`, a `package.json` and `schwitzer.json`)
 //! into `<repo>/.omp/plugins/node_modules/schwitzer/` and enters it in
 //! `<repo>/.omp/plugins/omp-plugins.lock.json`, so omp started in the repo loads it as a
-//! project-scope plugin. It gives omp `/schwitzer plan`, `build`, `propose` and `idea`, which
-//! plan, build and propose tasks of the projects the repo is linked to and note ideas for them
-//! through the app's MCP server. `omp-plugin/README.md` describes the plugin.
+//! project-scope plugin. It gives omp `/schwitzer plan`, `build`, `propose`, `idea` and `debug`
+//! (short `/sw`), which plan, build and propose tasks of the projects the repo is linked to,
+//! note ideas for them and start or join a room's debug session, all through the app's MCP
+//! server. `omp-plugin/README.md` describes the plugin.
 //!
 //! The plugin gives omp's agent the app's tools itself and reaches the app's MCP server with
 //! the URL in `schwitzer.json` and the token in `<data_dir>/mcp-token`.
