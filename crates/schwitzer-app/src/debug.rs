@@ -116,30 +116,37 @@ pub struct Outbox {
     offsets: HashMap<String, u64>,
 }
 
+/// The regular files in `out` whose names can be sent as a stream, with their sizes, ordered
+/// by name; empty when the folder is missing.
+pub fn out_files(out: &Path) -> io::Result<Vec<(String, u64)>> {
+    let entries = match fs::read_dir(out) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut files: Vec<(String, u64)> = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        if !valid_stream_name(&name) {
+            continue;
+        }
+        let meta = entry.metadata()?;
+        if meta.is_file() {
+            files.push((name, meta.len()));
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
 impl Outbox {
     /// The next unsent bytes of every file in `out`, at most [`caps::DEBUG_CHUNK`] per file,
     /// ordered by name. A file that shrank was truncated and is sent again from its start.
     pub fn collect(&mut self, out: &Path) -> io::Result<Vec<Chunk>> {
-        let entries = match fs::read_dir(out) {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e),
-        };
-        let mut files: Vec<(String, u64)> = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            let Ok(name) = entry.file_name().into_string() else {
-                continue;
-            };
-            if !valid_stream_name(&name) {
-                continue;
-            }
-            let meta = entry.metadata()?;
-            if meta.is_file() {
-                files.push((name, meta.len()));
-            }
-        }
-        files.sort();
+        let files = out_files(out)?;
         let mut chunks = Vec::new();
         for (stream, len) in files {
             let offset = self.offsets.entry(stream.clone()).or_default();

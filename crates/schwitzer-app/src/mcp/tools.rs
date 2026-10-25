@@ -554,7 +554,8 @@ fn debug_status_json(room: &RoomRef, me: MemberId, data_dir: &Path) -> Value {
         })
         .collect();
     let dirs = debug::SessionDirs::new(data_dir, session.id);
-    let sent: Vec<Value> = file_sizes(&dirs.out())
+    let sent: Vec<Value> = debug::out_files(&dirs.out())
+        .unwrap_or_default()
         .into_iter()
         .map(|(stream, bytes)| json!({"stream": stream, "bytes": bytes}))
         .collect();
