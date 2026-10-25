@@ -48,10 +48,10 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |Crate|Owns|Must not know about|
 |---|---|---|
 |`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `RoomState`, `DebugSession`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (8), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
-|`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `release.rs`, `update.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
+|`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `limit.rs` (the request budget and the debug log `ByteBudget`), `release.rs`, `update.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
 |`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
 |`schwitzer-release`|what both updaters share: `RELEASES_URL`, `PLATFORM`, `Asset`/`Download` with the `sha256:` digest parsing, `parse_tag`/`is_stable`, `VERSION`/`version()` (this build's version: `SCHWITZER_VERSION` at build time, else the workspace version), `is_update` (newer always, older only across stable/dev), `Channel` (`release`/`dev`), `DEV_TAG`, `newest_asset`, `api_get` and `download` (bounded HTTPS), `verify`, `extract_tar_gz`, `sibling`, `replace` (Unix swap)|iced, SQLite, weida, tokio|
-|`schwitzer-app`|the `schwitzer` binary: UI, MCP server, plugin writer, session scanner, updater, WSL support|SQLite, weida: it talks to room servers only through `schwitzer-client`; the self-update speaks HTTPS to GitHub itself (§10)|
+|`schwitzer-app`|the `schwitzer` binary: UI, MCP server, plugin writer, session scanner, debug session worker (`debug.rs`), updater, WSL support|SQLite, weida: it talks to room servers only through `schwitzer-client`; the self-update speaks HTTPS to GitHub itself (§10)|
 
 ```mermaid
 flowchart LR
@@ -223,7 +223,7 @@ sequenceDiagram
 
 **Debug sessions** (`hub.rs`, `DebugRuns`): at most one per room, in memory only, and part of the room snapshot (`RoomState::debug`). `DebugStart` makes the caller master and first member; `DebugJoin` adds a member (at most `caps::DEBUG_MEMBERS = 16`); `DebugLeave` of the master, or the last member leaving, ends it. A member who leaves the room or whose last stream ends is dropped from `members`; the master stays master while offline. Every change goes to the room as `Event::Debug`. `DebugLog` (a stream name of `[A-Za-z0-9._-]`, at most 64 KiB of bytes at a file offset) goes as `Event::DebugLog` to the other members only; `DebugInstruct`, master only, goes as `Event::DebugInstruction` to the addressees and the master, numbered per session. The server keeps no log bytes and no instructions.
 
-**Limits**: every refusal is an `ApiError::Invalid`, shown as `invalid request: …`.
+**Limits**: every refusal is an `ApiError::Invalid`, shown as `invalid request: …`, except the debug log budget, which answers `ApiError::LogBudget`.
 - Request budget (`limit.rs`, in memory, GCRA): a member may send `BURST = 60` requests at once and regains one per second; `Hello` and `JoinRoom`, which every reconnect sends, are free, everything else (also a refused or malformed request) spends one. Refusal: `too many requests, try again in N s`. `DebugLog` spends from its own budget in bytes (`ByteBudget`): 1 MiB at once, 256 KiB per second; refusal `ApiError::LogBudget`, `too much log data, try again in N s`.
 - Room and task size (`lib.rs`): a room snapshot (`Event::Room`) stays under `ROOM_BYTES = MAX_EVENT_FRAME − 64 KiB`, a task under `TASK_BYTES = MAX_RPC_BYTES − 16`, so the snapshot and the task reply always fit their frames. Every task mutation (`mutate`) checks both, a project mutation, a first `JoinRoom` and a non-empty `PublishSessions` check the room, inside the transaction, so a refusal rolls back. The 64 KiB headroom covers name changes, which are not checked. Refusals: `the room is full: its tasks, notes, members and sessions must stay under 4 MiB`, `the task is full: with its notes it must stay under 1 MiB`. The server has no delete; a full room still takes edits that shorten bodies or plans.
 - Rooms per member (`rpc.rs`): `MAX_ROOMS_PER_MEMBER = 50` memberships; `CreateRoom` and a first `JoinRoom` above it are refused with `you are in 50 rooms already; leave one to create or join another`. Leaving frees a slot; the left room stays on disk.
@@ -264,23 +264,24 @@ stateDiagram-v2
     Offline --> Dialing: backoff 1 s to 30 s
 ```
 
-- API: `add_room`, `create_room`, `join_room`, `leave_room`, `forget_room`, `request`, `rooms`, `subscribe`, `set_name`, `shutdown`.
-- `ClientEvent::{Status, Room, RoomRemoved, Release}` go out on a `broadcast` channel; `apply` folds each `Event` into the cached `RoomState` and emits `ClientEvent::Room`.
+- API: `add_room`, `create_room`, `join_room`, `leave_room`, `forget_room`, `request`, `rooms`, `subscribe`, `set_name`, `shutdown`; for debug sessions `debug_start`, `debug_join`, `debug_leave`, `debug_log`, `debug_instruct`, `debug_inbox`, `take_debug_instruction`.
+- `ClientEvent::{Status, Room, RoomRemoved, Release, DebugLog, DebugInbox}` go out on a `broadcast` channel; `apply` folds each `Event` into the cached `RoomState` and emits `ClientEvent::Room`. An `Event::DebugLog` becomes `ClientEvent::DebugLog`; a change of the debug inbox (an `Event::DebugInstruction` arriving, `take_debug_instruction`) emits `ClientEvent::DebugInbox`.
 - `ClientError::{Offline, Timeout, Api, Net, Proto}`. A request waits up to `SESSION_WAIT` (10 s) for its server to come online.
 
 ## 8. Desktop app
 
-The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` holds the state, `Message` is everything that can happen, `update` changes the state and returns tasks, `view` draws it. Pages are `Page::{Main, FirstStart, Settings, Licenses}` and the settings topics `Page::{RoomSettings, ProjectSettings, Rooms, Omp, ProjectsFolders, Updates}`; `Page::parent` is where Back goes (a topic to Settings, Settings to Main), and `App::open_page` opens a page at its top. `Page::FirstStart` (no projects folders in `settings.toml` yet) leaves only through its confirmation: `open_page` ignores it, Back confirms, and until then `save_settings` keeps the folders off disk. A danger action on a settings page waits in `App::confirm` until the member confirms it in place. A task opens in place in the list (`Expanded::{Task, New}`).
+The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` holds the state, `Message` is everything that can happen, `update` changes the state and returns tasks, `view` draws it. Pages are `Page::{Main, FirstStart, Settings, Licenses, Debug}` and the settings topics `Page::{RoomSettings, ProjectSettings, Rooms, Omp, ProjectsFolders, Updates}`; `Page::parent` is where Back goes (a topic to Settings, Settings and Debug to Main), and `App::open_page` opens a page at its top. `Page::Debug` is the selected room's debug session, opened from the bug button in the header bar. `Page::FirstStart` (no projects folders in `settings.toml` yet) leaves only through its confirmation: `open_page` ignores it, Back confirms, and until then `save_settings` keeps the folders off disk. A danger action on a settings page, or ending a debug session, waits in `App::confirm` (`Confirm::{LeaveRoom, RemoveRoom, DeleteProject, EndDebug}`) until the member confirms it in place. A task opens in place in the list (`Expanded::{Task, New}`).
 
 |File (`app/`)|Shows|
 |---|---|
 |`chrome.rs`|the header bar (room picker), the members row, the status bar (name, notice, the status lamp and its card for server, agent port and omp plugin)|
-|`list.rs`|the task list in its groups|
+|`list.rs`|the task list in its groups and the quick idea bar (`idea_bar`)|
 |`task_view.rs`|an opened task, the new-task form, the decision buttons|
 |`live.rs`|the live agent sessions of the open project|
 |`settings_view/`|settings: `mod.rs` the overview of nav slabs by scope (room, this machine, you, about), the first-start page and the shared rows (nav slab, switch row, confirm row); `room.rs` the selected room and all rooms; `project.rs` the selected project and its repos; `machine.rs` omp, projects folders, updates|
 |`pages.rs`|full-window pages with a back button: Settings and its topics, About|
 |`licenses_view.rs`|the About page with the licenses|
+|`debug_view.rs`|the Debug page: start or join, the people in the session, the folders, what was sent and received, the instructions|
 |`widgets.rs`|lamps, pills, buttons and other shared widgets|
 |`sticky.rs`|`Sticky`: the open task's head, pinned to the list's top while its slab is scrolled past|
 |`icons.rs`|Lucide icons from `assets/icons/`|
@@ -296,6 +297,7 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |session scanner, 5 s|`sessions.rs`, see [9.7](#97-live-sessions)|
 |WSL distros, 5 s|Windows only: the running distros (`wsl.rs`)|
 |MCP server|while a token exists (`mcp/serve.rs`)|
+|debug traffic, per joined session|`debug::subscription`: sends the new bytes of the `out` folder every 500 ms and writes received bytes to `in/`, see [9.8](#98-proposals-ideas-and-other-projects)|
 |update check, 300 s|feature `self-update` only (`update.rs`; on the dev channel it asks `releases/tags/dev`)|
 
 ```mermaid
@@ -317,13 +319,14 @@ flowchart LR
 |`mcp-token`|bearer token of the MCP server (file mode 0600)|
 |`settings.toml`|settings, below|
 |`resume.json`|the snapshot a restart after an update or a lost graphics device opens; ignored when older than 120 s, removed when read|
+|`debug/<session>/{out,in/<member dir>}`|the files of a debug session: `out` is what this machine sends, `in/<name>-<id>/` what each other member sent; a session folder untouched for 7 days is removed when a worker starts, a received file stops at 256 MiB|
 
 |`settings.toml` key|Meaning|
 |---|---|
 |`name`|display name|
 |`mcp_port`|MCP server port on `127.0.0.1`, default 13339; set in Settings, omp, where a change moves the listener and rewrites every installed plugin|
 |`omp_sessions_dir`|where omp keeps its sessions, default `~/.omp/agent/sessions`|
-|`last_server`|prefills "Create room"|
+|`last_server`|prefills "Create a room"|
 |`rooms`|room keys in list order|
 |`repos`|`"<room id hex>/<project id>"` → linked repo paths|
 |`chosen_projects`|`"<room id hex>"` → the project last picked in that room|
@@ -495,7 +498,7 @@ Every message text is in [the plugin README](../crates/schwitzer-app/omp-plugin/
 
 |Action|Human in the app|Agent (plugin command / tool)|
 |---|---|---|
-|note an idea|`+` in Ideas, "Add idea" (`AddIdea`)|`/schwitzer idea`, `schwitzer_add_idea`|
+|note an idea|`+` in Ideas, the quick idea bar above the list (Enter), "Add idea" (`AddIdea`)|`/schwitzer idea`, `schwitzer_add_idea`|
 |propose|`+` in Proposals, "Propose" (`Propose`)|`/schwitzer propose`, `schwitzer_propose`|
 |write up an idea|"Write up", then "Propose" (`ProposeIdea`)|`/schwitzer propose` picking the idea, `schwitzer_propose` with `idea`|
 |accept, reject, approve, replan, reopen, mark planned, mark done|"Accept", "Reject", "Approve & build", "Replan", "Reopen", "Mark planned", "Mark done" (`Decide`)|never|
@@ -571,6 +574,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |Task|Touch|
 |---|---|
 |New request or event|`schwitzer-proto/src/rpc.rs` or `events.rs` (append the variant; bump `PROTOCOL_VERSION` when old peers would break), `schwitzer-server/src/rpc.rs` (`dispatch`, validation), `store.rs`, the caller in `app/mod.rs`|
+|New debug request|`schwitzer-proto/src/rpc.rs` and `events.rs`, `schwitzer-server/src/hub.rs` (`DebugRuns`) and its handler in `rpc.rs`, a `Client::debug_*` method in `schwitzer-client/src/lib.rs`, `schwitzer-app/src/debug.rs` (the worker), `mcp/tools.rs`, `omp-plugin/index.ts`|
 |New stage, decision or claim rule|`model.rs` (append), `store.rs` (`stage_to_int` …, `next_stage`, `claim`), `app/logic.rs` (`Group::of`, `legal_decisions`, `stage_label`), `app/widgets.rs` (`lamp_kind`), `mcp/tools.rs` (`StageArg`), the plugin (`STAGE`)|
 |Schema change|`store.rs` (`SCHEMA`, a new `MIGRATE_n`, `SCHEMA_VERSION`)|
 |New MCP tool or argument|`mcp/tools.rs`, `omp-plugin/index.ts` (`TOOLS`), `omp-plugin/README.md`|
