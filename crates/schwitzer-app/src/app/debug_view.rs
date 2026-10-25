@@ -307,7 +307,7 @@ fn copy_line<'a>(
             .spacing(SP_2)
             .align_y(Alignment::Center),
     ]
-    .spacing(2)
+    .spacing(SP_1)
     .into()
 }
 
