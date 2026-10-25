@@ -261,6 +261,11 @@ impl RoomRef {
     fn tasks(&self) -> &[Task] {
         self.state.as_ref().map_or(&[], |s| &s.tasks)
     }
+
+    /// The room's running debug session, if any.
+    fn debug(&self) -> Option<&DebugSession> {
+        self.state.as_ref().and_then(|s| s.debug.as_ref())
+    }
 }
 
 /// The room a call means: `arg` is a room name (case-insensitive, exact) or a room id prefix of
@@ -525,11 +530,7 @@ fn subdirs(dir: &Path) -> Vec<String> {
 /// The status of `room`'s debug session as `debug_status` shows it, with the folders relative
 /// to `data_dir` and the sizes of the files there.
 fn debug_status_json(room: &RoomRef, me: MemberId, data_dir: &Path) -> Value {
-    let Some((state, session)) = room
-        .state
-        .as_ref()
-        .and_then(|s| s.debug.as_ref().map(|d| (s, d)))
-    else {
+    let Some((state, session)) = room.state.as_ref().zip(room.debug()) else {
         return json!({"room": room.label(), "session": null});
     };
     let name = |id: &MemberId| logic::member_name(&state.members, id);
@@ -944,9 +945,8 @@ impl Tools {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
             let state = room.loaded()?;
-            let session = state
-                .debug
-                .as_ref()
+            let session = room
+                .debug()
                 .ok_or_else(|| schwitzer_proto::ApiError::NoDebugSession.to_string())?;
             let to = debug_recipients(session, &state.members, &args.to.unwrap_or_default())?;
             let sent = self
@@ -1001,9 +1001,7 @@ impl Tools {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
             let master = room
-                .state
-                .as_ref()
-                .and_then(|s| s.debug.as_ref())
+                .debug()
                 .is_some_and(|d| d.master == self.client.member());
             self.client
                 .debug_leave(room.id)
@@ -1024,11 +1022,7 @@ impl Tools {
     async fn debug_inbox(&self, Parameters(args): Parameters<RoomArgs>) -> CallToolResult {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
-            let session = room
-                .state
-                .as_ref()
-                .and_then(|s| s.debug.as_ref())
-                .map(|d| d.id.short());
+            let session = room.debug().map(|d| d.id.short());
             let instruction = match session {
                 Some(_) => self.client.take_debug_instruction(room.id),
                 None => None,
