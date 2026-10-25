@@ -7,8 +7,7 @@ use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
 use schwitzer_proto::Event;
-use schwitzer_release::{ApiError, Asset, Channel, DEV_TAG};
-use serde::Deserialize;
+use schwitzer_release::{Asset, Channel, GitHubRelease};
 use tokio::sync::oneshot;
 use tokio::time::MissedTickBehavior;
 
@@ -22,17 +21,6 @@ const RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
 /// Releases asked for per check; the newest stable one is among them.
 const PER_PAGE: &str = "10";
 
-#[derive(Deserialize)]
-struct Listed {
-    tag_name: String,
-    #[serde(default)]
-    draft: bool,
-    #[serde(default)]
-    prerelease: bool,
-    #[serde(default)]
-    assets: Vec<Asset>,
-}
-
 /// A published server build on GitHub, a stable release or a dev build, and the downloads of
 /// its release.
 #[derive(Debug, Clone, PartialEq)]
@@ -44,7 +32,7 @@ pub(crate) struct Published {
 /// The newest stable release in GitHub's release list `json`. Tags that are no version are
 /// skipped.
 pub(crate) fn newest_stable(json: &[u8]) -> Result<Option<Published>, String> {
-    let listed: Vec<Listed> =
+    let listed: Vec<GitHubRelease> =
         serde_json::from_slice(json).map_err(|e| format!("unreadable release list: {e}"))?;
     Ok(listed
         .into_iter()
@@ -63,7 +51,7 @@ pub(crate) fn newest_stable(json: &[u8]) -> Result<Option<Published>, String> {
 /// The newest server build for `platform` on the dev release `json` (one release), with all of
 /// the release's assets.
 pub(crate) fn newest_dev(json: &[u8], platform: &str) -> Result<Option<Published>, String> {
-    let dev: Listed =
+    let dev: GitHubRelease =
         serde_json::from_slice(json).map_err(|e| format!("unreadable release: {e}"))?;
     if dev.draft {
         return Ok(None);
@@ -81,28 +69,12 @@ pub(crate) fn newest_dev(json: &[u8], platform: &str) -> Result<Option<Published
 }
 
 fn fetch(url: &str) -> Result<Option<Published>, String> {
-    let json = schwitzer_release::api_get(
-        USER_AGENT,
-        Duration::from_secs(30),
-        url,
-        &[("per_page", PER_PAGE)],
-        MAX_JSON,
-    )?;
+    let json = schwitzer_release::api_get(USER_AGENT, url, &[("per_page", PER_PAGE)], MAX_JSON)?;
     newest_stable(&json)
 }
 
 fn fetch_dev(url: &str, platform: &str) -> Result<Option<Published>, String> {
-    let json = schwitzer_release::api_get(
-        USER_AGENT,
-        Duration::from_secs(30),
-        &format!("{url}/tags/{DEV_TAG}"),
-        &[],
-        MAX_JSON,
-    )
-    .map_err(|e| match e {
-        ApiError::NotFound(_) => "no dev release is on GitHub".to_owned(),
-        ApiError::Failed(message) => message,
-    })?;
+    let json = schwitzer_release::api_get_dev(USER_AGENT, url, MAX_JSON)?;
     newest_dev(&json, platform)
 }
 

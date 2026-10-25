@@ -2,8 +2,8 @@
 //! its downloads, the `sha256:` digest GitHub publishes, the bounded HTTPS requests, the size and
 //! digest check of a download, the member of a `.tar.gz` and the swap of a program file.
 //!
-//! What differs stays with the callers: which asset to take, how to read a release, the archive
-//! formats beyond `.tar.gz`, and how the new program starts.
+//! What differs stays with the callers: which release to look at and which asset to take, the
+//! archive formats beyond `.tar.gz`, and how the new program starts.
 
 #[cfg(unix)]
 use std::ffi::OsStr;
@@ -38,6 +38,19 @@ pub struct Asset {
     pub browser_download_url: String,
     pub size: u64,
     pub digest: Option<String>,
+}
+
+/// A release as GitHub's API lists it. A caller keeps the fields it needs and decides what an
+/// absent or unusable one means.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct GitHubRelease {
+    pub tag_name: String,
+    #[serde(default)]
+    pub draft: bool,
+    #[serde(default)]
+    pub prerelease: bool,
+    #[serde(default)]
+    pub assets: Vec<Asset>,
 }
 
 /// An archive to download, and what it must be.
@@ -162,6 +175,11 @@ impl From<ApiError> for String {
     }
 }
 
+/// How long a GitHub API request may take.
+const API_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a download may take.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
+
 fn agent(user_agent: &str, timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
@@ -174,12 +192,11 @@ fn agent(user_agent: &str, timeout: Duration) -> ureq::Agent {
 /// Blocks.
 pub fn api_get(
     user_agent: &str,
-    timeout: Duration,
     url: &str,
     query: &[(&str, &str)],
     limit: u64,
 ) -> Result<Vec<u8>, ApiError> {
-    let mut request = agent(user_agent, timeout).get(url);
+    let mut request = agent(user_agent, API_TIMEOUT).get(url);
     for (key, value) in query {
         request = request.query(key, value);
     }
@@ -202,14 +219,18 @@ pub fn api_get(
         .map_err(|e| ApiError::Failed(format!("GitHub: {e}")))
 }
 
+/// The answer for the rolling dev release, from the release list at `base` (a `{base}/tags/dev`
+/// request). Blocks.
+pub fn api_get_dev(user_agent: &str, base: &str, limit: u64) -> Result<Vec<u8>, String> {
+    api_get(user_agent, &format!("{base}/tags/{DEV_TAG}"), &[], limit).map_err(|e| match e {
+        ApiError::NotFound(_) => "no dev release is on GitHub".to_owned(),
+        ApiError::Failed(message) => message,
+    })
+}
+
 /// Downloads `url`, at most `limit` bytes. Blocks.
-pub fn download(
-    user_agent: &str,
-    timeout: Duration,
-    url: &str,
-    limit: u64,
-) -> Result<Vec<u8>, String> {
-    let mut response = agent(user_agent, timeout)
+pub fn download(user_agent: &str, url: &str, limit: u64) -> Result<Vec<u8>, String> {
+    let mut response = agent(user_agent, DOWNLOAD_TIMEOUT)
         .get(url)
         .call()
         .map_err(|e| format!("download failed: {e}"))?;

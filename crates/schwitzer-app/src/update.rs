@@ -15,8 +15,7 @@ use std::time::Duration;
 use futures::channel::oneshot;
 #[cfg(unix)]
 use schwitzer_release::replace;
-use schwitzer_release::{ApiError, Asset, Channel, DEV_TAG, PLATFORM, RELEASES_URL, sibling};
-use serde::Deserialize;
+use schwitzer_release::{ApiError, Channel, GitHubRelease, PLATFORM, RELEASES_URL, sibling};
 
 /// Whether this build updates itself: only the release builds from CI (`--features self-update`).
 pub const ENABLED: bool = cfg!(feature = "self-update");
@@ -128,16 +127,6 @@ pub enum UpdateState {
     Installed(semver::Version),
 }
 
-#[derive(Deserialize)]
-struct GitHubRelease {
-    tag_name: String,
-    #[serde(default)]
-    draft: bool,
-    #[serde(default)]
-    prerelease: bool,
-    assets: Vec<Asset>,
-}
-
 /// The file extension of the release asset for `package`.
 fn package_ext(package: Package) -> &'static str {
     match package {
@@ -227,12 +216,7 @@ pub async fn check(lookup: Lookup, package: Package) -> Result<Option<Release>, 
 /// Downloads `release`, verifies it and puts it in place of `program`.
 pub async fn install(release: Release, program: Program) -> Result<semver::Version, String> {
     blocking(move || {
-        let bytes = schwitzer_release::download(
-            USER_AGENT,
-            Duration::from_secs(600),
-            &release.url,
-            MAX_ARCHIVE,
-        )?;
+        let bytes = schwitzer_release::download(USER_AGENT, &release.url, MAX_ARCHIVE)?;
         schwitzer_release::verify(&bytes, release.size, &release.sha256)?;
         let binary = match program.package {
             Package::AppImage => bytes,
@@ -287,31 +271,28 @@ fn fetch_release(
     package: Package,
 ) -> Result<Option<Release>, String> {
     let base = std::env::var(URL_ENV).unwrap_or_else(|_| RELEASES_URL.to_owned());
-    let url = match &lookup {
-        Lookup::Latest => format!("{base}/latest"),
-        Lookup::Version(v) => format!("{base}/tags/v{v}"),
-        Lookup::Dev => format!("{base}/tags/{DEV_TAG}"),
-    };
-    let json = schwitzer_release::api_get(
-        USER_AGENT,
-        Duration::from_secs(30),
-        &url,
-        &[],
-        MAX_RELEASE_JSON,
-    )
-    .map_err(|e| match e {
-        ApiError::NotFound(_) => match &lookup {
-            Lookup::Latest => "no release is on GitHub".to_owned(),
-            Lookup::Version(v) => format!("release v{v} is not on GitHub"),
-            Lookup::Dev => "no dev release is on GitHub".to_owned(),
-        },
-        ApiError::Failed(message) => message,
-    })?;
     let current = schwitzer_release::version();
-    match lookup {
-        Lookup::Dev => parse_dev(&json, &current, platform, package),
-        Lookup::Latest | Lookup::Version(_) => parse_release(&json, &current, platform, package),
-    }
+    let (url, missing) = match &lookup {
+        Lookup::Latest => (
+            format!("{base}/latest"),
+            "no release is on GitHub".to_owned(),
+        ),
+        Lookup::Version(v) => (
+            format!("{base}/tags/v{v}"),
+            format!("release v{v} is not on GitHub"),
+        ),
+        Lookup::Dev => {
+            let json = schwitzer_release::api_get_dev(USER_AGENT, &base, MAX_RELEASE_JSON)?;
+            return parse_dev(&json, &current, platform, package);
+        }
+    };
+    let json = schwitzer_release::api_get(USER_AGENT, &url, &[], MAX_RELEASE_JSON).map_err(
+        |e| match e {
+            ApiError::NotFound(_) => missing,
+            ApiError::Failed(message) => message,
+        },
+    )?;
+    parse_release(&json, &current, platform, package)
 }
 
 /// The program file in the release archive `bytes`.

@@ -4,7 +4,6 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use anyhow::{Context, bail};
 use schwitzer_release::{Asset, Channel, Download, sibling};
@@ -95,12 +94,7 @@ impl AutoUpdate {
         assets: &[Asset],
     ) -> Result<(), String> {
         let download = pick(assets, version, self.platform)?;
-        let bytes = schwitzer_release::download(
-            USER_AGENT,
-            Duration::from_secs(600),
-            &download.url,
-            MAX_ARCHIVE,
-        )?;
+        let bytes = schwitzer_release::download(USER_AGENT, &download.url, MAX_ARCHIVE)?;
         schwitzer_release::verify(&bytes, download.size, &download.sha256)?;
         unpack_and_replace(&self.exe, &bytes)
     }
