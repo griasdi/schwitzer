@@ -37,7 +37,7 @@ allow = [
 ]
 
 # https://embarkstudios.github.io/cargo-deny/checks/sources/cfg.html
-# Crates come from crates.io and from the git repositories of the root `Cargo.toml`,
+# Crates come from crates.io and from the git repository of the root `Cargo.toml` (weida),
 # nowhere else; a new source is a decision, not a side effect.
 [sources]
 unknown-registry = "deny"
@@ -47,8 +47,6 @@ required-git-spec = "rev"
 allow-git = [
     # `weida` (`[workspace.dependencies]`), pinned to a rev: alpha, not on crates.io at this rev.
     "https://github.com/tuco86/weida.git",
-    # `iced_impeccable`, the optional feature `remote` of schwitzer-app.
-    "https://github.com/tuco86/iced_impeccable.git",
 ]
 
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html

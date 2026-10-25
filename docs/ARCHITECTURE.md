@@ -86,7 +86,7 @@ flowchart LR
   client -.->|flow test, dev only| server
 ```
 
-Pins (root `Cargo.toml`): weida rev `8e29fcb6…` and iced_impeccable rev `4c90fe0c…` are exact git revisions, because weida is alpha and its wire protocol may break within 0.x; moving a rev is its own change. iced 0.14, rmcp 3.5, axum 0.8, rusqlite 0.37 with bundled SQLite.
+Pins (root `Cargo.toml`): weida rev `8e29fcb6…` is an exact git revision, because weida is alpha and its wire protocol may break within 0.x; moving the rev is its own change. iced_impeccable 0.3 from crates.io, iced 0.14, rmcp 3.5, axum 0.8, rusqlite 0.37 with bundled SQLite.
 
 ## 4. Rooms, projects and tasks
 

@@ -61,7 +61,7 @@ iced-impeccable ctl /tmp/sw/a.sock tree                     # or target/debug/sc
 iced-impeccable ctl /tmp/sw/a.sock screenshot --annotate /tmp/sw/a.png   # look at it with Read
 ```
 
-Start hosts with `setsid … &`: a plain `&` dies with the harness's shell. `ctl -` reads a batch of commands from stdin; `~/code/iced_impeccable/README.md` lists every command. If `iced-impeccable` is missing, install it with `cargo install --path ~/code/iced_impeccable --bin iced-impeccable --locked`. A control that can only be reached by coordinates gets a widget id (`container(...).id("...")`) instead. Signals to the agent's own processes go by PID, never by name: `pkill schwitzer` would hit the user's app.
+Start hosts with `setsid … &`: a plain `&` dies with the harness's shell. `ctl -` reads a batch of commands from stdin; `~/code/iced_impeccable/README.md` lists every command. If `iced-impeccable` is missing, install it with `cargo install iced_impeccable --version 0.3.0 --locked`. A control that can only be reached by coordinates gets a widget id (`container(...).id("...")`) instead. Signals to the agent's own processes go by PID, never by name: `pkill schwitzer` would hit the user's app.
 
 A headless instance opens no folder dialog: the folder buttons (`#repo-browse`, `#projects-dir-browse`) answer with `$SCHWITZER_PICK_FOLDER` from the app's environment, or act as cancelled when it is unset.
 
@@ -97,7 +97,7 @@ Keep pure logic (`app/logic.rs`, `store.rs`, `proto`) free of iced types so it s
 - Errors: `thiserror` in the libraries (`schwitzer-proto`, `schwitzer-client`), `anyhow` in `schwitzer-server`; the app shows errors as text (`ApiError`'s `Display`). Log with `tracing`, to stderr: stdout belongs to the server's `server url:` line and to `ctl` replies. Poisoned mutexes are taken over with `unwrap_or_else(PoisonError::into_inner)`.
 - `unsafe_code` is forbidden workspace-wide.
 - UI work reads DESIGN.md (normative, with Daylight and Night tokens) and PRODUCT.md first and uses the impeccable skill (`.omp/skills/impeccable`). Only the style functions in `theme.rs` read the tokens; views never hard-code colours or sizes.
-- `weida` and `iced_impeccable` are pinned to exact git revisions in the root `Cargo.toml`. weida is alpha and its wire protocol may break within 0.x; moving the rev is its own change.
+- `weida` is pinned to an exact git revision in the root `Cargo.toml`: it is alpha and its wire protocol may break within 0.x; moving the rev is its own change. `iced_impeccable` comes from crates.io.
 - `SCHWITZER_PLAN.md` (the first cut's plan) and other local planning files stay untracked; the code is authoritative where they differ.
 
 ## Environment gotchas

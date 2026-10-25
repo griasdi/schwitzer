@@ -1988,8 +1988,9 @@ dependencies = [
 
 [[package]]
 name = "iced_impeccable"
-version = "0.2.0"
-source = "git+https://github.com/tuco86/iced_impeccable.git?rev=4c90fe0cfc87c90fa43693d1d299db35e0a1021c#4c90fe0cfc87c90fa43693d1d299db35e0a1021c"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2f3f0b112cf3e82114b5cf9f81f914d335c935e86fb605d0d967cb888fa2903"
 dependencies = [
  "font8x8",
  "iced",
@@ -1997,6 +1998,7 @@ dependencies = [
  "iced_runtime",
  "iced_selector",
  "png 0.18.1",
+ "serde_json",
  "tokio",
 ]
 
