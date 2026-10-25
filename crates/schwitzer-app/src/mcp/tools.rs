@@ -268,6 +268,11 @@ impl RoomRef {
     }
 }
 
+/// `arg` without surrounding whitespace; `None` when it is omitted or blank.
+fn named(arg: Option<&str>) -> Option<&str> {
+    arg.map(str::trim).filter(|a| !a.is_empty())
+}
+
 /// The index in `rooms` of the room a call means: `arg` is a room name (case-insensitive,
 /// exact) or a room id prefix of at least [`MIN_ID_PREFIX`] hex digits; omitted, the only
 /// joined room.
@@ -279,7 +284,7 @@ fn resolve_room(rooms: &[RoomRef], arg: Option<&str>) -> Result<usize, String> {
             .collect::<Vec<_>>()
             .join(", ")
     };
-    let Some(arg) = arg.map(str::trim).filter(|a| !a.is_empty()) else {
+    let Some(arg) = named(arg) else {
         return match rooms {
             [] => Err("No rooms joined. Join or create a room in the Schwitzer app.".into()),
             [_] => Ok(0),
@@ -345,7 +350,6 @@ fn find_project<'a>(projects: &'a [Project], arg: &str) -> Result<&'a Project, S
             "This room has no projects yet; a member creates one in the Schwitzer app.".into(),
         );
     }
-    let arg = arg.trim();
     let wanted = arg.to_lowercase();
     projects
         .iter()
@@ -365,15 +369,14 @@ fn find_project<'a>(projects: &'a [Project], arg: &str) -> Result<&'a Project, S
 /// The id of the project `arg` names in `room`, `None` when `arg` is omitted or blank. The room
 /// need only be loaded when a project is named.
 fn optional_project(room: &RoomRef, arg: Option<&str>) -> Result<Option<u64>, String> {
-    arg.map(str::trim)
-        .filter(|p| !p.is_empty())
+    named(arg)
         .map(|arg| find_project(&room.loaded()?.projects, arg).map(|p| p.id))
         .transpose()
 }
 
 /// The project a new task goes to: `arg` when given, else the room's only project.
 fn target_project<'a>(projects: &'a [Project], arg: Option<&str>) -> Result<&'a Project, String> {
-    if let Some(arg) = arg.map(str::trim).filter(|a| !a.is_empty()) {
+    if let Some(arg) = named(arg) {
         return find_project(projects, arg);
     }
     match projects {
@@ -1280,7 +1283,7 @@ mod tests {
     #[test]
     fn a_project_is_found_by_name_or_number_and_named_when_there_are_several() {
         let projects = room(1, "r", vec![]).state.unwrap().projects;
-        assert_eq!(find_project(&projects, " SITE ").unwrap().id, 2);
+        assert_eq!(target_project(&projects, Some(" SITE ")).unwrap().id, 2);
         assert_eq!(find_project(&projects, "1").unwrap().name, "app");
         let err = find_project(&projects, "nope").unwrap_err();
         assert_eq!(err, "No project matches \"nope\". Projects: app, site");
