@@ -12,11 +12,13 @@ pub mod logic;
 mod main_view;
 mod pages;
 mod plugins;
+mod projects;
 mod resume;
 mod rooms;
 mod settings_view;
 mod sticky;
 mod task_view;
+mod tasks;
 mod updates;
 mod widgets;
 
@@ -36,14 +38,14 @@ use iced::{Element, Length, Subscription, Task, Theme};
 use schwitzer_client::{Client, ClientError, ClientEvent};
 use schwitzer_proto::{
     Decision, Priority, Project, Request, Response, RoomId, RoomKey, RoomState, ServerAddr,
-    SessionInfo, Stage, Task as RoomTask, Work, caps, now_ms,
+    SessionInfo, Task as RoomTask, Work, caps, now_ms,
 };
 use serde::{Deserialize, Serialize};
 
 use self::chrome::RoomChoice;
 use self::logic::{Group, ServerStatus};
 use self::rooms::Rooms;
-use crate::bridge::{self, ClientKey, call, fire};
+use crate::bridge::{self, ClientKey, call};
 use crate::debug;
 use crate::mcp::{self, McpStatus};
 use crate::omp_plugin::PluginState;
@@ -53,9 +55,6 @@ use crate::system_notify;
 use crate::theme::{self, SP_2};
 use crate::update::{self, UpdateState};
 use crate::wsl;
-
-/// The agent name a pick claims the build with; the picker's own agent finishes it.
-const PICK_AGENT: &str = "omp";
 
 /// How long a status-bar notice stays.
 const NOTICE_MS: u64 = 5_000;
@@ -1103,14 +1102,7 @@ impl App {
                 self.forms.repo = s;
                 Task::none()
             }
-            Message::AddRepo => match self.link_repo(settings::expand_home(self.forms.repo.trim()))
-            {
-                Some(task) => {
-                    self.forms.repo.clear();
-                    task
-                }
-                None => Task::none(),
-            },
+            Message::AddRepo => self.add_repo(),
             Message::LinkRepo(path) => self.link_repo(path).unwrap_or_else(Task::none),
             Message::ChooseFolder(for_) => {
                 if self.folder_dialog {
@@ -1150,14 +1142,7 @@ impl App {
                     }
                 }
             }
-            Message::RemoveRepo(index) => {
-                let (Some(room), Some(project)) = (self.selected, self.selected_project()) else {
-                    return Task::none();
-                };
-                self.settings.unlink_repo(&room, project.id, index);
-                self.save_settings();
-                self.publish()
-            }
+            Message::RemoveRepo(index) => self.remove_repo(index),
             Message::InstallPlugin(index) => {
                 self.write_plugin(index, plugins::Write::Install);
                 // Installed: the prompt is done for good, also once the plugin is removed again.
@@ -1231,151 +1216,28 @@ impl App {
                 self.forms.new_project = s;
                 Task::none()
             }
-            Message::CreateProject => {
-                let name = caps::cut(self.forms.new_project.trim(), caps::PROJECT_NAME).to_owned();
-                let Some(room) = self.selected.filter(|_| !name.is_empty()) else {
-                    return Task::none();
-                };
-                call(
-                    self.request(room, Request::CreateProject { room, name }),
-                    move |result| Message::ProjectCreated(room, result),
-                )
-            }
-            Message::ProjectCreated(room, result) => {
-                match result {
-                    Ok(Response::Project(project)) => {
-                        self.forms.new_project.clear();
-                        self.choose_project(room, project.id);
-                        if self.selected == Some(room) && self.page != Page::FirstStart {
-                            self.page = Page::Main;
-                            self.expanded = None;
-                            self.reset_drafts();
-                        }
-                        self.sync_project_form();
-                        self.read_project_dirs();
-                        self.notify("Project created");
-                    }
-                    Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
-                    Err(e) => self.banner = Some(e),
-                }
-                Task::none()
-            }
+            Message::CreateProject => self.create_project(),
+            Message::ProjectCreated(room, result) => self.project_created(room, result),
             Message::ProjectNameInput(s) => {
                 self.forms.project_name = s;
                 Task::none()
             }
-            Message::RenameProject => {
-                let name = caps::cut(self.forms.project_name.trim(), caps::PROJECT_NAME).to_owned();
-                let (Some(room), Some(project)) = (self.selected, self.selected_project()) else {
-                    return Task::none();
-                };
-                if name.is_empty() || name == project.name {
-                    return Task::none();
-                }
-                let req = Request::RenameProject {
-                    room,
-                    project: project.id,
-                    name,
-                };
-                call(self.request(room, req), Message::ProjectRenamed)
-            }
-            Message::ProjectRenamed(result) => {
-                match result {
-                    Ok(Response::Project(project)) => {
-                        // The rename event may come after the reply: show the new name now.
-                        self.forms.project_name = project.name;
-                        self.notify("Project renamed");
-                    }
-                    Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
-                    Err(e) => self.banner = Some(e),
-                }
-                Task::none()
-            }
-            Message::DeleteProject => {
-                self.confirm = None;
-                let (Some(room), Some(project)) = (self.selected, self.selected_project()) else {
-                    return Task::none();
-                };
-                let req = Request::DeleteProject {
-                    room,
-                    project: project.id,
-                };
-                call(self.request(room, req), Message::ProjectDeleted)
-            }
-            Message::ProjectDeleted(result) => {
-                match result {
-                    Ok(Response::Ok) => {
-                        self.notify("Project deleted");
-                        if self.page == Page::ProjectSettings {
-                            return self.open_page(Page::RoomSettings);
-                        }
-                    }
-                    Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
-                    Err(e) => self.banner = Some(e),
-                }
-                Task::none()
-            }
-            Message::MoveTask(project) => {
-                let Some((state, task)) = self.open() else {
-                    return Task::none();
-                };
-                if task.project == project {
-                    return Task::none();
-                }
-                let room = state.id;
-                let req = Request::MoveTask {
-                    room,
-                    task: task.number,
-                    project,
-                };
-                call(self.request(room, req), Message::TaskMoved)
-            }
-            Message::TaskMoved(result) => {
-                match result {
-                    Ok(Response::Task(task)) => {
-                        let target = self
-                            .selected_state()
-                            .and_then(|s| s.projects.iter().find(|p| p.id == task.project))
-                            .map_or_else(|| format!("#{}", task.project), |p| p.name.clone());
-                        if self.expanded == Some(Expanded::Task(task.number)) {
-                            self.expanded = None;
-                            self.reset_drafts();
-                        }
-                        self.notify(&format!("#{} moved to {target}", task.number));
-                    }
-                    Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
-                    Err(e) => self.banner = Some(e),
-                }
-                Task::none()
-            }
+            Message::RenameProject => self.rename_project(),
+            Message::ProjectRenamed(result) => self.project_renamed(result),
+            Message::DeleteProject => self.delete_project(),
+            Message::ProjectDeleted(result) => self.project_deleted(result),
+            Message::MoveTask(project) => self.move_task(project),
+            Message::TaskMoved(result) => self.task_moved(result),
             Message::ProjectsDirInput(s) => {
                 self.forms.new_projects_dir = s;
                 Task::none()
             }
             Message::AddProjectsDir => {
-                let input = self.forms.new_projects_dir.trim();
-                if input.is_empty() {
-                    return Task::none();
-                }
-                if self.add_projects_dir(settings::expand_home(input)) {
-                    self.forms.new_projects_dir.clear();
-                }
+                self.submit_projects_dir();
                 Task::none()
             }
             Message::RemoveProjectsDir(index) => {
-                // An emptied list stays `Some`, so the defaults are not entered again.
-                let Some(dirs) = self
-                    .settings
-                    .projects_dirs
-                    .as_mut()
-                    .filter(|dirs| index < dirs.len())
-                else {
-                    return Task::none();
-                };
-                dirs.remove(index);
-                self.save_settings();
-                self.read_project_dirs();
-                self.notify("Projects folder removed");
+                self.remove_projects_dir(index);
                 Task::none()
             }
 
@@ -1388,59 +1250,15 @@ impl App {
                 Task::none()
             }
             Message::Propose => self.propose(),
-            Message::Proposed(result) => {
-                match result {
-                    Ok(response) => {
-                        self.forms.proposal_title.clear();
-                        self.forms.proposal_body = text_editor::Content::new();
-                        if matches!(self.expanded, Some(Expanded::New { .. })) {
-                            self.expanded = None;
-                        }
-                        let idea = matches!(&response, Response::Task(t) if t.stage == Stage::Idea);
-                        self.notify(if idea { "Idea added" } else { "Task proposed" });
-                    }
-                    Err(e) => self.banner = Some(e),
-                }
-                Task::none()
-            }
+            Message::Proposed(result) => self.proposed(result),
             Message::QuickIdea(action) => {
                 self.forms.quick_idea.perform(action);
                 Task::none()
             }
             Message::NoteIdea => self.note_idea(),
-            Message::IdeaNoted(result) => {
-                let sent = self.noting_idea.take();
-                match result {
-                    Ok(response) => {
-                        // Text typed while the request ran stays in the field.
-                        if Some(self.forms.quick_idea.text()) == sent {
-                            self.forms.quick_idea = text_editor::Content::new();
-                        }
-                        match response {
-                            Response::Task(t) => self.notify(&format!("Idea #{} added", t.number)),
-                            _ => self.notify("Idea added"),
-                        }
-                    }
-                    Err(e) => self.banner = Some(e),
-                }
-                Task::none()
-            }
+            Message::IdeaNoted(result) => self.idea_noted(result),
             Message::Pick(number) => self.pick(number),
-            Message::Picked(result) => {
-                self.picking = None;
-                match result {
-                    Ok((room, task)) => match &task.claim {
-                        Some(claim) => {
-                            let prompt = logic::pick_prompt(&room, &task, &claim.token);
-                            self.notify(&format!("#{} is yours, prompt copied", task.number));
-                            return iced::clipboard::write(prompt);
-                        }
-                        None => self.banner = Some("The claim came back empty".to_owned()),
-                    },
-                    Err(e) => self.banner = Some(e),
-                }
-                Task::none()
-            }
+            Message::Picked(result) => self.picked(result),
 
             Message::EditTask => {
                 self.proposal_folded = false;
@@ -1488,13 +1306,7 @@ impl App {
             }
             Message::SaveTask => self.save_task(),
             Message::ProposeIdea => self.propose_idea(),
-            Message::TaskSaved(result) => {
-                match result {
-                    Ok(_) => self.task_draft = None,
-                    Err(e) => self.banner = Some(e),
-                }
-                Task::none()
-            }
+            Message::TaskSaved(result) => self.task_saved(result),
             Message::EditPlan => {
                 self.plan_folded = false;
                 if let Some((_, task)) = self.open() {
@@ -1520,60 +1332,18 @@ impl App {
                 }
             }
             Message::SavePlan => self.save_plan(),
-            Message::PlanSaved(result) => {
-                match result {
-                    Ok(_) => self.plan_draft = None,
-                    Err(e) => self.banner = Some(e),
-                }
-                Task::none()
-            }
-            Message::SetPriority(priority) => match self.open_ids() {
-                Some((room, task)) => fire(self.request(
-                    room,
-                    Request::SetPriority {
-                        room,
-                        task,
-                        priority,
-                    },
-                )),
-                None => Task::none(),
-            },
+            Message::PlanSaved(result) => self.plan_saved(result),
+            Message::SetPriority(priority) => self.set_priority(priority),
             Message::AddWait(n) => self.set_waits(|w| w.push(n)),
             Message::RemoveWait(n) => self.set_waits(|w| w.retain(|x| *x != n)),
-            Message::Decide(number, decision) => match self.task_ids(number) {
-                Some((room, task)) => fire(self.request(
-                    room,
-                    Request::Decide {
-                        room,
-                        task,
-                        decision,
-                    },
-                )),
-                None => Task::none(),
-            },
-            Message::Unclaim(number) => match self.task_ids(number) {
-                Some((room, task)) => fire(self.request(
-                    room,
-                    Request::Unclaim {
-                        room,
-                        task,
-                        note: String::new(),
-                    },
-                )),
-                None => Task::none(),
-            },
+            Message::Decide(number, decision) => self.decide(number, decision),
+            Message::Unclaim(number) => self.unclaim(number),
             Message::NoteInput(s) => {
                 self.forms.note = s;
                 Task::none()
             }
             Message::AddNote => self.add_note(),
-            Message::NoteAdded(result) => {
-                match result {
-                    Ok(_) => self.forms.note.clear(),
-                    Err(e) => self.banner = Some(e),
-                }
-                Task::none()
-            }
+            Message::NoteAdded(result) => self.note_added(result),
         }
     }
 
@@ -1688,18 +1458,6 @@ impl App {
         self.read_project_dirs();
     }
 
-    /// Reads the subfolders of the searched folders.
-    fn read_project_dirs(&mut self) {
-        let mut dirs: Vec<PathBuf> = self
-            .searched_dirs()
-            .into_iter()
-            .flat_map(settings::subdirs)
-            .collect();
-        dirs.sort();
-        dirs.dedup();
-        self.project_dirs = dirs;
-    }
-
     /// Enters the default projects folders of every running distro seen for the first time.
     /// A distro whose homes could not be read yet (it may still be starting) is left for a
     /// later round.
@@ -1760,15 +1518,6 @@ impl App {
         Some((state, task))
     }
 
-    fn open_ids(&self) -> Option<(RoomId, u64)> {
-        self.open().map(|(state, task)| (state.id, task.number))
-    }
-
-    /// The selected room's id with task `number`, for the buttons on a slab.
-    fn task_ids(&self, number: u64) -> Option<(RoomId, u64)> {
-        self.selected_state().map(|s| (s.id, number))
-    }
-
     /// Whether `task` of `room` was approved a moment ago and waits for its build claim.
     fn handing_off(&self, room: RoomId, task: &RoomTask) -> bool {
         logic::handing_off(
@@ -1787,72 +1536,6 @@ impl App {
     ) -> impl Future<Output = Result<Response, ClientError>> + Send + 'static + use<> {
         let client = self.client.clone();
         async move { client.request(room, req).await }
-    }
-
-    fn submit_create(&mut self) -> Task<Message> {
-        let server = match self.forms.server_url.trim().parse::<ServerAddr>() {
-            Ok(server) => server,
-            Err(e) => {
-                self.banner = Some(format!("Server address: {e}"));
-                return Task::none();
-            }
-        };
-        let name = self.forms.room_name.trim();
-        if name.is_empty() {
-            self.banner = Some("Room name is empty".to_owned());
-            return Task::none();
-        }
-        let name = caps::cut(name, caps::ROOM_NAME).to_owned();
-        let client = self.client.clone();
-        call(
-            async move { client.create_room(server, name).await },
-            Message::Created,
-        )
-    }
-
-    fn on_created(&mut self, result: Result<RoomKey, String>) -> Task<Message> {
-        match result {
-            Ok(key) => {
-                self.settings.last_server = Some(key.server.to_string());
-                self.forms.room_name.clear();
-                self.sync_rooms();
-                self.select(Some(RoomId::of(&key.token)));
-                self.save_settings();
-                Task::batch([self.publish(), self.open_page(Page::Main)])
-            }
-            Err(e) => {
-                self.banner = Some(e);
-                Task::none()
-            }
-        }
-    }
-
-    fn submit_join(&mut self) -> Task<Message> {
-        let key = match self.forms.room_key.parse::<RoomKey>() {
-            Ok(key) => key,
-            Err(e) => {
-                self.banner = Some(format!("Room key: {e}"));
-                return Task::none();
-            }
-        };
-        let client = self.client.clone();
-        call(async move { client.join_room(key).await }, Message::Joined)
-    }
-
-    fn on_joined(&mut self, result: Result<RoomId, String>) -> Task<Message> {
-        match result {
-            Ok(room) => {
-                self.forms.room_key.clear();
-                self.sync_rooms();
-                self.select(Some(room));
-                self.save_settings();
-                Task::batch([self.publish(), self.open_page(Page::Main)])
-            }
-            Err(e) => {
-                self.banner = Some(e);
-                Task::none()
-            }
-        }
     }
 
     fn submit_name(&mut self) -> Task<Message> {
@@ -1887,53 +1570,11 @@ impl App {
         self.notify("Port saved");
     }
 
-    /// Adds `path` to the projects folders; `false` when it is not a folder on this machine
-    /// (with a banner). A folder already listed counts as added.
-    fn add_projects_dir(&mut self, path: PathBuf) -> bool {
-        let path = match logic::existing_folder(path) {
-            Ok(path) => path,
-            Err(banner) => {
-                self.banner = Some(banner);
-                return false;
-            }
-        };
-        let dirs = self.settings.projects_dirs.get_or_insert_with(Vec::new);
-        if dirs.contains(&path) {
-            return true;
-        }
-        dirs.push(path);
-        self.save_settings();
-        self.read_project_dirs();
-        self.notify("Projects folder added");
-        true
-    }
-
     /// Ends the first-start page: the projects folders and the entered WSL distros are saved
     /// from now on, starting with the list on the page.
     fn confirm_projects_dirs(&mut self) {
         self.page = Page::Main;
         self.save_settings();
-    }
-
-    /// Links `path` to the selected project; `None` when nothing was linked.
-    fn link_repo(&mut self, path: PathBuf) -> Option<Task<Message>> {
-        let room = self.selected?;
-        let project = self.selected_project()?.id;
-        let path = match logic::existing_folder(path) {
-            Ok(path) => path,
-            Err(banner) => {
-                self.banner = Some(banner);
-                return None;
-            }
-        };
-        let from_main = self.page == Page::Main;
-        self.settings.link_repo(&room, project, path.clone());
-        self.save_settings();
-        // Reads whether the repo carries the plugin already, so the prompt and the agent dot
-        // are right at once.
-        self.check_plugins();
-        self.plugin_prompt = (from_main && !self.plugins.contains_key(&path)).then_some(path);
-        Some(self.publish())
     }
 
     /// Index in [`Self::project_repos`] of the repo whose plugin prompt is open: linked to the
@@ -1944,193 +1585,6 @@ impl App {
             return None;
         }
         self.project_repos().iter().position(|r| r == repo)
-    }
-
-    fn propose(&mut self) -> Task<Message> {
-        let Some(Expanded::New { idea }) = self.expanded else {
-            return Task::none();
-        };
-        let (Some(room), Some(project), title) = (
-            self.selected,
-            self.selected_project().map(|p| p.id),
-            self.forms.proposal_title.trim(),
-        ) else {
-            return Task::none();
-        };
-        if title.is_empty() {
-            return Task::none();
-        }
-        let (title, body) = (title.to_owned(), self.forms.proposal_body.text());
-        let req = if idea {
-            Request::AddIdea {
-                room,
-                project,
-                title,
-                body,
-            }
-        } else {
-            Request::Propose {
-                room,
-                project,
-                title,
-                body,
-                waits_for: Vec::new(),
-            }
-        };
-        call(self.request(room, req), Message::Proposed)
-    }
-
-    /// Sends the quick idea field's text as an idea: the first line is the title, the rest the
-    /// details.
-    fn note_idea(&mut self) -> Task<Message> {
-        if self.noting_idea.is_some() {
-            return Task::none();
-        }
-        let text = self.forms.quick_idea.text();
-        let Some((title, body)) = logic::split_idea(&text) else {
-            return Task::none();
-        };
-        let (Some(room), Some(project)) = (self.selected, self.selected_project().map(|p| p.id))
-        else {
-            return Task::none();
-        };
-        let req = Request::AddIdea {
-            room,
-            project,
-            title: title.to_owned(),
-            body: body.to_owned(),
-        };
-        let task = call(self.request(room, req), Message::IdeaNoted);
-        self.noting_idea = Some(text);
-        task
-    }
-
-    /// Claims the build of an approved task for this member and hands back the room name and the
-    /// claimed task for the prompt.
-    fn pick(&mut self, number: u64) -> Task<Message> {
-        if self.picking.is_some() {
-            return Task::none();
-        }
-        let Some(state) = self.selected_state() else {
-            return Task::none();
-        };
-        let Some(task) = state.tasks.iter().find(|t| t.number == number) else {
-            return Task::none();
-        };
-        if !logic::pickable(task) || !task.open_waits(&state.tasks).is_empty() {
-            return Task::none();
-        }
-        let (room, name) = (state.id, state.name.clone());
-        self.picking = Some(number);
-        let client = self.client.clone();
-        call(
-            async move {
-                let claim = Request::Claim {
-                    room,
-                    work: Work::Build,
-                    project: None,
-                    task: Some(number),
-                    agent: PICK_AGENT.to_owned(),
-                };
-                match client.request(room, claim).await? {
-                    Response::Claimed(Some(task)) => Ok((name, task)),
-                    other => Err(ClientError::Proto(format!("unexpected reply: {other:?}"))),
-                }
-            },
-            Message::Picked,
-        )
-    }
-
-    fn save_task(&mut self) -> Task<Message> {
-        let (Some((state, task)), Some(draft)) = (self.open(), &self.task_draft) else {
-            return Task::none();
-        };
-        if draft.title.trim().is_empty() {
-            return Task::none();
-        }
-        let room = state.id;
-        let req = Request::EditTask {
-            room,
-            task: task.number,
-            title: draft.title.clone(),
-            body: draft.body.text(),
-            plan: task.plan.clone(),
-        };
-        call(self.request(room, req), Message::TaskSaved)
-    }
-
-    /// Sends the open task's waits after `edit`, when that changes them.
-    fn set_waits(&self, edit: impl FnOnce(&mut Vec<u64>)) -> Task<Message> {
-        let Some((state, task)) = self.open() else {
-            return Task::none();
-        };
-        let mut waits_for = task.waits_for.clone();
-        edit(&mut waits_for);
-        waits_for.sort_unstable();
-        waits_for.dedup();
-        if waits_for == task.waits_for {
-            return Task::none();
-        }
-        let room = state.id;
-        fire(self.request(
-            room,
-            Request::SetWaits {
-                room,
-                task: task.number,
-                waits_for,
-            },
-        ))
-    }
-
-    /// Writes the open idea up into a proposal with the draft's title and body.
-    fn propose_idea(&self) -> Task<Message> {
-        let (Some((state, task)), Some(draft)) = (self.open(), &self.task_draft) else {
-            return Task::none();
-        };
-        if task.stage != Stage::Idea || draft.title.trim().is_empty() {
-            return Task::none();
-        }
-        let room = state.id;
-        let req = Request::ProposeIdea {
-            room,
-            task: task.number,
-            title: draft.title.clone(),
-            body: draft.body.text(),
-            waits_for: Vec::new(),
-        };
-        call(self.request(room, req), Message::TaskSaved)
-    }
-
-    fn save_plan(&self) -> Task<Message> {
-        let (Some((state, task)), Some(draft)) = (self.open(), &self.plan_draft) else {
-            return Task::none();
-        };
-        let room = state.id;
-        let req = Request::EditTask {
-            room,
-            task: task.number,
-            title: task.title.clone(),
-            body: task.body.clone(),
-            plan: draft.text(),
-        };
-        call(self.request(room, req), Message::PlanSaved)
-    }
-
-    fn add_note(&mut self) -> Task<Message> {
-        let Some((room, task)) = self.open_ids() else {
-            return Task::none();
-        };
-        let text = self.forms.note.trim();
-        if text.is_empty() {
-            return Task::none();
-        }
-        let req = Request::AddNote {
-            room,
-            task,
-            text: text.to_owned(),
-            agent: None,
-        };
-        call(self.request(room, req), Message::NoteAdded)
     }
 
     // ---- client events and rooms ----------------------------------------------------------
