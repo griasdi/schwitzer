@@ -276,22 +276,20 @@ impl Client {
 
     /// Starts a debug session in `room` with this member as master.
     pub async fn debug_start(&self, room: RoomId) -> Result<DebugSession, ClientError> {
-        match self.request(room, Request::DebugStart { room }).await? {
-            Response::Debug(session) => {
-                lock(&self.0.debug_rejoin).insert(room, session.id);
-                Ok(session)
-            }
-            other => Err(unexpected(&other)),
-        }
+        self.enter_debug(room, Request::DebugStart { room }).await
     }
 
     /// Joins the running debug session of `room`.
     pub async fn debug_join(&self, room: RoomId) -> Result<DebugSession, ClientError> {
         let session = self.debug_id(room)?;
-        match self
-            .request(room, Request::DebugJoin { room, session })
-            .await?
-        {
+        self.enter_debug(room, Request::DebugJoin { room, session })
+            .await
+    }
+
+    /// Sends `req`, which puts this member into the debug session of `room`, and remembers
+    /// the session to rejoin after a reconnect.
+    async fn enter_debug(&self, room: RoomId, req: Request) -> Result<DebugSession, ClientError> {
+        match self.request(room, req).await? {
             Response::Debug(session) => {
                 lock(&self.0.debug_rejoin).insert(room, session.id);
                 Ok(session)
