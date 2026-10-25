@@ -12,7 +12,7 @@ use super::list;
 use super::logic;
 use super::widgets::{
     self, LAMP, chevron, fold_button, heading, hrule, icon_button, icon_text_button, id_button,
-    lamp, member_tag_of, muted, text_button,
+    lamp, member_tag_of, muted, segment, text_button,
 };
 use super::{App, Message, TaskText, sticky};
 use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
@@ -508,20 +508,19 @@ fn plan<'a>(
 }
 
 fn priority(task: &Task) -> Element<'_, Message> {
-    let segment = |id: &'static str, label: &'static str, value: Priority| {
-        id_button(
+    let option = |id: &'static str, label: &'static str, value: Priority| {
+        segment(
             id,
-            container(text(label).size(TS_12).font(MEDIUM)).padding([SP_1, SP_3]),
-            Some(Message::SetPriority(value)),
-            theme::button_segment(task.priority == value),
-            Length::Shrink,
+            label,
+            task.priority == value,
+            Message::SetPriority(value),
         )
     };
     row![
         heading("Priority").width(Length::Fill),
-        segment("prio-high", "High", Priority::High),
-        segment("prio-normal", "Normal", Priority::Normal),
-        segment("prio-low", "Low", Priority::Low),
+        option("prio-high", "High", Priority::High),
+        option("prio-normal", "Normal", Priority::Normal),
+        option("prio-low", "Low", Priority::Low),
     ]
     .spacing(SP_1)
     .align_y(Alignment::Center)

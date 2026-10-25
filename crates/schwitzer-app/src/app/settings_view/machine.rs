@@ -1,6 +1,6 @@
 //! The pages of this machine: the omp connection, the projects folders, and the updates.
 
-use iced::widget::{column, container, row, text};
+use iced::widget::{column, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_release::Channel;
 
@@ -8,12 +8,12 @@ use super::{Switch, projects_folders, repos, switch_row};
 use crate::app::icons::{Icon, Tone, icon};
 use crate::app::logic;
 use crate::app::pages::{frame, section};
-use crate::app::widgets::{dot, heading, id_button, input, muted, path_text, text_button};
+use crate::app::widgets::{dot, heading, input, muted, path_text, segment, text_button};
 use crate::app::{App, Message};
 use crate::mcp::McpStatus;
 use crate::omp_plugin::count_outdated;
 use crate::settings;
-use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
+use crate::theme::{self, SP_1, SP_2, SP_4, TS_14};
 use crate::update::UpdateState;
 
 /// The omp connection: its port, the plugins in the shared repos, and where sessions are read.
@@ -173,20 +173,19 @@ pub fn updates_page(app: &App) -> Element<'_, Message> {
         ),
     };
     let dev = app.channel() == Channel::Dev;
-    let segment = |id: &'static str, label: &'static str, value: Channel| {
-        id_button(
+    let option = |id: &'static str, label: &'static str, value: Channel| {
+        segment(
             id,
-            container(text(label).size(TS_12).font(MEDIUM)).padding([SP_1, SP_3]),
-            Some(Message::UpdateChannel(value)),
-            theme::button_segment(app.channel() == value),
-            Length::Shrink,
+            label,
+            app.channel() == value,
+            Message::UpdateChannel(value),
         )
     };
     let channel = column![
         row![
             heading("Channel").width(Length::Fill),
-            segment("channel-release", "Release", Channel::Release),
-            segment("channel-dev", "Dev", Channel::Dev),
+            option("channel-release", "Release", Channel::Release),
+            option("channel-dev", "Dev", Channel::Dev),
         ]
         .spacing(SP_1)
         .align_y(Alignment::Center),

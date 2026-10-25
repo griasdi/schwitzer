@@ -66,6 +66,22 @@ pub fn id_button<'a>(
     .into()
 }
 
+/// One option of a segmented choice: a small text button, filled while `on`.
+pub fn segment<'a>(
+    id: &'static str,
+    label: &'static str,
+    on: bool,
+    message: Message,
+) -> Element<'a, Message> {
+    id_button(
+        id,
+        container(text(label).size(TS_12).font(MEDIUM)).padding([SP_1, SP_3]),
+        Some(message),
+        theme::button_segment(on),
+        Length::Shrink,
+    )
+}
+
 /// The fold chevron of a group header, a fold head or a license: 14 px, muted.
 pub fn chevron<'a>(open: bool) -> svg::Svg<'a, Theme> {
     let glyph = if open {
