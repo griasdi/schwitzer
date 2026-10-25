@@ -8,7 +8,7 @@ use schwitzer_proto::{
     ApiError, Decision, MemberId, Priority, Project, Request, Response, RoomId, RoomKey, RoomState,
     ServerAddr, Stage, Task, Work, caps,
 };
-use schwitzer_server::{Options, Server};
+use schwitzer_server::{Options, Releases, Server};
 use tempfile::TempDir;
 use tokio::sync::broadcast::{Receiver, error::RecvError};
 
@@ -20,8 +20,7 @@ fn options(listen: SocketAddr, data: &TempDir) -> Options {
         public_host: "127.0.0.1".into(),
         data_dir: data.path().to_path_buf(),
         // Tests never reach GitHub.
-        releases_url: None,
-        auto_update: None,
+        releases: None,
     }
 }
 
@@ -1012,7 +1011,10 @@ async fn the_server_announces_the_newest_release_even_above_its_own_version() {
     let data = TempDir::new().unwrap();
     let listen: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let server = schwitzer_server::start(Options {
-        releases_url: Some(serve_feed(body)),
+        releases: Some(Releases {
+            url: serve_feed(body),
+            auto_update: None,
+        }),
         ..options(listen, &data)
     })
     .await

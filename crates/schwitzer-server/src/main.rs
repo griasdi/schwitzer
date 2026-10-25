@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use schwitzer_release::RELEASES_URL;
-use schwitzer_server::{AutoUpdate, Options, Stop, start};
+use schwitzer_server::{AutoUpdate, Options, Releases, Stop, start};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -64,8 +64,10 @@ async fn main() -> ExitCode {
         listen: cli.listen,
         public_host: cli.public_host,
         data_dir: cli.data_dir,
-        releases_url: Some(cli.releases_url),
-        auto_update: auto_update.clone(),
+        releases: Some(Releases {
+            url: cli.releases_url,
+            auto_update,
+        }),
     };
     let mut server = match start(opts).await {
         Ok(server) => server,
@@ -82,13 +84,10 @@ async fn main() -> ExitCode {
             tracing::error!("server task {task} ended");
             ExitCode::FAILURE
         }
-        Stop::Updated(version) => {
+        Stop::Updated { version, update } => {
             tracing::info!("restarting into {version}");
             // Closes the connections, so clients reconnect at once, and frees the port.
             server.shutdown().await;
-            let Some(update) = &auto_update else {
-                unreachable!("only --auto-update installs releases");
-            };
             let e = update.restart();
             // The new program is in place: a supervisor restarting on failure starts it.
             tracing::error!("cannot restart into {version}: {e}");

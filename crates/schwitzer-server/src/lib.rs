@@ -45,10 +45,17 @@ pub struct Options {
     pub public_host: String,
     /// Directory for the database and the server's identity.
     pub data_dir: PathBuf,
-    /// GitHub API URL of the release list, checked every two minutes; `None` checks nothing.
-    pub releases_url: Option<String>,
+    /// The release check; `None` checks nothing (and cannot auto update).
+    pub releases: Option<Releases>,
+}
+
+/// The release check of a server.
+#[derive(Debug, Clone)]
+pub struct Releases {
+    /// GitHub API URL of the release list, checked every two minutes.
+    pub url: String,
     /// Installs the newest build of its channel (see [`AutoUpdate`]) over the program file and
-    /// stops with [`Stop::Updated`]; needs `releases_url`.
+    /// stops with [`Stop::Updated`].
     pub auto_update: Option<AutoUpdate>,
 }
 
@@ -143,8 +150,12 @@ impl Shared {
 pub enum Stop {
     /// An endpoint task ended or panicked: they serve until aborted, so this is a failure.
     Failed(&'static str),
-    /// `--auto-update` installed this release over the program file: restart into it.
-    Updated(semver::Version),
+    /// `--auto-update` installed this release over the program file: restart into it with
+    /// [`AutoUpdate::restart`].
+    Updated {
+        version: semver::Version,
+        update: AutoUpdate,
+    },
 }
 
 /// A running server. Dropping it stops the endpoints.
@@ -152,8 +163,9 @@ pub struct Server {
     /// How clients reach this server.
     pub addr: ServerAddr,
     tasks: JoinSet<&'static str>,
-    /// The release `--auto-update` installed; `None` without auto update.
-    installed: Option<oneshot::Receiver<semver::Version>>,
+    /// The release `--auto-update` installs, with what restarts into it; `None` without
+    /// auto update.
+    installed: Option<(AutoUpdate, oneshot::Receiver<semver::Version>)>,
     binding: Binding,
     _listener: Listener,
     _runtime: Runtime,
@@ -164,8 +176,8 @@ impl Server {
     pub async fn stopped(&mut self) -> Stop {
         let installed = async {
             match self.installed.as_mut() {
-                Some(rx) => match rx.await {
-                    Ok(version) => version,
+                Some((update, rx)) => match rx.await {
+                    Ok(version) => (version, update.clone()),
                     Err(_) => std::future::pending().await,
                 },
                 None => std::future::pending().await,
@@ -182,7 +194,7 @@ impl Server {
             }
         };
         tokio::select! {
-            version = installed => Stop::Updated(version),
+            (version, update) = installed => Stop::Updated { version, update },
             task = ended => Stop::Failed(task),
         }
     }
@@ -198,9 +210,6 @@ impl Server {
 
 /// Opens the store and the identity, binds the QUIC endpoint and starts serving.
 pub async fn start(opts: Options) -> anyhow::Result<Server> {
-    if opts.auto_update.is_some() && opts.releases_url.is_none() {
-        anyhow::bail!("auto update needs the release check");
-    }
     std::fs::create_dir_all(&opts.data_dir)
         .with_context(|| format!("creating {}", opts.data_dir.display()))?;
     let store = Store::open(&opts.data_dir.join("schwitzer.db"))?;
@@ -250,10 +259,10 @@ pub async fn start(opts: Options) -> anyhow::Result<Server> {
     spawn!("rpc", rpc::serve(state.clone(), rpc_replier));
     spawn!("events", events::serve(state.clone(), events_replier));
     let mut installed = None;
-    if let Some(url) = opts.releases_url {
-        let update = opts.auto_update.map(|updater| {
+    if let Some(Releases { url, auto_update }) = opts.releases {
+        let update = auto_update.map(|updater| {
             let (tx, rx) = oneshot::channel();
-            installed = Some(rx);
+            installed = Some((updater.clone(), rx));
             (updater, tx)
         });
         spawn!("release check", release::watch(state.clone(), url, update));
