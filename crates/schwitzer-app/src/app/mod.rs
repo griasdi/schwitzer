@@ -2732,10 +2732,20 @@ fn key_message(event: keyboard::Event) -> Option<Message> {
     }
 }
 
-/// Scrolls the task list so the element with widget id `id` shows: when its top is above the
-/// list, or its first list-height is below it, its top goes to the top of the list. Runs after
-/// the next layout, so it finds an element the same update opened.
-fn reveal(id: &'static str) -> Task<Message> {
+/// Where the task list lies, as the selector found it.
+struct ListView {
+    bounds: iced::Rectangle,
+    content_bounds: iced::Rectangle,
+    translation: iced::Vector,
+}
+
+/// Scrolls the task list to the offset `offset` returns for the element with widget id `id`,
+/// given the list and the element's bounds; `None` leaves the list where it is. Runs after the
+/// next layout, so it finds an element the same update opened.
+fn reveal_by(
+    id: &'static str,
+    offset: fn(&ListView, iced::Rectangle) -> Option<f32>,
+) -> Task<Message> {
     selector::find(selector::id(list::LIST_ID)).then(move |list| {
         let Some(Target::Scrollable {
             bounds,
@@ -2746,56 +2756,44 @@ fn reveal(id: &'static str) -> Task<Message> {
         else {
             return Task::none();
         };
+        let list = ListView {
+            bounds,
+            content_bounds,
+            translation,
+        };
         selector::find(selector::id(id)).then(move |target| {
             let Some(target) = target else {
                 return Task::none();
             };
-            let el = target.bounds();
-            let top = el.y - translation.y;
-            let bottom = top + el.height.min(bounds.height);
-            if top >= bounds.y && bottom <= bounds.y + bounds.height {
-                return Task::none();
+            match offset(&list, target.bounds()) {
+                Some(y) => operation::scroll_to(list::LIST_ID, AbsoluteOffset { x: 0.0, y }),
+                None => Task::none(),
             }
-            operation::scroll_to(
-                list::LIST_ID,
-                AbsoluteOffset {
-                    x: 0.0,
-                    y: (el.y - content_bounds.y - SP_2).max(0.0),
-                },
-            )
         })
     })
 }
 
+/// Scrolls the task list so the element with widget id `id` shows: when its top is above the
+/// list, or its first list-height is below it, its top goes to the top of the list.
+fn reveal(id: &'static str) -> Task<Message> {
+    reveal_by(id, |list, el| {
+        let top = el.y - list.translation.y;
+        let bottom = top + el.height.min(list.bounds.height);
+        if top >= list.bounds.y && bottom <= list.bounds.y + list.bounds.height {
+            return None;
+        }
+        Some((el.y - list.content_bounds.y - SP_2).max(0.0))
+    })
+}
+
 /// Scrolls the task list so the bottom of element `id` lies inside it, when the element ends
-/// below the list's bottom edge. Runs after the next layout, so it finds what the update opened.
+/// below the list's bottom edge.
 fn reveal_bottom(id: &'static str) -> Task<Message> {
-    selector::find(selector::id(list::LIST_ID)).then(move |list| {
-        let Some(Target::Scrollable {
-            bounds,
-            content_bounds,
-            translation,
-            ..
-        }) = list
-        else {
-            return Task::none();
-        };
-        selector::find(selector::id(id)).then(move |target| {
-            let Some(target) = target else {
-                return Task::none();
-            };
-            let el = target.bounds();
-            if el.y + el.height - translation.y <= bounds.y + bounds.height {
-                return Task::none();
-            }
-            operation::scroll_to(
-                list::LIST_ID,
-                AbsoluteOffset {
-                    x: 0.0,
-                    y: (el.y + el.height + SP_2 - content_bounds.y - bounds.height).max(0.0),
-                },
-            )
-        })
+    reveal_by(id, |list, el| {
+        if el.y + el.height - list.translation.y <= list.bounds.y + list.bounds.height {
+            return None;
+        }
+        Some((el.y + el.height + SP_2 - list.content_bounds.y - list.bounds.height).max(0.0))
     })
 }
 
