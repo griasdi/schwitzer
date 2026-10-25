@@ -308,12 +308,15 @@ pub fn work_label(work: Work) -> &'static str {
     }
 }
 
-/// The name of a member, or the start of the id when the member is unknown.
+/// The name of a member, or the start of the id when the member is unknown or never said
+/// hello (the server sends an empty name then).
 pub fn member_name(members: &[Member], id: &MemberId) -> String {
     members
         .iter()
         .find(|m| &m.id == id)
-        .map_or_else(|| id.short(), |m| m.name.clone())
+        .map(|m| m.name.as_str())
+        .filter(|name| !name.is_empty())
+        .map_or_else(|| id.short(), str::to_owned)
 }
 
 /// The room's name, or `Room <short id>` before its server sent it.

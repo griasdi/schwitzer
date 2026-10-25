@@ -188,12 +188,7 @@ pub fn members(app: &App) -> Option<Element<'_, Message>> {
     let entries = logic::members_by_presence(&state.members)
         .into_iter()
         .map(|m| {
-            // The server sends an empty name for a member that never said hello.
-            let name = if m.name.is_empty() {
-                m.id.short()
-            } else {
-                m.name.clone()
-            };
+            let name = logic::member_name(&state.members, &m.id);
             let presence = if m.online { "online" } else { "offline" };
             let you = if m.id == me { " (you)" } else { "" };
             with_tip(

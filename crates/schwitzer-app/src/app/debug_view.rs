@@ -10,7 +10,7 @@ use super::icons::{Icon, Tone};
 use super::logic;
 use super::pages::{frame, section};
 use super::widgets::{
-    confirm_row, heading, icon_button, icon_text_button, member_tag, muted, path_text, pill,
+    confirm_row, heading, icon_button, icon_text_button, member_tag_of, muted, path_text, pill,
     text_button,
 };
 use super::{App, Confirm, Message};
@@ -97,12 +97,10 @@ pub fn page(app: &App) -> Element<'_, Message> {
 
 /// The members as name tags.
 fn tags<'a>(state: &RoomState, members: &[MemberId]) -> Element<'a, Message> {
-    row(members
-        .iter()
-        .map(|m| member_tag(logic::member_name(&state.members, m), logic::member_hue(m))))
-    .spacing(SP_1)
-    .wrap()
-    .into()
+    row(members.iter().map(|m| member_tag_of(&state.members, m)))
+        .spacing(SP_1)
+        .wrap()
+        .into()
 }
 
 fn joined<'a>(
@@ -114,12 +112,9 @@ fn joined<'a>(
     let master = session.master == me;
     let mut people = column![heading("People")].spacing(SP_2);
     for m in &session.members {
-        let mut line = row![member_tag(
-            logic::member_name(&state.members, m),
-            logic::member_hue(m)
-        )]
-        .spacing(SP_1)
-        .align_y(Alignment::Center);
+        let mut line = row![member_tag_of(&state.members, m)]
+            .spacing(SP_1)
+            .align_y(Alignment::Center);
         if *m == session.master {
             line = line.push(pill("master"));
         }
@@ -186,19 +181,13 @@ fn joined<'a>(
     }
     for entry in entries {
         let i = &entry.instruction;
-        let mut who = row![member_tag(
-            logic::member_name(&state.members, &i.from),
-            logic::member_hue(&i.from)
-        )]
-        .spacing(SP_1)
-        .align_y(Alignment::Center);
+        let mut who = row![member_tag_of(&state.members, &i.from)]
+            .spacing(SP_1)
+            .align_y(Alignment::Center);
         if master {
             who = who.push(muted("to"));
             for to in &i.to {
-                who = who.push(member_tag(
-                    logic::member_name(&state.members, to),
-                    logic::member_hue(to),
-                ));
+                who = who.push(member_tag_of(&state.members, to));
             }
         } else {
             who = who.push(pill(if entry.taken { "in omp" } else { "waiting" }));

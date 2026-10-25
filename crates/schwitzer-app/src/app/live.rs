@@ -4,10 +4,10 @@
 use iced::widget::text::Wrapping;
 use iced::widget::{Space, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{RoomState, SessionInfo};
+use schwitzer_proto::{Member, MemberId, RoomState, SessionInfo};
 
 use super::logic;
-use super::widgets::{self, chevron, fold_button, id_button, member_tag, muted};
+use super::widgets::{self, chevron, fold_button, id_button, member_tag_of, muted};
 use super::{App, Message};
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 
@@ -20,11 +20,9 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, project: u64) -> Element<'a,
     let mut rows = column![].spacing(SP_1);
     let mut count = 0;
     for (member, list) in &state.sessions {
-        let owner = logic::member_name(&state.members, member);
-        let hue = logic::member_hue(member);
         for session in list.iter().filter(|s| s.projects.contains(&project)) {
             count += 1;
-            rows = rows.push(session_row(app, owner.clone(), hue, session));
+            rows = rows.push(session_row(app, &state.members, member, session));
         }
     }
     let line = row![
@@ -69,8 +67,8 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, project: u64) -> Element<'a,
 
 fn session_row<'a>(
     app: &'a App,
-    owner: String,
-    hue: usize,
+    members: &[Member],
+    member: &MemberId,
     session: &'a SessionInfo,
 ) -> Element<'a, Message> {
     let idle = app.now_ms.saturating_sub(session.active_ms) > logic::IDLE_AFTER_MS;
@@ -103,7 +101,7 @@ fn session_row<'a>(
     }
     container(
         row![
-            member_tag(owner, hue),
+            member_tag_of(members, member),
             container(column![text(title).size(TS_14).wrapping(Wrapping::None), facts].spacing(2))
                 .width(Length::Fill)
                 .clip(true),

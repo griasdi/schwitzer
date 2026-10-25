@@ -12,7 +12,7 @@ use super::list;
 use super::logic;
 use super::widgets::{
     self, LAMP, chevron, fold_button, heading, hrule, icon_button, icon_text_button, id_button,
-    lamp, member_tag, muted, text_button,
+    lamp, member_tag_of, muted, text_button,
 };
 use super::{App, Message, TaskText, sticky};
 use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
@@ -304,10 +304,7 @@ fn people<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a,
         } else {
             "Proposed by"
         }),
-        member_tag(
-            logic::member_name(&state.members, &task.author),
-            logic::member_hue(&task.author)
-        ),
+        member_tag_of(&state.members, &task.author),
         muted(format!(
             "{} ago",
             logic::ago(app.now_ms.saturating_sub(task.created_ms))
@@ -323,10 +320,7 @@ fn people<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a,
         line,
         row![
             icon(Icon::Bot, 14.0, Tone::Muted),
-            member_tag(
-                logic::member_name(&state.members, &claim.member),
-                logic::member_hue(&claim.member)
-            ),
+            member_tag_of(&state.members, &claim.member),
             muted(format!(
                 "{} {} for {}",
                 claim.agent,
@@ -646,12 +640,9 @@ fn notes<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, 
         ));
     }
     for (i, note) in task.notes.iter().enumerate() {
-        let mut who = row![member_tag(
-            logic::member_name(&state.members, &note.author),
-            logic::member_hue(&note.author)
-        )]
-        .spacing(6)
-        .align_y(Alignment::Center);
+        let mut who = row![member_tag_of(&state.members, &note.author)]
+            .spacing(6)
+            .align_y(Alignment::Center);
         if let Some(agent) = &note.agent {
             who = who
                 .push(icon(Icon::Bot, 14.0, Tone::Muted))

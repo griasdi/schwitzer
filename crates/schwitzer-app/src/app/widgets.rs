@@ -5,7 +5,7 @@
 
 use iced::widget::{Space, button, container, pick_list, row, svg, text, text_input, tooltip};
 use iced::{Alignment, Element, Length, Theme};
-use schwitzer_proto::{Priority, Stage, Task};
+use schwitzer_proto::{Member, MemberId, Priority, Stage, Task};
 
 use super::Message;
 use super::icons::{Icon, Tone, icon};
@@ -284,6 +284,12 @@ pub fn member_tag<'a>(name: impl text::IntoFragment<'a>, hue: usize) -> Element<
         .padding([2.0, SP_2])
         .style(theme::tag(hue))
         .into()
+}
+
+/// The name tag of member `id` of a room's `members`; an unknown member shows the start of
+/// the id.
+pub fn member_tag_of<'a>(members: &[Member], id: &MemberId) -> Element<'a, Message> {
+    member_tag(logic::member_name(members, id), logic::member_hue(id))
 }
 
 /// A quiet pill with a label.

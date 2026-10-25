@@ -11,7 +11,7 @@ use super::logic::{self, Group, MissingSession};
 use super::task_view;
 use super::widgets::{
     self, LAMP, chevron, fold_button, icon_button, icon_text_button, id_button, lamp, lamp_kind,
-    member_tag, muted, priority_pill, with_tip,
+    member_tag_of, muted, priority_pill, with_tip,
 };
 use super::{App, Expanded, Message};
 use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
@@ -196,10 +196,7 @@ pub fn summary<'a>(
         meta = meta.push(with_tip(muted(label), why));
     }
     if let Some(claim) = &task.claim {
-        meta = meta.push(member_tag(
-            logic::member_name(&state.members, &claim.member),
-            logic::member_hue(&claim.member),
-        ));
+        meta = meta.push(member_tag_of(&state.members, &claim.member));
     }
     column![
         row![

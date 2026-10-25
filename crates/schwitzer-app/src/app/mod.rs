@@ -2472,10 +2472,11 @@ impl App {
             }
             ClientEvent::DebugInbox { room, fresh } => {
                 if let Some(entry) = fresh.filter(|e| e.for_me) {
-                    let from = self.rooms.state(room).map_or_else(
-                        || entry.instruction.from.short(),
-                        |s| logic::member_name(&s.members, &entry.instruction.from),
-                    );
+                    let members = self
+                        .rooms
+                        .state(room)
+                        .map_or(&[][..], |s| s.members.as_slice());
+                    let from = logic::member_name(members, &entry.instruction.from);
                     self.notify(&format!(
                         "Debug instruction #{} from {from}",
                         entry.instruction.id
