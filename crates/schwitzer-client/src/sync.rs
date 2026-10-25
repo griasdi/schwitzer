@@ -123,15 +123,13 @@ impl Client {
         let mut ready = false;
         loop {
             let frame = read_frame::<Event, _>(&mut stream, MAX_EVENT_FRAME);
-            let frame = if ready {
-                frame.await
+            let event = if ready {
+                frame.await?
             } else {
                 // A server that stops sending before `Ready` has stalled.
-                tokio::time::timeout(BACKLOG_STALL, frame)
-                    .await
-                    .map_err(|_| ClientError::Timeout)?
+                within_stall(frame).await?
             };
-            let Some(event) = frame? else {
+            let Some(event) = event else {
                 return Ok(());
             };
             match event {
