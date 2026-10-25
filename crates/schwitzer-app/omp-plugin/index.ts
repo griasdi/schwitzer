@@ -208,6 +208,7 @@ const SUBCOMMANDS = [
 const COMMAND_ARGS = "plan [#n] | build [#n | new] | propose [#n | text] | idea <text> | debug [stop]";
 const USAGE = `Usage: /schwitzer ${COMMAND_ARGS}`;
 const LEAVE_PLAN_MODE = "Leave plan mode, then run /schwitzer build again.";
+const NOT_JOINED = "The Schwitzer app has not joined a room with a project this repo is linked to.";
 const TITLE_BYTES = 200; // caps::TITLE on the server
 const NOTE_BYTES = 16 * 1024; // caps::NOTE on the server
 const MAX_COMMITS = 50; // commits listed in a finish note at most
@@ -773,6 +774,16 @@ function taskNumber(arg: string): number | undefined {
   return m ? Number(m[1]) : undefined;
 }
 
+/** The notice that none of this repo's Schwitzer projects holds task `number`. */
+function noTaskNumbered(number: number): string {
+  return `No task #${number} in this repo's Schwitzer projects.`;
+}
+
+/** Whether `found` spans several projects, so that a label has to name its project. */
+function severalProjects(found: Candidate[]): boolean {
+  return new Set(found.map((c) => `${c.room}/${c.projectName}`)).size > 1;
+}
+
 /** Task `number` in each configured project of a joined room. Numbers count per room, so a repo
  *  linked to projects in several rooms may find more than one. */
 async function tasksNumbered(config: Config, number: number): Promise<Candidate[]> {
@@ -842,7 +853,7 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, number: n
   if (number !== undefined) {
     const found = await tasksNumbered(config, number);
     if (found.length === 0) {
-      ctx.ui.notify(`No task #${number} in this repo's Schwitzer projects.`, "info");
+      ctx.ui.notify(noTaskNumbered(number), "info");
       return;
     }
     const free = found.filter((c) => notClaimable(c.task, work) === undefined);
@@ -860,7 +871,7 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, number: n
     ctx.ui.notify(work === "plan" ? "No Schwitzer task waits for a plan." : "No approved Schwitzer task waits to be built.", "info");
     return;
   }
-  const several = new Set(open.map((c) => `${c.room}/${c.projectName}`)).size > 1;
+  const several = severalProjects(open);
   const labels = open.map(
     ({ task, projectName }) =>
       `#${task.number} ${task.title}` +
@@ -983,7 +994,7 @@ async function addIdea(ctx: Ctx, config: Config, text: string): Promise<void> {
   }
   const projects = ownProjects(config, await listRooms(config));
   if (projects.length === 0) {
-    ctx.ui.notify("The Schwitzer app has not joined a room with a project this repo is linked to.", "info");
+    ctx.ui.notify(NOT_JOINED, "info");
     return;
   }
   const target = await pickProject(ctx, projects, "Note the idea in which Schwitzer project?", []);
@@ -1013,7 +1024,7 @@ async function proposeTask(pi: Pi, ctx: Ctx, config: Config, text: string): Prom
     if (ideas.length === 0) {
       ctx.ui.notify(
         found.length === 0
-          ? `No task #${number} in this repo's Schwitzer projects.`
+          ? noTaskNumbered(number)
           : found.length === 1
             ? `Task #${number} is ${found[0].task.stage.replace("_", " ")}, not an idea; only an idea can be written up into a proposal.`
             : `Task #${number} is not an idea in any of this repo's Schwitzer projects.`,
@@ -1028,7 +1039,7 @@ async function proposeTask(pi: Pi, ctx: Ctx, config: Config, text: string): Prom
   if (text === "") {
     const ideas = await unclaimed(config, "idea");
     if (ideas.length > 0) {
-      const several = new Set(ideas.map((c) => `${c.room}/${c.projectName}`)).size > 1;
+      const several = severalProjects(ideas);
       const labels = [
         "New proposal",
         ...ideas.map(({ task, projectName }) => `#${task.number} ${task.title}` + (several ? ` · ${projectName}` : "")),
@@ -1045,7 +1056,7 @@ async function proposeTask(pi: Pi, ctx: Ctx, config: Config, text: string): Prom
   const own = ownProjects(config, rows);
   const others = otherProjects(config, rows);
   if (own.length === 0) {
-    ctx.ui.notify("The Schwitzer app has not joined a room with a project this repo is linked to.", "info");
+    ctx.ui.notify(NOT_JOINED, "info");
     return;
   }
   const target = await pickProject(ctx, own, "Propose to which Schwitzer project?", others);
@@ -1288,54 +1299,83 @@ async function submitPlan(event: PlanReviewEvent, claim: TaskClaim, ctx: Ctx): P
   }
 }
 
+/** How `pollWatch` asks the app and acts on its answers. */
+interface Poll<T> {
+  everyMs: number;
+  /** Shown once when a read fails because the app does not answer. */
+  unreachable: string;
+  /** Checked before each read: "stop" ends the watch, "skip" waits for the next round. */
+  gate: () => "stop" | "skip" | undefined;
+  read: () => Promise<T>;
+  /** Acts on an answer; "stop" ends the watch. */
+  handle: (answer: T) => Promise<"stop" | undefined>;
+}
+
+/** Asks the app every `everyMs` until the watch `me` is stopped or `handle` says stop. An app that
+ *  does not answer is warned about once and asked again. */
+async function pollWatch<T>(ctx: Ctx, me: { stopped: boolean }, poll: Poll<T>): Promise<void> {
+  let warned = false;
+  while (!me.stopped) {
+    await Bun.sleep(poll.everyMs);
+    if (me.stopped) return;
+    const gate = poll.gate();
+    if (gate === "stop") return;
+    if (gate === "skip") continue;
+    let answer: T;
+    try {
+      answer = await poll.read();
+    } catch {
+      if (!warned) {
+        warned = true;
+        ctx.ui.notify(poll.unreachable, "error");
+      }
+      continue;
+    }
+    if (me.stopped) return;
+    if ((await poll.handle(answer)) === "stop") return;
+  }
+}
+
 /** Polls the task while the plan review `reviewId` stays open, and answers the review once the
  *  room decided: approved builds, sent back refines. */
 async function awaitDecision(ctx: Ctx, config: Config, claim: TaskClaim, reviewId: string, notesBefore: number): Promise<void> {
   const me: Watch = { reviewId, stopped: false };
   watch = me;
-  let warned = false;
   try {
-    while (!me.stopped) {
-      await Bun.sleep(POLL_MS);
-      if (me.stopped) return;
+    await pollWatch(ctx, me, {
+      everyMs: POLL_MS,
+      unreachable: `Schwitzer app not reachable; still waiting for approval of task #${claim.task}.`,
       // The review is gone: the plan_review_resolved handler gives any notice.
-      if (ctx.getPendingPlanReview?.()?.reviewId !== reviewId) return;
-      let task: Record<string, unknown>;
-      try {
-        task = JSON.parse(
-          await tool(config, "get_task", { room: claim.room, task: claim.task }, POLL_TIMEOUT_MS),
-        ) as Record<string, unknown>;
-      } catch {
-        if (!warned) {
-          warned = true;
-          ctx.ui.notify(`Schwitzer app not reachable; still waiting for approval of task #${claim.task}.`, "error");
+      gate: () => (ctx.getPendingPlanReview?.()?.reviewId === reviewId ? undefined : "stop"),
+      read: async () =>
+        JSON.parse(await tool(config, "get_task", { room: claim.room, task: claim.task }, POLL_TIMEOUT_MS)) as Record<string, unknown>,
+      handle: async (task) => {
+        switch (task.stage) {
+          case "planned":
+            return undefined;
+          case "ready":
+            me.stopped = true;
+            await startBuild(ctx, config, claim, reviewId);
+            return "stop";
+          case "accepted":
+            me.stopped = true;
+            await replan(ctx, config, claim, reviewId, notesBefore);
+            return "stop";
+          case "rejected":
+            ctx.ui.notify(`Task #${claim.task} was rejected in Schwitzer.`, "info");
+            return "stop";
+          case "in_progress":
+            ctx.ui.notify(
+              `Task #${claim.task} is already being built in Schwitzer (picked there); stopped waiting. If you picked it, close this review and paste the copied prompt.`,
+              "info",
+            );
+            return "stop";
+          default:
+            ctx.ui.notify(`Task #${claim.task} is ${String(task.stage)} in Schwitzer now; stopped waiting for approval.`, "info");
+            return "stop";
         }
-        continue;
-      }
-      if (me.stopped) return;
-      switch (task.stage) {
-        case "planned":
-          continue;
-        case "ready":
-          me.stopped = true;
-          return await startBuild(ctx, config, claim, reviewId);
-        case "accepted":
-          me.stopped = true;
-          return await replan(ctx, config, claim, reviewId, notesBefore);
-        case "rejected":
-          ctx.ui.notify(`Task #${claim.task} was rejected in Schwitzer.`, "info");
-          return;
-        case "in_progress":
-          ctx.ui.notify(
-            `Task #${claim.task} is already being built in Schwitzer (picked there); stopped waiting. If you picked it, close this review and paste the copied prompt.`,
-            "info",
-          );
-          return;
-        default:
-          ctx.ui.notify(`Task #${claim.task} is ${String(task.stage)} in Schwitzer now; stopped waiting for approval.`, "info");
-          return;
-      }
-    }
+      },
+    });
   } finally {
     if (watch === me) watch = undefined;
   }
@@ -1461,7 +1501,7 @@ async function debugCommand(pi: Pi, ctx: CommandCtx, config: Config, stop: boole
   const rooms = new Map<string, string>();
   for (const p of ownProjects(config, await listRooms(config))) if (!rooms.has(p.room)) rooms.set(p.room, p.roomName);
   if (rooms.size === 0) {
-    ctx.ui.notify("The Schwitzer app has not joined a room with a project this repo is linked to.", "info");
+    ctx.ui.notify(NOT_JOINED, "info");
     return;
   }
   let room = [...rooms.keys()][0];
@@ -1501,7 +1541,7 @@ async function debugCommand(pi: Pi, ctx: CommandCtx, config: Config, stop: boole
     await tool(config, "debug_join", { room });
   }
   const now = await debugStatus(config, room);
-  const master = now.members?.find((m) => m.master)?.name ?? now.master ?? "the master";
+  const master = now.master ?? "the master";
   if (now.session === null || !now.out_dir || !now.in_dir || (now.you !== "master" && now.you !== "participant")) {
     ctx.ui.notify(`The debug session in "${roomName}" is gone.`, "info");
     return;
@@ -1554,42 +1594,38 @@ function debugPrompt(watch: DebugWatch, id: number, from: string, text: string):
  *  human as a dialog; only "Put it into the editor" places its text there, and the human presses
  *  Enter. It never sends a message to the agent by itself: that is the gate. */
 async function awaitDebugInstructions(ctx: Ctx, config: Config, me: DebugWatch): Promise<void> {
-  let warned = false;
   try {
-    while (!me.stopped) {
-      await Bun.sleep(DEBUG_POLL_MS);
-      if (me.stopped) return;
-      if (!ctx.isIdle()) continue;
-      let inbox: { session: string | null; instruction: { id: number; from: string; text: string } | null };
-      try {
-        inbox = JSON.parse(await tool(config, "debug_inbox", { room: me.room }, POLL_TIMEOUT_MS)) as typeof inbox;
-      } catch {
-        if (!warned) {
-          warned = true;
-          ctx.ui.notify("Schwitzer app not reachable; still waiting for debug instructions.", "error");
+    await pollWatch(ctx, me, {
+      everyMs: DEBUG_POLL_MS,
+      unreachable: "Schwitzer app not reachable; still waiting for debug instructions.",
+      gate: () => (ctx.isIdle() ? undefined : "skip"),
+      read: async () =>
+        JSON.parse(await tool(config, "debug_inbox", { room: me.room }, POLL_TIMEOUT_MS)) as {
+          session: string | null;
+          instruction: { id: number; from: string; text: string } | null;
+        },
+      handle: async (inbox) => {
+        if (inbox.session !== me.session) {
+          ctx.ui.notify(`The debug session in "${me.roomName}" ended.`, "info");
+          return "stop";
         }
-        continue;
-      }
-      if (me.stopped) return;
-      if (inbox.session !== me.session) {
-        ctx.ui.notify(`The debug session in "${me.roomName}" ended.`, "info");
-        return;
-      }
-      const got = inbox.instruction;
-      if (!got) continue;
-      try {
-        const options = ["Put it into the editor (replaces its text)", "Dismiss"];
-        const title = `Debug instruction #${got.id} from ${got.from}: "${cutText(got.text, 200)}"`;
-        if (pickIndex(await ctx.ui.select(title, options), options) === 0) {
-          ctx.ui.setEditorText(debugPrompt(me, got.id, got.from, got.text));
-          ctx.ui.notify(`Instruction #${got.id} is in the editor. Read it, change it if needed, then press Enter.`, "info");
-        } else {
-          ctx.ui.notify(`Instruction #${got.id} dismissed. It stays listed in the Schwitzer app.`, "info");
+        const got = inbox.instruction;
+        if (!got) return undefined;
+        try {
+          const options = ["Put it into the editor (replaces its text)", "Dismiss"];
+          const title = `Debug instruction #${got.id} from ${got.from}: "${cutText(got.text, 200)}"`;
+          if (pickIndex(await ctx.ui.select(title, options), options) === 0) {
+            ctx.ui.setEditorText(debugPrompt(me, got.id, got.from, got.text));
+            ctx.ui.notify(`Instruction #${got.id} is in the editor. Read it, change it if needed, then press Enter.`, "info");
+          } else {
+            ctx.ui.notify(`Instruction #${got.id} dismissed. It stays listed in the Schwitzer app.`, "info");
+          }
+        } catch (e) {
+          ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
         }
-      } catch (e) {
-        ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
-      }
-    }
+        return undefined;
+      },
+    });
   } finally {
     if (debugWatch === me) debugWatch = undefined;
   }
