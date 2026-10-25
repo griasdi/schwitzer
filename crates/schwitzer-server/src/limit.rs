@@ -15,53 +15,24 @@ const BURST: u32 = 60;
 /// Members tracked before those whose budget is full again are forgotten.
 const PRUNE_AT: usize = 4096;
 
-/// Per member, the time at which their budget is full again (GCRA's theoretical arrival time).
+/// Per member, the time at which their budget is full again (GCRA's theoretical arrival
+/// time): spending `cost` moves it forward by `cost`, and a spend is refused when that
+/// would put it more than `tolerance` ahead of now.
 #[derive(Default)]
-pub struct Limits {
+struct Gcra {
     full_at: Mutex<HashMap<MemberId, Instant>>,
 }
 
-impl Limits {
-    /// Spends one request of `member`'s budget at `now`; `Err(wait)` when it is used up,
-    /// with the time until the next request is allowed.
-    pub fn take(&self, member: MemberId, now: Instant) -> Result<(), Duration> {
-        let mut full_at = self.full_at.lock().unwrap_or_else(PoisonError::into_inner);
-        if full_at.len() >= PRUNE_AT {
-            full_at.retain(|_, at| *at > now);
-        }
-        let at = full_at
-            .get(&member)
-            .copied()
-            .filter(|at| *at > now)
-            .unwrap_or(now);
-        let ahead = at - now;
-        let allowed = INTERVAL * (BURST - 1);
-        if ahead > allowed {
-            return Err(ahead - allowed);
-        }
-        full_at.insert(member, at + INTERVAL);
-        Ok(())
-    }
-}
-
-/// Debug log bytes a member regains per second.
-const LOG_RATE: u64 = 256 * 1024;
-/// Debug log bytes a member may send at once.
-const LOG_BURST: u64 = 1024 * 1024;
-
-/// Per-member budget of debug log bytes: `LOG_BURST` at once, `LOG_RATE` per second
-/// (GCRA over bytes).
-#[derive(Default)]
-pub struct ByteBudget {
-    full_at: Mutex<HashMap<MemberId, Instant>>,
-}
-
-impl ByteBudget {
-    /// Spends `bytes` of `member`'s budget at `now`; `Err(wait)` when that would overdraw it,
-    /// with the time until it is allowed. A refused request spends nothing.
-    pub fn take(&self, member: MemberId, bytes: usize, now: Instant) -> Result<(), Duration> {
-        let tolerance = Duration::from_nanos(LOG_BURST * 1_000_000_000 / LOG_RATE);
-        let cost = Duration::from_nanos(bytes as u64 * 1_000_000_000 / LOG_RATE);
+impl Gcra {
+    /// Spends `cost` of `member`'s budget at `now`; `Err(wait)` when that would overdraw it,
+    /// with the time until it is allowed. A refused spend costs nothing.
+    fn take(
+        &self,
+        member: MemberId,
+        cost: Duration,
+        tolerance: Duration,
+        now: Instant,
+    ) -> Result<(), Duration> {
         let mut full_at = self.full_at.lock().unwrap_or_else(PoisonError::into_inner);
         if full_at.len() >= PRUNE_AT {
             full_at.retain(|_, at| *at > now);
@@ -78,6 +49,42 @@ impl ByteBudget {
         }
         full_at.insert(member, new);
         Ok(())
+    }
+}
+
+/// Per-member request budget: `BURST` at once, one more per `INTERVAL`.
+#[derive(Default)]
+pub struct Limits {
+    gcra: Gcra,
+}
+
+impl Limits {
+    /// Spends one request of `member`'s budget at `now`; `Err(wait)` when it is used up,
+    /// with the time until the next request is allowed.
+    pub fn take(&self, member: MemberId, now: Instant) -> Result<(), Duration> {
+        self.gcra.take(member, INTERVAL, INTERVAL * BURST, now)
+    }
+}
+
+/// Debug log bytes a member regains per second.
+const LOG_RATE: u64 = 256 * 1024;
+/// Debug log bytes a member may send at once.
+const LOG_BURST: u64 = 1024 * 1024;
+
+/// Per-member budget of debug log bytes: `LOG_BURST` at once, `LOG_RATE` per second
+/// (GCRA over bytes).
+#[derive(Default)]
+pub struct ByteBudget {
+    gcra: Gcra,
+}
+
+impl ByteBudget {
+    /// Spends `bytes` of `member`'s budget at `now`; `Err(wait)` when that would overdraw it,
+    /// with the time until it is allowed. A refused request spends nothing.
+    pub fn take(&self, member: MemberId, bytes: usize, now: Instant) -> Result<(), Duration> {
+        let cost = Duration::from_nanos(bytes as u64 * 1_000_000_000 / LOG_RATE);
+        let tolerance = Duration::from_nanos(LOG_BURST * 1_000_000_000 / LOG_RATE);
+        self.gcra.take(member, cost, tolerance, now)
     }
 }
 
@@ -136,7 +143,7 @@ mod tests {
             limits.take(MemberId([0; 32]), t0 + Duration::from_secs(61)),
             Ok(())
         );
-        assert_eq!(limits.full_at.lock().unwrap().len(), 1);
+        assert_eq!(limits.gcra.full_at.lock().unwrap().len(), 1);
     }
 
     #[test]
