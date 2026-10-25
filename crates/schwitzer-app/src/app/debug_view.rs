@@ -1,6 +1,8 @@
 //! The Debug session page of the selected room: start or join, the people in it, this
 //! machine's out and in folders, what was sent and received, and the instructions.
 
+use std::collections::BTreeMap;
+
 use iced::widget::text::Wrapping;
 use iced::widget::{Column, column, row, text};
 use iced::{Alignment, Element, Length};
@@ -103,13 +105,39 @@ fn tags<'a>(state: &RoomState, members: &[MemberId]) -> Element<'a, Message> {
         .into()
 }
 
+/// A session this member is in: the people, the omp commands, the folders, what was sent and
+/// received, and the instructions.
 fn joined<'a>(
     app: &'a App,
     state: &'a RoomState,
     session: &'a DebugSession,
     me: MemberId,
 ) -> Element<'a, Message> {
-    let master = session.master == me;
+    let traffic_now = app.debug_traffic.get(&state.id);
+    let error: Option<Element<'a, Message>> = traffic_now.and_then(|t| t.error.as_ref()).map(|e| {
+        text(e)
+            .size(TS_14)
+            .style(theme::text_danger)
+            .wrapping(Wrapping::WordOrGlyph)
+            .into()
+    });
+    let lost: Option<Element<'a, Message>> = traffic_now
+        .is_some_and(|t| t.lost)
+        .then(|| muted("Some received data was lost").into());
+    Column::with_children([
+        section(people(state, session)),
+        omp_commands(state, session, session.master == me),
+        section(folders(app, session)),
+        traffic("Sending", traffic_now.map(|t| &t.sent), error),
+        traffic("Receiving", traffic_now.map(|t| &t.received), lost),
+        section(instructions(app, state, session.master == me)),
+    ])
+    .spacing(SP_3)
+    .into()
+}
+
+/// Everyone in the session, with who is master and who is offline.
+fn people<'a>(state: &RoomState, session: &DebugSession) -> Column<'a, Message> {
     let mut people = column![heading("People")].spacing(SP_2);
     for m in &session.members {
         let mut line = row![member_tag_of(&state.members, m)]
@@ -123,55 +151,103 @@ fn joined<'a>(
         }
         people = people.push(line);
     }
+    people
+}
 
+/// The omp commands of the session: the master's start and end, a participant's join and leave.
+fn omp_commands<'a>(
+    state: &RoomState,
+    session: &DebugSession,
+    master: bool,
+) -> Element<'a, Message> {
+    if master {
+        return in_omp(vec![
+            command(
+                "Run in omp so your agent gets the folders and can send instructions:".to_owned(),
+                OMP_DEBUG,
+                "debug-copy-command",
+            ),
+            command(
+                "Ends the session for everyone:".to_owned(),
+                OMP_DEBUG_STOP,
+                "debug-copy-stop",
+            ),
+        ]);
+    }
+    let master_name = logic::member_name(&state.members, &session.master);
+    in_omp(vec![
+        command(
+            format!("Run in omp to get {master_name}'s instructions there for your OK:"),
+            OMP_DEBUG,
+            "debug-copy-command",
+        ),
+        command(
+            "Leaves the session:".to_owned(),
+            OMP_DEBUG_STOP,
+            "debug-copy-stop",
+        ),
+    ])
+}
+
+/// This machine's out and in folders of the session, each with a copy button.
+fn folders<'a>(app: &App, session: &DebugSession) -> Column<'a, Message> {
     let dirs = debug::SessionDirs::new(&app.data_dir, session.id);
     let out_dir = dirs.out();
     let out = out_dir.display().to_string();
     let inn = dirs.inbox().display().to_string();
     let example = out_dir.join("app.log").display().to_string();
-    let folders = column![
+    column![
         heading("Your folders"),
-        folder("Out: files here go to everyone", out, "debug-copy-out"),
-        folder("In: what the others send", inn, "debug-copy-in"),
+        copy_line(
+            muted("Out: files here go to everyone"),
+            path_text(&out),
+            out.clone(),
+            "debug-copy-out",
+        ),
+        copy_line(
+            muted("In: what the others send"),
+            path_text(&inn),
+            inn.clone(),
+            "debug-copy-in",
+        ),
         muted(format!(
             "Example: your-app 2>&1 | tee \"{}\"",
             logic::breakable_path(&example)
         ))
         .wrapping(Wrapping::WordOrGlyph),
     ]
-    .spacing(SP_2);
+    .spacing(SP_2)
+}
 
-    let traffic = app.debug_traffic.get(&state.id);
-    let counts = |title: &'a str, map: Option<&std::collections::BTreeMap<String, u64>>| {
-        let mut col = column![heading(title)].spacing(SP_1);
-        match map.filter(|m| !m.is_empty()) {
-            None => col = col.push(muted("Nothing yet")),
-            Some(map) => {
-                for (name, n) in map {
-                    col = col.push(
-                        text(format!("{name} · {}", logic::bytes(*n)))
-                            .size(TS_14)
-                            .wrapping(Wrapping::WordOrGlyph),
-                    );
-                }
+/// What one worker direction moved, per file, then `note` (an error, a loss); the slab of the
+/// Sending and the Receiving block.
+fn traffic<'a>(
+    title: &'static str,
+    files: Option<&BTreeMap<String, u64>>,
+    note: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let mut col = column![heading(title)].spacing(SP_1);
+    match files.filter(|files| !files.is_empty()) {
+        None => col = col.push(muted("Nothing yet")),
+        Some(files) => {
+            for (name, n) in files {
+                col = col.push(
+                    text(format!("{name} · {}", logic::bytes(*n)))
+                        .size(TS_14)
+                        .wrapping(Wrapping::WordOrGlyph),
+                );
             }
         }
-        col
-    };
-    let mut sending = counts("Sending", traffic.map(|t| &t.sent));
-    if let Some(e) = traffic.and_then(|t| t.error.as_ref()) {
-        sending = sending.push(
-            text(e)
-                .size(TS_14)
-                .style(theme::text_danger)
-                .wrapping(Wrapping::WordOrGlyph),
-        );
     }
-    let mut receiving = counts("Receiving", traffic.map(|t| &t.received));
-    if traffic.is_some_and(|t| t.lost) {
-        receiving = receiving.push(muted("Some received data was lost"));
+    if let Some(note) = note {
+        col = col.push(note);
     }
+    section(col)
+}
 
+/// The instructions of the session: all that were sent for the master, those addressed to
+/// this member otherwise.
+fn instructions<'a>(app: &App, state: &RoomState, master: bool) -> Column<'a, Message> {
     let mut instructions =
         column![heading(if master { "Sent" } else { "Instructions" })].spacing(SP_2);
     let inbox = app.client.debug_inbox(state.id);
@@ -209,103 +285,52 @@ fn joined<'a>(
                 ]
                 .spacing(SP_1)
                 .width(Length::Fill),
-                icon_button(
-                    format!("debug-copy-instruction-{}", i.id),
-                    Icon::Copy,
-                    Tone::Text,
-                    "Copy",
-                    Some(Message::CopyDebug(i.text.clone())),
-                    theme::button_ghost,
-                ),
+                copy_button(format!("debug-copy-instruction-{}", i.id), i.text.clone()),
             ]
             .spacing(SP_2)
             .align_y(Alignment::Start),
         );
     }
-
-    let master_name = logic::member_name(&state.members, &session.master);
-    let omp = if master {
-        in_omp(vec![
-            command(
-                "Run in omp so your agent gets the folders and can send instructions:".to_owned(),
-                OMP_DEBUG,
-                "debug-copy-command",
-            ),
-            command(
-                "Ends the session for everyone:".to_owned(),
-                OMP_DEBUG_STOP,
-                "debug-copy-stop",
-            ),
-        ])
-    } else {
-        in_omp(vec![
-            command(
-                format!("Run in omp to get {master_name}'s instructions there for your OK:"),
-                OMP_DEBUG,
-                "debug-copy-command",
-            ),
-            command(
-                "Leaves the session:".to_owned(),
-                OMP_DEBUG_STOP,
-                "debug-copy-stop",
-            ),
-        ])
-    };
-
-    Column::with_children([
-        section(people),
-        omp,
-        section(folders),
-        section(sending),
-        section(receiving),
-        section(instructions),
-    ])
-    .spacing(SP_3)
-    .into()
+    instructions
 }
 
-/// A folder with its label and a copy button.
-fn folder<'a>(label: &'a str, path: String, id: &'static str) -> Element<'a, Message> {
+/// A muted label over a line with `content` and a button that copies `copied`.
+fn copy_line<'a>(
+    label: impl Into<Element<'a, Message>>,
+    content: impl Into<Element<'a, Message>>,
+    copied: String,
+    id: &'static str,
+) -> Element<'a, Message> {
     column![
-        muted(label),
-        row![
-            path_text(&path),
-            icon_button(
-                id,
-                Icon::Copy,
-                Tone::Text,
-                "Copy",
-                Some(Message::CopyDebug(path.clone())),
-                theme::button_ghost,
-            ),
-        ]
-        .spacing(SP_2)
-        .align_y(Alignment::Center),
+        label.into(),
+        row![content.into(), copy_button(id, copied)]
+            .spacing(SP_2)
+            .align_y(Alignment::Center),
     ]
     .spacing(2)
     .into()
+}
+
+/// The icon button that puts `copied` on the clipboard.
+fn copy_button<'a>(id: impl Into<String>, copied: String) -> Element<'a, Message> {
+    icon_button(
+        id,
+        Icon::Copy,
+        Tone::Text,
+        "Copy",
+        Some(Message::CopyDebug(copied)),
+        theme::button_ghost,
+    )
 }
 
 /// An omp command: what it does, then the command with a copy button.
 fn command<'a>(label: String, command: &'static str, id: &'static str) -> Element<'a, Message> {
-    column![
+    copy_line(
         muted(label).wrapping(Wrapping::WordOrGlyph),
-        row![
-            text(command).size(TS_14).font(MEDIUM).width(Length::Fill),
-            icon_button(
-                id,
-                Icon::Copy,
-                Tone::Text,
-                "Copy",
-                Some(Message::CopyDebug(command.to_owned())),
-                theme::button_ghost,
-            ),
-        ]
-        .spacing(SP_2)
-        .align_y(Alignment::Center),
-    ]
-    .spacing(2)
-    .into()
+        text(command).size(TS_14).font(MEDIUM).width(Length::Fill),
+        command.to_owned(),
+        id,
+    )
 }
 
 /// The "In omp" slab with its commands.
