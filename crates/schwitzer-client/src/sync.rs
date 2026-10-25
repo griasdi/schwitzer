@@ -395,8 +395,8 @@ impl Client {
         }
     }
 
-    /// Removes the rooms of `server` that its backlog did not contain: the user is no longer
-    /// in them.
+    /// Removes the rooms of `server` that its backlog did not contain, with their debug inbox
+    /// and rejoin wish: the user is no longer in them.
     fn drop_unseen(&self, server: &ServerAddr, seen: &HashSet<RoomId>) {
         let stale: Vec<RoomId> = {
             let mut rooms = lock(&self.0.rooms);
@@ -411,6 +411,7 @@ impl Client {
             stale
         };
         for room in stale {
+            self.forget_debug(room);
             self.emit(ClientEvent::RoomRemoved(room));
         }
     }

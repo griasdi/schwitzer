@@ -416,6 +416,12 @@ impl Client {
         Ok(self.ensure_server(server))
     }
 
+    /// Drops the debug inbox and the rejoin wish of a room that is gone from this machine.
+    fn forget_debug(&self, room: RoomId) {
+        lock(&self.0.debug_inbox).remove(&room);
+        lock(&self.0.debug_rejoin).remove(&room);
+    }
+
     /// Forgets the room on this machine without telling its server: its key and its state.
     /// The connection to its server stops when no other kept room lives there. Tells the
     /// application if anything changed.
@@ -429,8 +435,7 @@ impl Client {
             (key_gone, idle)
         };
         let state_gone = lock(&self.0.rooms).remove(&room).is_some();
-        lock(&self.0.debug_inbox).remove(&room);
-        lock(&self.0.debug_rejoin).remove(&room);
+        self.forget_debug(room);
         if let Some(server) = idle {
             let conn = lock(&self.0.servers).remove(&server);
             if let Some(conn) = conn {
