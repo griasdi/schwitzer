@@ -18,6 +18,7 @@ use weida::{ErrorCode, IncomingRequest, Replier, TransferMeta};
 
 use crate::auth;
 use crate::hub::Hub;
+use crate::limit;
 use crate::store::{self, R};
 use crate::{Shared, State};
 
@@ -130,7 +131,7 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
         state.limits.take(caller, Instant::now()).map_err(|wait| {
             ApiError::Invalid(format!(
                 "too many requests, try again in {} s",
-                wait.as_millis().div_ceil(1000)
+                limit::wait_secs(wait)
             ))
         })?;
     }
@@ -817,7 +818,7 @@ fn debug_log(
     state
         .log_budget
         .take(caller, data.len(), Instant::now())
-        .map_err(|wait| ApiError::LogBudget(wait.as_secs().max(1)))?;
+        .map_err(|wait| ApiError::LogBudget(limit::wait_secs(wait)))?;
     state.hub.publish(
         &targets,
         &Event::DebugLog {

@@ -15,6 +15,11 @@ const BURST: u32 = 60;
 /// Members tracked before those whose budget is full again are forgotten.
 const PRUNE_AT: usize = 4096;
 
+/// A refusal's wait as the whole seconds the client is told: rounded up.
+pub fn wait_secs(wait: Duration) -> u64 {
+    u64::try_from(wait.as_millis().div_ceil(1000)).unwrap_or(u64::MAX)
+}
+
 /// Per member, the time at which their budget is full again (GCRA's theoretical arrival
 /// time): spending `cost` moves it forward by `cost`, and a spend is refused when that
 /// would put it more than `tolerance` ahead of now.
