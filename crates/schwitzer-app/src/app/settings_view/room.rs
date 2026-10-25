@@ -21,7 +21,7 @@ pub fn room_page(app: &App) -> Element<'_, Message> {
     };
     let state = app.selected_state();
     let name = logic::room_label(RoomId::of(&key.token), state);
-    let address = format!("{}:{}", key.server.host, key.server.port);
+    let address = key.server.authority();
     let online = app.server_online(&key.server);
 
     let server = column![
@@ -199,7 +199,7 @@ pub fn rooms_page(app: &App) -> Element<'_, Message> {
             format!("room-{}", id.short()),
             dot(online),
             logic::room_label(id, state),
-            format!("{}:{}", key.server.host, key.server.port),
+            key.server.authority(),
             app.selected == Some(id),
             Message::OpenRoom(id),
         ));

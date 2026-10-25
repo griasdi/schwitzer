@@ -684,7 +684,7 @@ pub fn server_status(server: Option<&ServerAddr>, known: Option<&ServerStatus>) 
     let (dot, word, detail) = match server {
         None => (Dot::Unknown, "no room", "No room selected".to_owned()),
         Some(addr) => {
-            let server = format!("{}:{}", addr.host, addr.port);
+            let server = addr.authority();
             match known {
                 Some(ServerStatus { online: true, .. }) => {
                     (Dot::Up, "online", format!("{server} online"))

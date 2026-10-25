@@ -27,8 +27,8 @@ impl ServerAddr {
         )
     }
 
-    /// `host:port`, IPv6 hosts bracketed.
-    fn authority(&self) -> String {
+    /// `host:port`, an IPv6 host in brackets.
+    pub fn authority(&self) -> String {
         if self.host.contains(':') && !self.host.starts_with('[') {
             format!("[{}]:{}", self.host, self.port)
         } else {

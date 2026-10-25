@@ -162,10 +162,7 @@ pub fn first_start(app: &App) -> Element<'_, Message> {
 fn room_slab<'a>(app: &'a App, key: &'a RoomKey) -> Element<'a, Message> {
     let state = app.selected_state();
     let status = if app.server_online(&key.server) == Some(false) {
-        Status::Problem(format!(
-            "{}:{} does not answer",
-            key.server.host, key.server.port
-        ))
+        Status::Problem(format!("{} does not answer", key.server.authority()))
     } else if let Some(state) = state {
         let online = state.members.iter().filter(|m| m.online).count();
         Status::Plain(format!(

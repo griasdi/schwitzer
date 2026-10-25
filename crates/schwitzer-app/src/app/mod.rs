@@ -783,8 +783,8 @@ impl App {
                     Some(key) if self.selected_server_online() == Some(false) => (
                         "Server not reachable",
                         format!(
-                            "{}:{} does not answer. If it is gone for good, remove the room in Settings.",
-                            key.server.host, key.server.port
+                            "{} does not answer. If it is gone for good, remove the room in Settings.",
+                            key.server.authority()
                         ),
                     ),
                     _ => (
@@ -2391,7 +2391,7 @@ impl App {
             } => {
                 if online {
                     if let Some(e) = &error {
-                        self.banner = Some(format!("{}:{}: {e}", server.host, server.port));
+                        self.banner = Some(format!("{}: {e}", server.authority()));
                     }
                     // A server that came back lost the sessions of this member.
                     let stale: Vec<RoomId> = self.rooms.ids_on(&server).collect();
@@ -2497,9 +2497,8 @@ impl App {
             ClientEvent::Release { server, version } => {
                 let Ok(version) = version.parse::<semver::Version>() else {
                     tracing::warn!(
-                        "{}:{} announced an unreadable version {version:?}",
-                        server.host,
-                        server.port
+                        "{} announced an unreadable version {version:?}",
+                        server.authority()
                     );
                     return Task::none();
                 };
