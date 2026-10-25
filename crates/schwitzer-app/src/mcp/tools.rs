@@ -268,9 +268,10 @@ impl RoomRef {
     }
 }
 
-/// The room a call means: `arg` is a room name (case-insensitive, exact) or a room id prefix of
-/// at least [`MIN_ID_PREFIX`] hex digits; omitted, the only joined room.
-fn resolve_room<'a>(rooms: &'a [RoomRef], arg: Option<&str>) -> Result<&'a RoomRef, String> {
+/// The index in `rooms` of the room a call means: `arg` is a room name (case-insensitive,
+/// exact) or a room id prefix of at least [`MIN_ID_PREFIX`] hex digits; omitted, the only
+/// joined room.
+fn resolve_room(rooms: &[RoomRef], arg: Option<&str>) -> Result<usize, String> {
     let list = || {
         rooms
             .iter()
@@ -281,7 +282,7 @@ fn resolve_room<'a>(rooms: &'a [RoomRef], arg: Option<&str>) -> Result<&'a RoomR
     let Some(arg) = arg.map(str::trim).filter(|a| !a.is_empty()) else {
         return match rooms {
             [] => Err("No rooms joined. Join or create a room in the Schwitzer app.".into()),
-            [only] => Ok(only),
+            [_] => Ok(0),
             _ => Err(format!(
                 "Several rooms are joined; pass `room`. Rooms: {}",
                 list()
@@ -289,10 +290,10 @@ fn resolve_room<'a>(rooms: &'a [RoomRef], arg: Option<&str>) -> Result<&'a RoomR
         };
     };
     let wanted = arg.to_lowercase();
-    let by_name: Vec<&RoomRef> = rooms
-        .iter()
-        .filter(|r| {
-            r.state
+    let by_name: Vec<usize> = (0..rooms.len())
+        .filter(|&i| {
+            rooms[i]
+                .state
                 .as_ref()
                 .is_some_and(|s| s.name.to_lowercase() == wanted)
         })
@@ -301,20 +302,19 @@ fn resolve_room<'a>(rooms: &'a [RoomRef], arg: Option<&str>) -> Result<&'a RoomR
         && wanted.len() >= MIN_ID_PREFIX
         && wanted.bytes().all(|b| b.is_ascii_hexdigit())
     {
-        rooms
-            .iter()
-            .filter(|r| r.id.to_hex().starts_with(&wanted))
+        (0..rooms.len())
+            .filter(|&i| rooms[i].id.to_hex().starts_with(&wanted))
             .collect()
     } else {
         by_name
     };
     match candidates.as_slice() {
         [] => Err(format!("No room matches \"{arg}\". Rooms: {}", list())),
-        [one] => Ok(one),
+        [one] => Ok(*one),
         many => Err(format!(
             "\"{arg}\" matches several rooms: {}",
             many.iter()
-                .map(|r| r.label())
+                .map(|&i| rooms[i].label())
                 .collect::<Vec<_>>()
                 .join(", ")
         )),
@@ -700,7 +700,9 @@ impl Tools {
 
     /// The room of a call.
     fn room(&self, arg: Option<&str>) -> Result<RoomRef, String> {
-        resolve_room(&self.joined(), arg).cloned()
+        let mut rooms = self.joined();
+        let index = resolve_room(&rooms, arg)?;
+        Ok(rooms.swap_remove(index))
     }
 
     /// Sends `request` for `room` and returns the task the server answers with.
@@ -1142,45 +1144,41 @@ mod tests {
         }
     }
 
+    /// The room `arg` means among `rooms`.
+    fn pick<'a>(rooms: &'a [RoomRef], arg: Option<&str>) -> Result<&'a RoomRef, String> {
+        resolve_room(rooms, arg).map(|i| &rooms[i])
+    }
+
     #[test]
     fn the_only_room_needs_no_argument() {
         let rooms = [room(0x11, "Smoke", vec![])];
-        assert_eq!(resolve_room(&rooms, None).unwrap().id, RoomId([0x11; 32]));
-        assert_eq!(
-            resolve_room(&rooms, Some("  ")).unwrap().id,
-            RoomId([0x11; 32])
-        );
+        assert_eq!(pick(&rooms, None).unwrap().id, RoomId([0x11; 32]));
+        assert_eq!(pick(&rooms, Some("  ")).unwrap().id, RoomId([0x11; 32]));
     }
 
     #[test]
     fn several_rooms_need_an_argument_and_the_error_lists_them() {
         let rooms = [room(0x11, "Smoke", vec![]), room(0x22, "Prod", vec![])];
-        let err = resolve_room(&rooms, None).unwrap_err();
+        let err = pick(&rooms, None).unwrap_err();
         assert!(
             err.contains("Smoke (11111111)") && err.contains("Prod (22222222)"),
             "{err}"
         );
-        assert!(resolve_room(&[], None).unwrap_err().contains("No rooms"));
+        assert!(pick(&[], None).unwrap_err().contains("No rooms"));
     }
 
     #[test]
     fn a_room_is_found_by_name_or_id_prefix() {
         let rooms = [room(0x11, "Smoke", vec![]), room(0x22, "Prod", vec![])];
+        assert_eq!(pick(&rooms, Some("sMOKE")).unwrap().id, RoomId([0x11; 32]));
+        assert_eq!(pick(&rooms, Some("2222")).unwrap().id, RoomId([0x22; 32]));
         assert_eq!(
-            resolve_room(&rooms, Some("sMOKE")).unwrap().id,
-            RoomId([0x11; 32])
-        );
-        assert_eq!(
-            resolve_room(&rooms, Some("2222")).unwrap().id,
-            RoomId([0x22; 32])
-        );
-        assert_eq!(
-            resolve_room(&rooms, Some("2222222")).unwrap().id,
+            pick(&rooms, Some("2222222")).unwrap().id,
             RoomId([0x22; 32])
         );
         // Too short for a prefix, and not a name.
-        assert!(resolve_room(&rooms, Some("222")).is_err());
-        let err = resolve_room(&rooms, Some("nope")).unwrap_err();
+        assert!(pick(&rooms, Some("222")).is_err());
+        let err = pick(&rooms, Some("nope")).unwrap_err();
         assert!(
             err.contains("Rooms: Smoke (11111111), Prod (22222222)"),
             "{err}"
@@ -1192,16 +1190,9 @@ mod tests {
         // "abcd" names the first room and is a prefix of the second room's id.
         let mut rooms = [room(0x11, "abcd", vec![]), room(0xab, "x", vec![])];
         rooms[1].id = RoomId([0xab; 32]);
-        assert_eq!(
-            resolve_room(&rooms, Some("abcd")).unwrap().id,
-            RoomId([0x11; 32])
-        );
+        assert_eq!(pick(&rooms, Some("abcd")).unwrap().id, RoomId([0x11; 32]));
         let twins = [room(0x11, "same", vec![]), room(0x22, "Same", vec![])];
-        assert!(
-            resolve_room(&twins, Some("same"))
-                .unwrap_err()
-                .contains("several")
-        );
+        assert!(pick(&twins, Some("same")).unwrap_err().contains("several"));
     }
 
     #[test]
