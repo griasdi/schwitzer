@@ -129,10 +129,11 @@ fn joined<'a>(
         people = people.push(line);
     }
 
-    let dir = debug::session_dir(&app.data_dir, session.id);
-    let out = dir.join("out").display().to_string();
-    let inn = dir.join("in").display().to_string();
-    let example = dir.join("out").join("app.log").display().to_string();
+    let dirs = debug::SessionDirs::new(&app.data_dir, session.id);
+    let out_dir = dirs.out();
+    let out = out_dir.display().to_string();
+    let inn = dirs.inbox().display().to_string();
+    let example = out_dir.join("app.log").display().to_string();
     let folders = column![
         heading("Your folders"),
         folder("Out: files here go to everyone", out, "debug-copy-out"),

@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 use futures::{SinkExt, Stream};
 use iced::Subscription;
 use schwitzer_client::{Client, ClientError, ClientEvent};
-use schwitzer_proto::{ApiError, DebugId, MemberId, RoomId, caps, valid_stream_name};
+use schwitzer_proto::{ApiError, DebugId, Member, MemberId, RoomId, caps, valid_stream_name};
 use tokio::sync::broadcast::error::RecvError;
 
 /// How often the out folder is looked at.
@@ -27,19 +27,66 @@ const KEEP_FOR: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// Bytes of a member folder's name part.
 const MEMBER_DIR_NAME: usize = 32;
 
-/// The session's folder relative to the data directory, with `/` separators.
-pub fn session_rel(session: DebugId) -> String {
-    format!("debug/{}", session.short())
+/// The folder of all debug sessions under the data directory.
+const SESSIONS_DIR: &str = "debug";
+/// The folder of a session that holds the files this member sends.
+const OUT_DIR: &str = "out";
+/// The folder of a session that holds the files received from the others.
+const IN_DIR: &str = "in";
+
+/// Where one session keeps its files on this machine.
+pub struct SessionDirs {
+    sessions: PathBuf,
+    short: String,
 }
 
-/// The session's folder.
-pub fn session_dir(data_dir: &Path, session: DebugId) -> PathBuf {
-    data_dir.join("debug").join(session.short())
+impl SessionDirs {
+    pub fn new(data_dir: &Path, session: DebugId) -> Self {
+        Self {
+            sessions: data_dir.join(SESSIONS_DIR),
+            short: session.short(),
+        }
+    }
+
+    /// The folder that holds the folders of all sessions.
+    pub fn sessions(&self) -> &Path {
+        &self.sessions
+    }
+
+    /// The folder whose files are sent.
+    pub fn out(&self) -> PathBuf {
+        self.sessions.join(&self.short).join(OUT_DIR)
+    }
+
+    /// The folder that receives the others' files, one folder per member.
+    pub fn inbox(&self) -> PathBuf {
+        self.sessions.join(&self.short).join(IN_DIR)
+    }
+
+    /// [`Self::out`] relative to the data directory, with `/` separators.
+    pub fn out_rel(&self) -> String {
+        format!("{SESSIONS_DIR}/{}/{OUT_DIR}", self.short)
+    }
+
+    /// [`Self::inbox`] relative to the data directory, with `/` separators.
+    pub fn in_rel(&self) -> String {
+        format!("{SESSIONS_DIR}/{}/{IN_DIR}", self.short)
+    }
+}
+
+/// The folder in `in/` that `id` sent into, looked up by name in `members`; a member that is
+/// not listed has an empty name. Example: `bob-3fa21c07`.
+pub fn member_dir_in(members: &[Member], id: MemberId) -> String {
+    let name = members
+        .iter()
+        .find(|m| m.id == id)
+        .map_or("", |m| m.name.as_str());
+    member_dir(name, id)
 }
 
 /// The folder in `in/` that holds what `id` sent: their name, made safe for a path, and the
 /// short id, which keeps it apart from a namesake. Example: `bob-3fa21c07`.
-pub fn member_dir(name: &str, id: MemberId) -> String {
+fn member_dir(name: &str, id: MemberId) -> String {
     let safe: String = name
         .chars()
         .map(|c| {
@@ -269,11 +316,11 @@ fn work(key: &DebugKey) -> impl Stream<Item = Traffic> + use<> {
             room,
             session,
         } = key;
-        let dir = session_dir(&data_dir, session);
-        let (out_dir, in_dir) = (dir.join("out"), dir.join("in"));
+        let folders = SessionDirs::new(&data_dir, session);
+        let (out_dir, in_dir) = (folders.out(), folders.inbox());
         {
             let (out_dir, in_dir) = (out_dir.clone(), in_dir.clone());
-            let root = data_dir.join("debug");
+            let root = folders.sessions().to_owned();
             let made = tokio::task::spawn_blocking(move || {
                 prune(&root, session, SystemTime::now());
                 fs::create_dir_all(&out_dir).and_then(|()| fs::create_dir_all(&in_dir))
@@ -299,7 +346,7 @@ fn work(key: &DebugKey) -> impl Stream<Item = Traffic> + use<> {
                     {
                         let dir = dirs
                             .entry(from)
-                            .or_insert_with(|| member_dir(&member_name(&client, room, from), from))
+                            .or_insert_with(|| member_dir_in(&room_members(&client, room), from))
                             .clone();
                         if !valid_stream_name(&stream) {
                             continue;
@@ -388,20 +435,14 @@ async fn send(
     }
 }
 
-/// The name of `member` in `room`, empty when unknown.
-fn member_name(client: &Client, room: RoomId, member: MemberId) -> String {
+/// The members of `room` as the client knows them, empty when the room is unknown.
+fn room_members(client: &Client, room: RoomId) -> Vec<Member> {
     client
         .rooms()
         .into_iter()
         .filter_map(|(_, state)| state)
         .find(|state| state.id == room)
-        .and_then(|state| {
-            state
-                .members
-                .into_iter()
-                .find(|m| m.id == member)
-                .map(|m| m.name)
-        })
+        .map(|state| state.members)
         .unwrap_or_default()
 }
 
