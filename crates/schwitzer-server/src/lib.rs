@@ -18,6 +18,7 @@ use weida::{
 };
 
 mod auth;
+mod debug;
 mod events;
 mod hub;
 mod limit;
@@ -61,7 +62,7 @@ pub(crate) struct Shared {
     /// Request budget per member.
     pub limits: limit::Limits,
     /// The running debug sessions.
-    pub debug: hub::DebugRuns,
+    pub debug: debug::DebugRuns,
     /// Debug log bytes per member.
     pub log_budget: limit::ByteBudget,
 }
@@ -233,7 +234,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Server> {
         sessions: Sessions::default(),
         release: Mutex::new(None),
         limits: limit::Limits::default(),
-        debug: hub::DebugRuns::default(),
+        debug: debug::DebugRuns::default(),
         log_budget: limit::ByteBudget::default(),
     });
     let mut tasks: JoinSet<&'static str> = JoinSet::new();
