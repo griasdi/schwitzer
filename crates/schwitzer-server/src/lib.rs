@@ -33,7 +33,9 @@ use store::{R, Store};
 pub use update::AutoUpdate;
 
 /// The server's user agent towards GitHub.
-const USER_AGENT: &str = concat!("schwitzer-server/", env!("CARGO_PKG_VERSION"));
+fn user_agent() -> String {
+    schwitzer_release::user_agent("schwitzer-server")
+}
 
 /// How the server is run.
 #[derive(Debug, Clone)]

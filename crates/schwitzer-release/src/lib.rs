@@ -95,6 +95,11 @@ pub const VERSION: &str = match option_env!("SCHWITZER_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 
+/// The user agent `program` sends to GitHub: `program/VERSION`.
+pub fn user_agent(program: &str) -> String {
+    format!("{program}/{VERSION}")
+}
+
 /// [`VERSION`], parsed.
 pub fn version() -> semver::Version {
     VERSION.parse().expect("the build version is semver")

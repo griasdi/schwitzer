@@ -25,7 +25,8 @@ pub const CHECK_INTERVAL: Duration = Duration::from_secs(300);
 const URL_ENV: &str = "SCHWITZER_UPDATE_URL";
 const MAX_RELEASE_JSON: u64 = 1 << 20;
 const MAX_ARCHIVE: u64 = 256 << 20;
-const USER_AGENT: &str = concat!("schwitzer/", env!("CARGO_PKG_VERSION"));
+/// The program name in the user agent sent to GitHub.
+const PROGRAM: &str = "schwitzer";
 const ARCHIVE_EXT: &str = if cfg!(windows) { "zip" } else { "tar.gz" };
 /// The file the updater takes out of the archive, at any depth.
 const BINARY: &str = if cfg!(windows) {
@@ -216,7 +217,11 @@ pub async fn check(lookup: Lookup, package: Package) -> Result<Option<Release>, 
 /// Downloads `release`, verifies it and puts it in place of `program`.
 pub async fn install(release: Release, program: Program) -> Result<semver::Version, String> {
     blocking(move || {
-        let bytes = schwitzer_release::download(USER_AGENT, &release.url, MAX_ARCHIVE)?;
+        let bytes = schwitzer_release::download(
+            &schwitzer_release::user_agent(PROGRAM),
+            &release.url,
+            MAX_ARCHIVE,
+        )?;
         schwitzer_release::verify(&bytes, release.size, &release.sha256)?;
         let binary = match program.package {
             Package::AppImage => bytes,
@@ -271,6 +276,7 @@ fn fetch_release(
     package: Package,
 ) -> Result<Option<Release>, String> {
     let base = std::env::var(URL_ENV).unwrap_or_else(|_| RELEASES_URL.to_owned());
+    let user_agent = schwitzer_release::user_agent(PROGRAM);
     let current = schwitzer_release::version();
     let (url, missing) = match &lookup {
         Lookup::Latest => (
@@ -282,11 +288,11 @@ fn fetch_release(
             format!("release v{v} is not on GitHub"),
         ),
         Lookup::Dev => {
-            let json = schwitzer_release::api_get_dev(USER_AGENT, &base, MAX_RELEASE_JSON)?;
+            let json = schwitzer_release::api_get_dev(&user_agent, &base, MAX_RELEASE_JSON)?;
             return parse_dev(&json, &current, platform, package);
         }
     };
-    let json = schwitzer_release::api_get(USER_AGENT, &url, &[], MAX_RELEASE_JSON).map_err(
+    let json = schwitzer_release::api_get(&user_agent, &url, &[], MAX_RELEASE_JSON).map_err(
         |e| match e {
             ApiError::NotFound(_) => missing,
             ApiError::Failed(message) => message,
