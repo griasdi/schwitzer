@@ -694,8 +694,16 @@ async fn publish_sessions(
     Ok(Response::Ok)
 }
 
-/// Runs `change` as a member of `room`, then publishes the event it returns to the room's
-/// members. The debug sessions live in memory; the store only checks membership and lists
+/// Whom a debug event goes to.
+enum Audience {
+    /// Every member of the room.
+    Room,
+    /// These members only.
+    Only(Vec<MemberId>),
+}
+
+/// Runs `change` as a member of `room`, then publishes the event it returns to its
+/// audience. The debug sessions live in memory; the store only checks membership and lists
 /// the members, and its lock keeps the events in order.
 async fn in_debug<T, C>(
     state: &State,
@@ -705,7 +713,7 @@ async fn in_debug<T, C>(
 ) -> Result<T, ApiError>
 where
     T: Send + 'static,
-    C: FnOnce(&Shared) -> Result<(T, Option<Event>), ApiError> + Send + 'static,
+    C: FnOnce(&Shared) -> Result<(T, Option<(Audience, Event)>), ApiError> + Send + 'static,
 {
     let st = state.clone();
     state
@@ -713,17 +721,20 @@ where
         .run(move |conn| {
             store::require_member(conn, &room, &caller)?;
             let (out, event) = change(&st)?;
-            if let Some(event) = event {
-                let members = store::room_member_ids(conn, &room)?;
-                st.hub.publish(&members, &event);
+            if let Some((audience, event)) = event {
+                let recipients = match audience {
+                    Audience::Room => store::room_member_ids(conn, &room)?,
+                    Audience::Only(members) => members,
+                };
+                st.hub.publish(&recipients, &event);
             }
             Ok(out)
         })
         .await
 }
 
-fn debug_event(room: RoomId, session: Option<DebugSession>) -> Option<Event> {
-    Some(Event::Debug { room, session })
+fn debug_event(room: RoomId, session: Option<DebugSession>) -> Option<(Audience, Event)> {
+    Some((Audience::Room, Event::Debug { room, session }))
 }
 
 async fn debug_start(state: &State, caller: MemberId, room: RoomId) -> Reply {
@@ -738,10 +749,9 @@ async fn debug_start(state: &State, caller: MemberId, room: RoomId) -> Reply {
 async fn debug_join(state: &State, caller: MemberId, room: RoomId, session: DebugId) -> Reply {
     let session = in_debug(state, caller, room, move |st| {
         let (s, changed) = st.debug.join(&room, session, caller)?;
-        let event = changed.then(|| Event::Debug {
-            room,
-            session: Some(s.clone()),
-        });
+        let event = changed
+            .then(|| debug_event(room, Some(s.clone())))
+            .flatten();
         Ok((s, event))
     })
     .await?;
@@ -765,25 +775,18 @@ async fn debug_instruct(
     to: Vec<MemberId>,
     text: String,
 ) -> Reply {
-    let st = state.clone();
-    let instruction = state
-        .store
-        .run(move |conn| {
-            store::require_member(conn, &room, &caller)?;
-            let (instruction, publish) =
-                st.debug
-                    .instruct(&room, session, caller, to, text, now_ms())?;
-            st.hub.publish(
-                &publish,
-                &Event::DebugInstruction {
-                    room,
-                    session,
-                    instruction: instruction.clone(),
-                },
-            );
-            Ok(instruction)
-        })
-        .await?;
+    let instruction = in_debug(state, caller, room, move |st| {
+        let (instruction, publish) =
+            st.debug
+                .instruct(&room, session, caller, to, text, now_ms())?;
+        let event = Event::DebugInstruction {
+            room,
+            session,
+            instruction: instruction.clone(),
+        };
+        Ok((instruction, Some((Audience::Only(publish), event))))
+    })
+    .await?;
     Ok(Response::DebugInstruction(instruction))
 }
 
