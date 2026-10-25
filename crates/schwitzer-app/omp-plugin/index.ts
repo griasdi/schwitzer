@@ -514,6 +514,16 @@ function lastEntry(ctx: Ctx, match: (entry: SessionEntry) => boolean): SessionEn
   return undefined;
 }
 
+/** The index of the option `choice` of ctx.ui.select names; -1 when the dialog was dismissed. */
+function pickIndex(choice: string | number | undefined, labels: string[]): number {
+  return typeof choice === "number" ? choice : choice === undefined ? -1 : labels.indexOf(choice);
+}
+
+/** The item whose label the user picks in ctx.ui.select; undefined when the dialog was dismissed. */
+async function choose<T>(ctx: Ctx, title: string, labels: string[], items: readonly T[]): Promise<T | undefined> {
+  return items[pickIndex(await ctx.ui.select(title, labels), labels)];
+}
+
 /** The rooms the app has joined, as list_rooms shows them. */
 async function listRooms(config: Config, timeoutMs = TIMEOUT_MS): Promise<RoomRow[]> {
   return JSON.parse(await tool(config, "list_rooms", {}, timeoutMs)) as RoomRow[];
@@ -684,7 +694,7 @@ async function crossProjectCheck(
     `The agent wants to edit ${target}, which belongs to the Schwitzer project "${name}" (room "${roomName}").`,
     options,
   );
-  const index = typeof choice === "number" ? choice : choice === undefined ? -1 : options.indexOf(choice);
+  const index = pickIndex(choice, options);
   if (index === 0) return undefined;
   if (index === 1) {
     pi.appendEntry(ALLOW_ENTRY, { room: found.room, project: found.project });
@@ -792,8 +802,7 @@ function notClaimable(task: TaskRow, work: Work): string | undefined {
 async function pickNumbered(ctx: Ctx, found: Candidate[], title: string): Promise<Candidate | undefined> {
   if (found.length === 1) return found[0];
   const labels = found.map((c) => `#${c.task.number} ${c.task.title} · ${c.projectName} · ${c.roomName}`);
-  const choice = await ctx.ui.select(title, labels);
-  return typeof choice === "number" ? found[choice] : choice === undefined ? undefined : found[labels.indexOf(choice)];
+  return choose(ctx, title, labels, found);
 }
 
 /** The task as context for the planning or building turn. */
@@ -858,8 +867,7 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, number: n
       (task.priority === "normal" ? "" : ` · ${task.priority}`) +
       (several ? ` · ${projectName}` : ""),
   );
-  const choice = await ctx.ui.select(title, labels);
-  const picked = typeof choice === "number" ? open[choice] : choice === undefined ? undefined : open[labels.indexOf(choice)];
+  const picked = await choose(ctx, title, labels, open);
   if (!picked) return;
   await claimPicked(pi, ctx, config, picked, work, planning);
 }
@@ -905,13 +913,8 @@ async function offerNext(pi: Pi, ctx: Ctx): Promise<void> {
     const [next] = await unclaimed(config, STAGE.build);
     if (!next) return;
     const from = config.projects.length > 1 ? ` from project "${next.projectName}"` : "";
-    const choice = await ctx.ui.select(`Build #${next.task.number} "${next.task.title}"${from} next?`, [...NEXT_CHOICES]);
-    const index =
-      typeof choice === "number"
-        ? choice
-        : choice === undefined
-          ? -1
-          : NEXT_CHOICES.indexOf(choice as (typeof NEXT_CHOICES)[number]);
+    const options = [...NEXT_CHOICES];
+    const index = pickIndex(await ctx.ui.select(`Build #${next.task.number} "${next.task.title}"${from} next?`, options), options);
     if (index === 0) {
       ctx.ui.setEditorText("/schwitzer build new");
       ctx.ui.notify("Press Enter for a new session with /schwitzer build; a fresh session keeps the context small.", "info");
@@ -968,8 +971,7 @@ async function pickProject(
     ...projects.map((p) => `${p.projectName} · ${p.roomName}`),
     ...others.map((p) => `${p.projectName} · ${p.roomName} · other project`),
   ];
-  const choice = await ctx.ui.select(title, labels);
-  return typeof choice === "number" ? all[choice] : choice === undefined ? undefined : all[labels.indexOf(choice)];
+  return choose(ctx, title, labels, all);
 }
 
 /** Notes `text` as an idea in a project, without an agent turn. */
@@ -1031,8 +1033,7 @@ async function proposeTask(pi: Pi, ctx: Ctx, config: Config, text: string): Prom
         "New proposal",
         ...ideas.map(({ task, projectName }) => `#${task.number} ${task.title}` + (several ? ` · ${projectName}` : "")),
       ];
-      const choice = await ctx.ui.select("Write up an idea or propose something new", labels);
-      const index = typeof choice === "number" ? choice : choice === undefined ? -1 : labels.indexOf(choice);
+      const index = pickIndex(await ctx.ui.select("Write up an idea or propose something new", labels), labels);
       if (index < 0) return;
       if (index > 0) {
         pi.sendUserMessage(writeUpPrompt(ideas[index - 1]));
@@ -1125,9 +1126,7 @@ async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
   }
   if (sub === "") {
     const labels: string[] = SUBCOMMANDS.map((s) => s.label);
-    const choice = await ctx.ui.select("Schwitzer", labels);
-    const picked =
-      typeof choice === "number" ? SUBCOMMANDS[choice] : choice === undefined ? undefined : SUBCOMMANDS[labels.indexOf(choice)];
+    const picked = await choose(ctx, "Schwitzer", labels, SUBCOMMANDS);
     if (!picked) return;
     sub = picked.name;
   }
@@ -1445,11 +1444,6 @@ function absoluteDirs(config: Config, status: DebugStatus): DebugStatus {
 
 async function debugStatus(config: Config, room: string): Promise<DebugStatus> {
   return absoluteDirs(config, JSON.parse(await tool(config, "debug_status", { room })) as DebugStatus);
-}
-
-/** The index of the option `choice` of ctx.ui.select names; -1 when the dialog was dismissed. */
-function pickIndex(choice: string | number | undefined, labels: string[]): number {
-  return typeof choice === "number" ? choice : choice === undefined ? -1 : labels.indexOf(choice);
 }
 
 /** `text` on one line, cut to `max` characters with `…`. */
