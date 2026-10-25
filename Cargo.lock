@@ -4069,7 +4069,7 @@ dependencies = [
 
 [[package]]
 name = "schwitzer-app"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axum",
  "blake3",
@@ -4105,7 +4105,7 @@ dependencies = [
 
 [[package]]
 name = "schwitzer-client"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "futures",
  "schwitzer-proto",
@@ -4119,7 +4119,7 @@ dependencies = [
 
 [[package]]
 name = "schwitzer-proto"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "blake3",
  "hex",
@@ -4132,7 +4132,7 @@ dependencies = [
 
 [[package]]
 name = "schwitzer-release"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "flate2",
  "hex",
@@ -4147,7 +4147,7 @@ dependencies = [
 
 [[package]]
 name = "schwitzer-server"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "clap",
