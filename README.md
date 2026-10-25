@@ -127,10 +127,13 @@ An opened task lets you:
 
 The sessions panel shows the live agent sessions of the open project. The status bar shows your name and one status lamp for the server, the agent port and the omp plugin; hover it to see each.
 
+The quick idea field between the task list and the sessions panel notes an idea without opening a form: Enter adds it, the first line is the title and the rest its details, and Shift+Enter starts a new line.
+
 |Shortcut|Action|
 |---|---|
 |`Ctrl+N` (`Cmd+N` on macOS)|new proposal|
 |`Ctrl+,`|Settings|
+|`Ctrl+L` (`Cmd+L` on macOS)|focus the quick idea field|
 |`Esc`|cancel a confirm, close the open task, or go back|
 |`Tab` / `Shift+Tab`|move focus|
 
@@ -153,7 +156,8 @@ The data directory is:
 - `identity/`: your key. Losing it makes you a new member in every room.
 - `settings.toml`: the settings below.
 - `mcp-token`: the agents' token, mode 0600; the app replaces it if others can read it.
-- `resume.json`: written only for an update restart.
+- `resume.json`: written for a restart after an update or after a lost graphics device.
+- `debug/`: the files of debug sessions, `debug/<session>/out` and `debug/<session>/in/<member>-<id>/` (see "Debug sessions"); a session folder untouched for 7 days is removed when a debug worker starts.
 
 |Key|Type|Default|Meaning|
 |---|---|---|---|
@@ -173,7 +177,7 @@ The data directory is:
 |`auto_restart_updates`|bool|`true`|restart after installing an update|
 |`notify_hand_ins`|bool|`false`|notify when your agents hand in a plan or finish a build|
 
-The Settings pages edit all of these. A `settings.toml` that cannot be read loads as defaults with a notice, and is not overwritten until the next save.
+The Settings pages edit these, with these exceptions: `omp_sessions_dir` is set in the file only (Settings → omp lists it read-only under "Session files"), and `rooms`, `last_server`, `repos`, `chosen_projects` and `wsl_distros` change as you join, create or leave rooms, link repos, pick a project and add a WSL distro's folders. A `settings.toml` that cannot be read loads as defaults with a notice, and is not overwritten until the next save.
 
 Environment variables:
 
@@ -298,10 +302,11 @@ Without `--auto-update`, update the server yourself soon after each release. Whe
 |---|---|
 |50 rooms per member|"you are in 50 rooms already; leave one to create or join another"|
 |requests: a burst of 60, then one per second per member|"too many requests, try again in N s"|
+|debug log data: at most 64 KiB per chunk; a burst of 1 MiB, then 256 KiB per second per member|"too much log data, try again in N s"|
 |room snapshot under 4 MiB|"the room is full: …"|
 |task with its notes under 1 MiB|"the task is full: …"|
 
-The app shows these refusals as "invalid request: …".
+The app shows these refusals as "invalid request: …", except the debug log refusal, which it shows as it is.
 
 ### Logs
 
