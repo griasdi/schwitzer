@@ -249,13 +249,16 @@ impl Client {
                     if inbox.0 != session {
                         *inbox = (session, Vec::new());
                     }
-                    inbox.1.push(entry);
+                    inbox.1.push(entry.clone());
                     if inbox.1.len() > INBOX_CAP {
                         let excess = inbox.1.len() - INBOX_CAP;
                         inbox.1.drain(..excess);
                     }
                 }
-                self.emit(ClientEvent::DebugInbox { room });
+                self.emit(ClientEvent::DebugInbox {
+                    room,
+                    fresh: Some(entry),
+                });
                 return;
             }
             Event::Debug { room, session } => {
@@ -362,7 +365,7 @@ impl Client {
             }
         }
         if dropped {
-            self.emit(ClientEvent::DebugInbox { room });
+            self.emit(ClientEvent::DebugInbox { room, fresh: None });
         }
     }
 

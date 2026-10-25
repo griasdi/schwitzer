@@ -31,10 +31,10 @@ use iced::widget::operation::AbsoluteOffset;
 use iced::widget::selector::{self, Target};
 use iced::widget::{column, container, markdown, operation, stack, text_editor};
 use iced::{Element, Length, Subscription, Task, Theme};
-use schwitzer_client::{Client, ClientError, ClientEvent, InboxEntry};
+use schwitzer_client::{Client, ClientError, ClientEvent};
 use schwitzer_proto::{
-    Decision, Priority, Project, Request, Response, RoomId, RoomKey, RoomState, ServerAddr,
-    SessionInfo, Stage, Task as RoomTask, Work, caps, now_ms,
+    DebugId, Decision, Priority, Project, Request, Response, RoomId, RoomKey, RoomState,
+    ServerAddr, SessionInfo, Stage, Task as RoomTask, Work, caps, now_ms,
 };
 use serde::{Deserialize, Serialize};
 
@@ -520,8 +520,6 @@ pub struct App {
     gpu: gpu::Watch,
     /// What each joined debug session's worker moved.
     debug_traffic: HashMap<RoomId, debug::Traffic>,
-    /// The debug instructions each room's session brought.
-    debug_inbox: HashMap<RoomId, Vec<InboxEntry>>,
 }
 
 impl App {
@@ -638,7 +636,6 @@ impl App {
             now_ms: now,
             gpu: gpu::Watch::new(now),
             debug_traffic: HashMap::new(),
-            debug_inbox: HashMap::new(),
         };
         app.read_project_dirs();
         if update::ENABLED
@@ -705,12 +702,10 @@ impl App {
                 .map(Message::Mcp),
             );
         }
-        let me = self.client.member();
-        for (id, _, state) in self.rooms.iter() {
-            let Some(state) = state else { continue };
-            if let Some(session) = state.debug.as_ref().filter(|s| s.members.contains(&me)) {
+        for (id, _, _) in self.rooms.iter() {
+            if let Some(session) = self.joined_debug(id) {
                 subs.push(
-                    debug::subscription(self.client.clone(), self.data_dir.clone(), id, session.id)
+                    debug::subscription(self.client.clone(), self.data_dir.clone(), id, session)
                         .map(Message::DebugTraffic),
                 );
             }
@@ -1326,7 +1321,9 @@ impl App {
                 }
             }
             Message::DebugTraffic(traffic) => {
-                self.debug_traffic.insert(traffic.room, traffic);
+                if self.joined_debug(traffic.room) == Some(traffic.session) {
+                    self.debug_traffic.insert(traffic.room, traffic);
+                }
                 Task::none()
             }
             Message::CopyDebug(text) => {
@@ -2448,12 +2445,10 @@ impl App {
                     }
                     None => self.sync_rooms(),
                 }
-                if let Some((text, ended)) = debug_notice {
-                    if ended {
-                        self.debug_traffic.remove(&id);
-                    }
+                if let Some(text) = debug_notice {
                     self.notify(&text);
                 }
+                self.prune_debug_traffic();
                 if self.selected == Some(id) && self.selected_project().map(|p| p.id) != shown {
                     self.sync_project_form();
                 }
@@ -2468,27 +2463,16 @@ impl App {
                 self.sync_rooms();
                 self.follow_release(before)
             }
-            ClientEvent::DebugInbox { room } => {
-                let entries = self.client.debug_inbox(room);
-                let seen: HashSet<u64> = self
-                    .debug_inbox
-                    .get(&room)
-                    .map(|old| old.iter().map(|e| e.instruction.id).collect())
-                    .unwrap_or_default();
-                let fresh = entries
-                    .iter()
-                    .rev()
-                    .find(|e| e.for_me && !seen.contains(&e.instruction.id))
-                    .map(|e| {
-                        let from = self.rooms.state(room).map_or_else(
-                            || e.instruction.from.short(),
-                            |s| logic::member_name(&s.members, &e.instruction.from),
-                        );
-                        format!("Debug instruction #{} from {from}", e.instruction.id)
-                    });
-                self.debug_inbox.insert(room, entries);
-                if let Some(text) = fresh {
-                    self.notify(&text);
+            ClientEvent::DebugInbox { room, fresh } => {
+                if let Some(entry) = fresh.filter(|e| e.for_me) {
+                    let from = self.rooms.state(room).map_or_else(
+                        || entry.instruction.from.short(),
+                        |s| logic::member_name(&s.members, &entry.instruction.from),
+                    );
+                    self.notify(&format!(
+                        "Debug instruction #{} from {from}",
+                        entry.instruction.id
+                    ));
                 }
                 Task::none()
             }
@@ -2513,6 +2497,7 @@ impl App {
     fn sync_rooms(&mut self) {
         self.rooms.reload(&self.client);
         self.published.retain(|room, _| self.rooms.contains(*room));
+        self.prune_debug_traffic();
         if self
             .selected
             .is_none_or(|selected| !self.rooms.contains(selected))
@@ -2523,6 +2508,24 @@ impl App {
         self.settings
             .retain_rooms(self.rooms.iter().map(|(id, key, _)| (id, key.to_string())));
         self.save_settings();
+    }
+
+    /// The debug session of `room` that this member has joined.
+    fn joined_debug(&self, room: RoomId) -> Option<DebugId> {
+        let me = self.client.member();
+        self.rooms
+            .state(room)?
+            .debug
+            .as_ref()
+            .filter(|session| session.members.contains(&me))
+            .map(|session| session.id)
+    }
+
+    /// Forgets the counts of workers whose session is over, was left or was replaced.
+    fn prune_debug_traffic(&mut self) {
+        let mut traffic = std::mem::take(&mut self.debug_traffic);
+        traffic.retain(|room, t| self.joined_debug(*room) == Some(t.session));
+        self.debug_traffic = traffic;
     }
 
     fn select(&mut self, room: Option<RoomId>) {

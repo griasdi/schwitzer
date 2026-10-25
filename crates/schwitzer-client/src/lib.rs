@@ -94,8 +94,12 @@ pub enum ClientEvent {
         offset: u64,
         data: Arc<[u8]>,
     },
-    /// The room's debug inbox ([`Client::debug_inbox`]) changed.
-    DebugInbox { room: RoomId },
+    /// The room's debug inbox ([`Client::debug_inbox`]) changed; `fresh` is the instruction
+    /// that just arrived, `None` when one was taken or the inbox was dropped.
+    DebugInbox {
+        room: RoomId,
+        fresh: Option<InboxEntry>,
+    },
 }
 
 /// A debug instruction this client received: as an addressee, or as the master who sent it.
@@ -363,7 +367,7 @@ impl Client {
             entry.taken = true;
             entry.instruction.clone()
         };
-        self.emit(ClientEvent::DebugInbox { room });
+        self.emit(ClientEvent::DebugInbox { room, fresh: None });
         Some(taken)
     }
 

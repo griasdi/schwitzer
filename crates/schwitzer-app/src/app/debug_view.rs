@@ -179,13 +179,8 @@ fn joined<'a>(
 
     let mut instructions =
         column![heading(if master { "Sent" } else { "Instructions" })].spacing(SP_2);
-    let entries: Vec<_> = app
-        .debug_inbox
-        .get(&state.id)
-        .into_iter()
-        .flatten()
-        .filter(|e| master || e.for_me)
-        .collect();
+    let inbox = app.client.debug_inbox(state.id);
+    let entries: Vec<_> = inbox.iter().filter(|e| master || e.for_me).collect();
     if entries.is_empty() {
         instructions = instructions.push(muted("Nothing yet"));
     }

@@ -342,19 +342,16 @@ pub fn bytes(n: u64) -> String {
 }
 
 /// What to tell `me` about the change of a room's debug session from `old` to `new`: someone
-/// else started one, or the one `me` was in ended (`true`).
-pub fn debug_change(old: &RoomState, new: &RoomState, me: &MemberId) -> Option<(String, bool)> {
+/// else started one, or the one `me` was in ended.
+pub fn debug_change(old: &RoomState, new: &RoomState, me: &MemberId) -> Option<String> {
     match (&old.debug, &new.debug) {
-        (None, Some(s)) if s.master != *me => Some((
-            format!(
-                "{} started a debug session in {}",
-                member_name(&new.members, &s.master),
-                new.name
-            ),
-            false,
+        (None, Some(s)) if s.master != *me => Some(format!(
+            "{} started a debug session in {}",
+            member_name(&new.members, &s.master),
+            new.name
         )),
         (Some(s), None) if s.members.contains(me) => {
-            Some((format!("The debug session in {} ended", new.name), true))
+            Some(format!("The debug session in {} ended", new.name))
         }
         _ => None,
     }

@@ -256,6 +256,8 @@ pub fn prune(root: &Path, keep: DebugId, now: SystemTime) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Traffic {
     pub room: RoomId,
+    /// The session the worker belongs to.
+    pub session: DebugId,
     /// Bytes sent per out file.
     pub sent: BTreeMap<String, u64>,
     /// Bytes received per `<member dir>/<stream>`.
@@ -268,9 +270,10 @@ pub struct Traffic {
 }
 
 impl Traffic {
-    fn new(room: RoomId) -> Self {
+    fn new(room: RoomId, session: DebugId) -> Self {
         Self {
             room,
+            session,
             sent: BTreeMap::new(),
             received: BTreeMap::new(),
             lost: false,
@@ -347,7 +350,7 @@ fn work(key: &DebugKey) -> impl Stream<Item = Traffic> + use<> {
         let mut outbox = Outbox::default();
         let mut inbox = Inbox::default();
         let mut dirs: HashMap<MemberId, String> = HashMap::new();
-        let mut traffic = Traffic::new(room);
+        let mut traffic = Traffic::new(room, session);
         let mut reported = traffic.clone();
         loop {
             tokio::select! {
