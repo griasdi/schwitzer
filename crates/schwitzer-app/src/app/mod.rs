@@ -1,6 +1,7 @@
 //! The application: state, messages and `update`. The views live in the submodules.
 
 mod chrome;
+mod debug_session;
 mod debug_view;
 mod gpu;
 mod icons;
@@ -34,8 +35,8 @@ use iced::widget::{column, container, markdown, operation, stack, text_editor};
 use iced::{Element, Length, Subscription, Task, Theme};
 use schwitzer_client::{Client, ClientError, ClientEvent};
 use schwitzer_proto::{
-    DebugId, Decision, Priority, Project, Request, Response, RoomId, RoomKey, RoomState,
-    ServerAddr, SessionInfo, Stage, Task as RoomTask, Work, caps, now_ms,
+    Decision, Priority, Project, Request, Response, RoomId, RoomKey, RoomState, ServerAddr,
+    SessionInfo, Stage, Task as RoomTask, Work, caps, now_ms,
 };
 use serde::{Deserialize, Serialize};
 
@@ -702,14 +703,7 @@ impl App {
                 .map(Message::Mcp),
             );
         }
-        for (id, _, _) in self.rooms.iter() {
-            if let Some(session) = self.joined_debug(id) {
-                subs.push(
-                    debug::subscription(self.client.clone(), self.data_dir.clone(), id, session)
-                        .map(Message::DebugTraffic),
-                );
-            }
-        }
+        subs.extend(self.debug_subscriptions());
         if update::ENABLED {
             subs.push(iced::time::every(update::CHECK_INTERVAL).map(|_| Message::CheckUpdate));
         }
@@ -1084,40 +1078,14 @@ impl App {
                 self.notify("Room removed from this app");
                 self.leave_room_page()
             }
-            Message::DebugStart => match self.selected {
-                Some(room) => {
-                    let client = self.client.clone();
-                    fire(async move { client.debug_start(room).await })
-                }
-                None => Task::none(),
-            },
-            Message::DebugJoin => match self.selected {
-                Some(room) => {
-                    let client = self.client.clone();
-                    fire(async move { client.debug_join(room).await })
-                }
-                None => Task::none(),
-            },
-            Message::DebugLeave => {
-                self.confirm = None;
-                match self.selected {
-                    Some(room) => {
-                        let client = self.client.clone();
-                        fire(async move { client.debug_leave(room).await })
-                    }
-                    None => Task::none(),
-                }
-            }
+            Message::DebugStart => self.debug_start(),
+            Message::DebugJoin => self.debug_join(),
+            Message::DebugLeave => self.debug_leave(),
             Message::DebugTraffic(traffic) => {
-                if self.joined_debug(traffic.room) == Some(traffic.session) {
-                    self.debug_traffic.insert(traffic.room, traffic);
-                }
+                self.on_debug_traffic(traffic);
                 Task::none()
             }
-            Message::CopyDebug(text) => {
-                self.notify("Copied");
-                iced::clipboard::write(text)
-            }
+            Message::CopyDebug(text) => self.copy_debug(text),
             Message::NameInput(s) => {
                 self.forms.name = s;
                 Task::none()
@@ -2233,10 +2201,7 @@ impl App {
                     }
                     None => self.sync_rooms(),
                 }
-                if let Some(text) = debug_notice {
-                    self.notify(&text);
-                }
-                self.prune_debug_traffic();
+                self.on_debug_room_change(debug_notice);
                 if self.selected == Some(id) && self.selected_project().map(|p| p.id) != shown {
                     self.sync_project_form();
                 }
@@ -2252,17 +2217,7 @@ impl App {
                 self.follow_release(before)
             }
             ClientEvent::DebugInbox { room, fresh } => {
-                if let Some(entry) = fresh.filter(|e| e.for_me) {
-                    let members = self
-                        .rooms
-                        .state(room)
-                        .map_or(&[][..], |s| s.members.as_slice());
-                    let from = logic::member_name(members, &entry.instruction.from);
-                    self.notify(&format!(
-                        "Debug instruction #{} from {from}",
-                        entry.instruction.id
-                    ));
-                }
+                self.on_debug_inbox(room, fresh);
                 Task::none()
             }
             // The bridge keeps log bytes out of the message loop; the debug worker reads them.
@@ -2297,24 +2252,6 @@ impl App {
         self.settings
             .retain_rooms(self.rooms.iter().map(|(id, key, _)| (id, key.to_string())));
         self.save_settings();
-    }
-
-    /// The debug session of `room` that this member has joined.
-    fn joined_debug(&self, room: RoomId) -> Option<DebugId> {
-        let me = self.client.member();
-        self.rooms
-            .state(room)?
-            .debug
-            .as_ref()
-            .filter(|session| session.members.contains(&me))
-            .map(|session| session.id)
-    }
-
-    /// Forgets the counts of workers whose session is over, was left or was replaced.
-    fn prune_debug_traffic(&mut self) {
-        let mut traffic = std::mem::take(&mut self.debug_traffic);
-        traffic.retain(|room, t| self.joined_debug(*room) == Some(t.session));
-        self.debug_traffic = traffic;
     }
 
     fn select(&mut self, room: Option<RoomId>) {

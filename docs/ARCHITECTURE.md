@@ -283,6 +283,7 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |`pages.rs`|full-window pages with a back button: Settings and its topics, About|
 |`licenses_view.rs`|the About page with the licenses|
 |`debug_view.rs`|the Debug page: start or join, the people in the session, the folders, what was sent and received, the instructions|
+|`debug_session.rs`|no view: the debug session lifecycle (`impl App`: start, join, leave, one worker subscription per joined session and the counts they report, the notices of a session change and of an instruction)|
 |`widgets.rs`|lamps, pills, buttons and other shared widgets|
 |`sticky.rs`|`Sticky`: the open task's head, pinned to the list's top while its slab is scrolled past|
 |`icons.rs`|Lucide icons from `assets/icons/`|
@@ -298,7 +299,7 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |session scanner, 5 s|`sessions.rs`, see [9.7](#97-live-sessions)|
 |WSL distros, 5 s|Windows only: the running distros (`wsl.rs`)|
 |MCP server|while a token exists (`mcp/serve.rs`)|
-|debug traffic, per joined session|`debug::subscription`: sends the new bytes of the `out` folder every 500 ms and writes received bytes to `in/`, see [9.8](#98-proposals-ideas-and-other-projects)|
+|debug traffic, per joined session|`App::debug_subscriptions` (`app/debug_session.rs`) runs `debug::subscription`: sends the new bytes of the `out` folder every 500 ms and writes received bytes to `in/`, see [9.8](#98-proposals-ideas-and-other-projects)|
 |update check, 300 s|feature `self-update` only (`update.rs`; on the dev channel it asks `releases/tags/dev`)|
 
 ```mermaid
@@ -575,7 +576,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |Task|Touch|
 |---|---|
 |New request or event|`schwitzer-proto/src/rpc.rs` or `events.rs` (append the variant; bump `PROTOCOL_VERSION` when old peers would break), `schwitzer-server/src/rpc.rs` (`dispatch`, validation), `store.rs`, the caller in `app/mod.rs`|
-|New debug request|`schwitzer-proto/src/rpc.rs` and `events.rs`, `schwitzer-server/src/debug.rs` (`DebugRuns`) and its handler in `rpc.rs`, a `Client::debug_*` method in `schwitzer-client/src/lib.rs`, `schwitzer-app/src/debug.rs` (the worker), `mcp/tools.rs`, `omp-plugin/index.ts`|
+|New debug request|`schwitzer-proto/src/rpc.rs` and `events.rs`, `schwitzer-server/src/debug.rs` (`DebugRuns`) and its handler in `rpc.rs`, a `Client::debug_*` method in `schwitzer-client/src/lib.rs`, `schwitzer-app/src/debug.rs` (the worker), `app/debug_session.rs` (the lifecycle in the app), `app/debug_view.rs` (the page), `mcp/tools.rs`, `omp-plugin/index.ts`|
 |New stage, decision or claim rule|`model.rs` (append), `store.rs` (`stage_to_int` …, `next_stage`, `claim`), `app/logic.rs` (`Group::of`, `legal_decisions`, `stage_label`), `app/widgets.rs` (`lamp_kind`), `mcp/tools.rs` (`StageArg`), the plugin (`STAGE`)|
 |Schema change|`store.rs` (`SCHEMA`, a new `MIGRATE_n`, `SCHEMA_VERSION`)|
 |New MCP tool or argument|`mcp/tools.rs`, `omp-plugin/index.ts` (`TOOLS`), `omp-plugin/README.md`|
