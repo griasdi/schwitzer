@@ -2819,6 +2819,6 @@ async fn choose_folder(title: &'static str, start: Option<PathBuf>) -> Option<Pa
 
 /// A start that cannot continue: no data directory, no identity.
 fn fatal(message: &str) -> ! {
-    eprintln!("schwitzer: {message}");
+    tracing::error!("{message}");
     std::process::exit(1)
 }

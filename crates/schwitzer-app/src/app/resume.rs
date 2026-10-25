@@ -152,9 +152,14 @@ pub fn write(dir: &Path, resume: &Resume) -> io::Result<()> {
     crate::settings::write_atomic(&dir.join(FILE), &json)
 }
 
-/// Removes the resume file from `dir`.
+/// Removes the resume file from `dir`; an error other than a missing file is logged.
 pub fn remove(dir: &Path) {
-    let _ = std::fs::remove_file(dir.join(FILE));
+    let path = dir.join(FILE);
+    if let Err(e) = std::fs::remove_file(&path)
+        && e.kind() != io::ErrorKind::NotFound
+    {
+        tracing::warn!("cannot remove {}: {e}", path.display());
+    }
 }
 
 /// Reads and removes the resume file in `dir`; `None` without one, for an unreadable one and
