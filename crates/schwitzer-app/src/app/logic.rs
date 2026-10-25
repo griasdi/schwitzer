@@ -1254,9 +1254,11 @@ mod tests {
         let v = |s: &str| semver::Version::parse(s).unwrap();
         let release = |version: &str| crate::update::Release {
             version: v(version),
-            url: String::new(),
-            size: 0,
-            sha256: [0; 32],
+            download: schwitzer_release::Download {
+                url: String::new(),
+                size: 0,
+                sha256: [0; 32],
+            },
         };
         let current = v("1.0.0");
         let idle = UpdateState::Idle;

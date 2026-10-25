@@ -233,8 +233,15 @@ pub fn api_get_dev(user_agent: &str, base: &str, limit: u64) -> Result<Vec<u8>, 
     })
 }
 
-/// Downloads `url`, at most `limit` bytes. Blocks.
-pub fn download(user_agent: &str, url: &str, limit: u64) -> Result<Vec<u8>, String> {
+/// Downloads `download` (at most `limit` bytes) and checks it has the size and sha256 digest
+/// the release lists. Blocks.
+pub fn fetch(user_agent: &str, download: &Download, limit: u64) -> Result<Vec<u8>, String> {
+    let bytes = get(user_agent, &download.url, limit)?;
+    verify(&bytes, download.size, &download.sha256)?;
+    Ok(bytes)
+}
+
+fn get(user_agent: &str, url: &str, limit: u64) -> Result<Vec<u8>, String> {
     let mut response = agent(user_agent, DOWNLOAD_TIMEOUT)
         .get(url)
         .call()
@@ -248,7 +255,7 @@ pub fn download(user_agent: &str, url: &str, limit: u64) -> Result<Vec<u8>, Stri
 }
 
 /// Checks that `bytes` have the `size` and sha256 digest the release lists.
-pub fn verify(bytes: &[u8], size: u64, sha256: &[u8; 32]) -> Result<(), String> {
+fn verify(bytes: &[u8], size: u64, sha256: &[u8; 32]) -> Result<(), String> {
     let got = bytes.len() as u64;
     if got != size {
         return Err(format!("download is {got} bytes, expected {size}"));

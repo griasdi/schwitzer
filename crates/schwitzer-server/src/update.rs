@@ -94,8 +94,7 @@ impl AutoUpdate {
         assets: &[Asset],
     ) -> Result<(), String> {
         let download = pick(assets, version, self.platform)?;
-        let bytes = schwitzer_release::download(&user_agent(), &download.url, MAX_ARCHIVE)?;
-        schwitzer_release::verify(&bytes, download.size, &download.sha256)?;
+        let bytes = schwitzer_release::fetch(&user_agent(), &download, MAX_ARCHIVE)?;
         unpack_and_replace(&self.exe, &bytes)
     }
 

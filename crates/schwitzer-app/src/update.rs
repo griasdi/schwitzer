@@ -15,7 +15,9 @@ use std::time::Duration;
 use futures::channel::oneshot;
 #[cfg(unix)]
 use schwitzer_release::replace;
-use schwitzer_release::{ApiError, Channel, GitHubRelease, PLATFORM, RELEASES_URL, sibling};
+use schwitzer_release::{
+    ApiError, Channel, Download, GitHubRelease, PLATFORM, RELEASES_URL, sibling,
+};
 
 /// Whether this build updates itself: only the release builds from CI (`--features self-update`).
 pub const ENABLED: bool = cfg!(feature = "self-update");
@@ -90,9 +92,7 @@ impl Program {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
     pub version: semver::Version,
-    pub url: String,
-    pub size: u64,
-    pub sha256: [u8; 32],
+    pub download: Download,
 }
 
 /// Which release a check asks GitHub for.
@@ -168,12 +168,7 @@ pub fn parse_release(
         .find(|a| a.name == name)
         .ok_or_else(|| format!("release {tag} has no {name}"))?;
     let download = asset.download_info()?;
-    Ok(Some(Release {
-        version,
-        url: download.url,
-        size: download.size,
-        sha256: download.sha256,
-    }))
+    Ok(Some(Release { version, download }))
 }
 
 /// The newest build in GitHub's answer `json` for the rolling dev release when this build of
@@ -198,12 +193,7 @@ pub fn parse_dev(
         return Ok(None);
     }
     let download = asset.download_info()?;
-    Ok(Some(Release {
-        version,
-        url: download.url,
-        size: download.size,
-        sha256: download.sha256,
-    }))
+    Ok(Some(Release { version, download }))
 }
 
 /// Asks GitHub for the release `lookup` names; `None` when this build does not install it.
@@ -217,12 +207,11 @@ pub async fn check(lookup: Lookup, package: Package) -> Result<Option<Release>, 
 /// Downloads `release`, verifies it and puts it in place of `program`.
 pub async fn install(release: Release, program: Program) -> Result<semver::Version, String> {
     blocking(move || {
-        let bytes = schwitzer_release::download(
+        let bytes = schwitzer_release::fetch(
             &schwitzer_release::user_agent(PROGRAM),
-            &release.url,
+            &release.download,
             MAX_ARCHIVE,
         )?;
-        schwitzer_release::verify(&bytes, release.size, &release.sha256)?;
         let binary = match program.package {
             Package::AppImage => bytes,
             Package::Archive => extract(&bytes)?,
@@ -388,9 +377,9 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(release.version, v("1.2.0"));
-        assert_eq!(release.url, "https://x/a");
-        assert_eq!(release.size, 42);
-        assert_eq!(hex::encode(release.sha256), &DIGEST[7..]);
+        assert_eq!(release.download.url, "https://x/a");
+        assert_eq!(release.download.size, 42);
+        assert_eq!(hex::encode(release.download.sha256), &DIGEST[7..]);
     }
 
     #[test]
@@ -477,6 +466,7 @@ mod tests {
             parse_release(json.as_bytes(), &v("1.1.0"), PLATFORM, package)
                 .unwrap()
                 .unwrap()
+                .download
                 .url
         };
         assert_eq!(found(Package::AppImage), "https://x/img");
@@ -518,7 +508,7 @@ mod tests {
             .unwrap();
         assert_eq!(release.version, v("0.3.1-dev.12"));
         assert_eq!(
-            release.url,
+            release.download.url,
             format!("https://x/{}", archive("0.3.1-dev.12"))
         );
         assert_eq!(
