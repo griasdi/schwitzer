@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" role="img" aria-labelledby="title desc">
   <title id="title">Schwitzer system architecture</title>
-  <desc id="desc">On your machine, omp agent sessions with the Schwitzer plugin call the desktop app's local MCP server; the app (UI, MCP server, session scanner, plugin keeper) reaches its rooms through schwitzer-client and schwitzer-proto and keeps its data in SCHWITZER_HOME. weida/QUIC carries /rpc and /events to the room server (rpc, events, hub, in-memory sessions, SQLite store, release check), which sends every change to the other members' apps; GitHub releases, the releases API, stkn.org, CI and the site make up the project infrastructure.</desc>
+  <desc id="desc">On your machine, omp agent sessions with the Schwitzer plugin call the desktop app's local MCP server; the app (UI, MCP server, session scanner, plugin keeper) reaches its rooms through schwitzer-client and schwitzer-proto and keeps its data in SCHWITZER_HOME. weida/QUIC carries /rpc and /events to the room server (rpc, events, hub, in-memory sessions and debug sessions, SQLite store, release check), which sends every change to the other members' apps; GitHub releases with the rolling dev prerelease, the releases API, stkn.org, CI and the site make up the project infrastructure.</desc>
   <defs>
     <style>
       text { font-family: Figtree, Inter, 'Segoe UI', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif; }
@@ -74,12 +74,12 @@
   <rect x="60" y="180" width="780" height="130" rx="10" fill="#f0a630" stroke="#f0a630" stroke-width="1.5" fill-opacity="0.10"/>
   <text x="76" y="200" class="crate agent">omp · coding agent sessions</text>
   <text x="76" y="217" class="desc">the harness, started in a repo that is linked to a room's project</text>
-  <rect x="76" y="228" width="280" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
-  <text x="216.0" y="244.0" class="chip mid">/schwitzer plan · build · propose · idea</text>
-  <rect x="364" y="228" width="164" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
-  <text x="446.0" y="244.0" class="chip mid">schwitzer_* tools (10)</text>
-  <rect x="536" y="228" width="183" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
-  <text x="627.5" y="244.0" class="chip mid">plan review → submit_plan</text>
+  <rect x="76" y="228" width="331" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="241.5" y="244.0" class="chip mid">/schwitzer plan · build · propose · idea · debug</text>
+  <rect x="415" y="228" width="164" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="497.0" y="244.0" class="chip mid">schwitzer_* tools (12)</text>
+  <rect x="587" y="228" width="183" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="678.5" y="244.0" class="chip mid">plan review → submit_plan</text>
   <rect x="76" y="258" width="106" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
   <text x="129.0" y="274.0" class="chip mid">projects hint</text>
   <rect x="190" y="258" width="177" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
@@ -136,7 +136,7 @@
   <text x="76" y="622" class="crate proto">schwitzer-proto</text>
   <text x="76" y="643" class="desc">Request · Event · Task · Stage</text>
   <text x="76" y="661" class="desc">postcard · u32 LE frames · caps</text>
-  <text x="76" y="679" class="desc mono">PROTOCOL_VERSION 7</text>
+  <text x="76" y="679" class="desc mono">PROTOCOL_VERSION 8</text>
   <rect x="340" y="600" width="500" height="104" rx="10" fill="#5aa6f5" stroke="#5aa6f5" stroke-width="1.5" fill-opacity="0.10"/>
   <text x="356" y="622" class="crate client">schwitzer-client</text>
   <text x="356" y="639" class="desc">own tokio runtime schwitzer-net (2 workers) + weida runtime</text>
@@ -176,7 +176,7 @@
   <text x="1088" y="220" class="desc">stores: rooms, projects, tasks, plans,</text>
   <text x="1088" y="236" class="desc">notes, names — plain text,</text>
   <text x="1088" y="252" class="small">TLS protects only the wire</text>
-  <text x="1088" y="268" class="desc">in memory: shared sessions</text>
+  <text x="1088" y="268" class="desc">in memory: sessions, debug sessions</text>
   <text x="1088" y="284" class="small">title · model · tokens · task</text>
   <text x="1088" y="300" class="desc">never: code, MCP token, other sessions</text>
   <rect x="1074" y="325" width="302" height="410" rx="10" fill="#16494a" stroke="#cdf5f2" stroke-width="1.5" fill-opacity="0.45"/>
@@ -191,8 +191,9 @@
   <rect x="1088" y="494" width="131" height="96" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
   <text x="1102" y="513" class="head">sessions</text>
   <text x="1102" y="532" class="desc">memory only</text>
-  <text x="1102" y="548" class="desc">per room and</text>
-  <text x="1102" y="564" class="desc">member</text>
+  <text x="1102" y="548" class="desc">shared sessions</text>
+  <text x="1102" y="564" class="desc">debug sessions,</text>
+  <text x="1102" y="580" class="desc">relayed</text>
   <rect x="1088" y="600" width="131" height="56" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
   <text x="1102" y="619" class="head">rpc</text>
   <text x="1102" y="639" class="small">one tx per change</text>
@@ -261,6 +262,9 @@
   <text x="70" y="919" class="desc">AppImage · tar.gz · zip · setup.exe</text>
   <text x="70" y="936" class="desc">sha256 digest per asset</text>
   <text x="70" y="953" class="desc">notes from Changelog: trailers</text>
+  <text x="70" y="970" class="desc">rolling dev prerelease from main</text>
+  <text x="70" y="987" class="desc">after CI passes: the dev update</text>
+  <text x="70" y="1004" class="desc">channel of app and server</text>
   <rect x="356" y="845" width="286" height="190" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
   <text x="370" y="865" class="head">GitHub Actions</text>
   <text x="370" y="885" class="small mono">.github/workflows/ci.yml</text>
@@ -288,6 +292,7 @@
   <text x="1270" y="902" class="small mono">griasdi/schwitzer/releases</text>
   <text x="1270" y="919" class="desc">server polls it every 2 min</text>
   <text x="1270" y="936" class="desc">app fetches releases/tags/v&lt;version&gt;</text>
+  <text x="1270" y="953" class="desc">dev channel: releases/tags/dev</text>
 
   <!-- arrows into E -->
   <path d="M60 460 L48 460 L48 880 L56 880" fill="none" stroke="#627568" stroke-width="1.5" marker-end="url(#m-https)"/>

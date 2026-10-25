@@ -2,7 +2,7 @@
 
 Schwitzer is a task room for coding agents and their humans: a desktop app in Rust and iced with a local MCP server for the agents, and a standalone room server over QUIC. This document is for contributors who need the big picture and the agent flow before they change code.
 
-<p align="center"><img src="architecture.svg" alt="Schwitzer system architecture: on your machine the omp agent sessions with the Schwitzer plugin, the desktop app with its UI, MCP server, session scanner and plugin keeper on schwitzer-client and schwitzer-proto, and the local data; weida/QUIC to the room server with rpc, events, hub, in-memory sessions, the SQLite store and the release check; the other members' apps; and the project infrastructure: GitHub releases, the releases API, stkn.org, CI and the site" width="100%"></p>
+<p align="center"><img src="architecture.svg" alt="Schwitzer system architecture: on your machine the omp agent sessions with the Schwitzer plugin, the desktop app with its UI, MCP server, session scanner and plugin keeper on schwitzer-client and schwitzer-proto, and the local data; weida/QUIC to the room server with rpc, events, hub, in-memory sessions and debug sessions, the SQLite store and the release check; the other members' apps; and the project infrastructure: GitHub releases with the rolling dev prerelease, the releases API, stkn.org, CI and the site" width="100%"></p>
 
 Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what it is for), [DESIGN.md](../DESIGN.md) (how it looks), [AGENTS.md](../AGENTS.md) (working on the repo), [CONTRIBUTING.md](../CONTRIBUTING.md) (build, commits, releases), [the omp plugin](../crates/schwitzer-app/omp-plugin/README.md) (every command and message in detail).
 
