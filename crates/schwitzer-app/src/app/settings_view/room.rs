@@ -22,7 +22,7 @@ pub fn room_page(app: &App) -> Element<'_, Message> {
     let state = app.selected_state();
     let name = logic::room_label(RoomId::of(&key.token), state);
     let address = format!("{}:{}", key.server.host, key.server.port);
-    let online = app.servers.get(&key.server).map(|s| s.online);
+    let online = app.server_online(&key.server);
 
     let server = column![
         heading("Server"),
@@ -194,7 +194,7 @@ fn pick_row<'a>(
 pub fn rooms_page(app: &App) -> Element<'_, Message> {
     let mut list = column![].spacing(2);
     for (id, key, state) in app.rooms.iter() {
-        let online = app.servers.get(&key.server).map(|s| s.online);
+        let online = app.server_online(&key.server);
         list = list.push(pick_row(
             format!("room-{}", id.short()),
             dot(online),

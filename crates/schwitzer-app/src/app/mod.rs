@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 
 use self::chrome::RoomChoice;
 use self::icons::{Icon, Tone};
-use self::logic::Group;
+use self::logic::{Group, ServerStatus};
 use self::rooms::Rooms;
 use crate::bridge::{self, ClientKey, call, fire};
 use crate::debug;
@@ -49,7 +49,7 @@ use crate::omp_plugin::PluginState;
 use crate::sessions::{self, LocalSession};
 use crate::settings::{self, Settings};
 use crate::system_notify;
-use crate::theme::{self, Dot, SP_2};
+use crate::theme::{self, SP_2};
 use crate::update::{self, UpdateState};
 use crate::wsl;
 
@@ -271,13 +271,6 @@ pub enum TaskText {
     Plan,
     /// Note `i` in note order.
     Note(usize),
-}
-
-/// Whether a server answers, with the reason when it does not.
-#[derive(Debug, Clone, Default)]
-struct ServerStatus {
-    online: bool,
-    error: Option<String>,
 }
 
 /// Which page fills the window.
@@ -1841,40 +1834,14 @@ impl App {
         self.rooms.key(self.selected?)
     }
 
-    /// Whether the selected room's server answers; `None` before it said either.
-    fn selected_server_online(&self) -> Option<bool> {
-        let key = self.selected_key()?;
-        self.servers.get(&key.server).map(|s| s.online)
+    /// Whether `server` answers; `None` before it said either.
+    fn server_online(&self, server: &ServerAddr) -> Option<bool> {
+        self.servers.get(server).map(|s| s.online)
     }
 
-    /// The status lamp's line for the selected room's server.
-    fn server_status(&self) -> logic::Status {
-        let (dot, word, detail) = match self.selected_key() {
-            None => (Dot::Unknown, "no room", "No room selected".to_owned()),
-            Some(key) => {
-                let server = format!("{}:{}", key.server.host, key.server.port);
-                match self.servers.get(&key.server) {
-                    Some(ServerStatus { online: true, .. }) => {
-                        (Dot::Up, "online", format!("{server} online"))
-                    }
-                    Some(ServerStatus { error: Some(e), .. }) => {
-                        (Dot::Down, "offline", format!("{server} offline: {e}"))
-                    }
-                    Some(_) => (Dot::Down, "offline", format!("{server} offline")),
-                    None => (
-                        Dot::Unknown,
-                        "connecting",
-                        format!("Connecting to {server}"),
-                    ),
-                }
-            }
-        };
-        logic::Status {
-            name: "Server",
-            dot,
-            word,
-            detail,
-        }
+    /// Whether the selected room's server answers; `None` before it said either.
+    fn selected_server_online(&self) -> Option<bool> {
+        self.server_online(&self.selected_key()?.server)
     }
 
     /// The rooms for the switcher, in list order.

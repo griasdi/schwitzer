@@ -161,7 +161,7 @@ pub fn first_start(app: &App) -> Element<'_, Message> {
 /// The selected room's slab: whether its server answers and who is online.
 fn room_slab<'a>(app: &'a App, key: &'a RoomKey) -> Element<'a, Message> {
     let state = app.selected_state();
-    let status = if app.servers.get(&key.server).map(|s| s.online) == Some(false) {
+    let status = if app.server_online(&key.server) == Some(false) {
         Status::Problem(format!(
             "{}:{} does not answer",
             key.server.host, key.server.port

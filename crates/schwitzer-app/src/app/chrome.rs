@@ -224,8 +224,9 @@ pub fn members(app: &App) -> Option<Element<'_, Message>> {
 /// The status bar: my name, a notice, and one lamp for the server, the agent port and the omp
 /// plugin, whose card spells each out.
 pub fn status_bar(app: &App) -> Element<'_, Message> {
+    let server = app.selected_key().map(|key| &key.server);
     let statuses = [
-        app.server_status(),
+        logic::server_status(server, server.and_then(|s| app.servers.get(s))),
         logic::mcp_status(app.mcp.as_ref(), app.settings.mcp_port),
         logic::omp_status(Coverage::of(app.project_repos(), &app.plugins)),
     ];

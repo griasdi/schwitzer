@@ -4,7 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use schwitzer_proto::{
-    ClaimToken, Decision, Member, MemberId, RoomId, RoomState, SessionInfo, Stage, Task, Work, caps,
+    ClaimToken, Decision, Member, MemberId, RoomId, RoomState, ServerAddr, SessionInfo, Stage,
+    Task, Work, caps,
 };
 use schwitzer_release::Channel;
 use serde::{Deserialize, Serialize};
@@ -664,6 +665,44 @@ pub fn omp_status(coverage: Coverage) -> Status {
     };
     Status {
         name: "omp",
+        dot,
+        word,
+        detail,
+    }
+}
+
+/// Whether a server answers, with the reason when it does not.
+#[derive(Debug, Clone, Default)]
+pub struct ServerStatus {
+    pub online: bool,
+    pub error: Option<String>,
+}
+
+/// The server's line for the selected room's `server`, `None` while no room is selected;
+/// `known` is what was learned about the server, `None` before it said anything.
+pub fn server_status(server: Option<&ServerAddr>, known: Option<&ServerStatus>) -> Status {
+    let (dot, word, detail) = match server {
+        None => (Dot::Unknown, "no room", "No room selected".to_owned()),
+        Some(addr) => {
+            let server = format!("{}:{}", addr.host, addr.port);
+            match known {
+                Some(ServerStatus { online: true, .. }) => {
+                    (Dot::Up, "online", format!("{server} online"))
+                }
+                Some(ServerStatus { error: Some(e), .. }) => {
+                    (Dot::Down, "offline", format!("{server} offline: {e}"))
+                }
+                Some(_) => (Dot::Down, "offline", format!("{server} offline")),
+                None => (
+                    Dot::Unknown,
+                    "connecting",
+                    format!("Connecting to {server}"),
+                ),
+            }
+        }
+    };
+    Status {
+        name: "Server",
         dot,
         word,
         detail,
