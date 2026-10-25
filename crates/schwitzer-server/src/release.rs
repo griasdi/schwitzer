@@ -78,6 +78,26 @@ fn fetch_dev(url: &str, platform: &str) -> Result<Option<Published>, String> {
     newest_dev(&json, platform)
 }
 
+/// Runs the blocking check `f` on a worker; a failed or stopped check is logged as `what` and
+/// reads as no answer.
+async fn blocking<T, F>(what: &'static str, f: F) -> Option<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(f).await {
+        Ok(Ok(found)) => Some(found),
+        Ok(Err(e)) => {
+            tracing::warn!("{what} failed: {e}");
+            None
+        }
+        Err(e) => {
+            tracing::warn!("{what} stopped: {e}");
+            None
+        }
+    }
+}
+
 /// Checks `url` every two minutes and announces a changed release to every stream. Stores the
 /// release before publishing it: `/events` reads it after subscribing, so no stream misses it.
 ///
@@ -100,19 +120,8 @@ pub(crate) async fn watch(
         let tick = ticks;
         ticks = ticks.wrapping_add(1);
         let u = url.clone();
-        let stable = match tokio::task::spawn_blocking(move || fetch(&u)).await {
-            Ok(Ok(Some(stable))) => Some(stable),
-            // No stable release listed: keep the last known release.
-            Ok(Ok(None)) => None,
-            Ok(Err(e)) => {
-                tracing::warn!("release check failed: {e}");
-                None
-            }
-            Err(e) => {
-                tracing::warn!("release check stopped: {e}");
-                None
-            }
-        };
+        // No stable release listed: keep the last known release.
+        let stable = blocking("release check", move || fetch(&u)).await.flatten();
         if let Some(stable) = &stable {
             let version = stable.version.clone();
             let changed = {
@@ -138,17 +147,9 @@ pub(crate) async fn watch(
             Channel::Release => stable,
             Channel::Dev if tick.is_multiple_of(3) => {
                 let (u, platform) = (url.clone(), updater.platform());
-                match tokio::task::spawn_blocking(move || fetch_dev(&u, platform)).await {
-                    Ok(Ok(found)) => found,
-                    Ok(Err(e)) => {
-                        tracing::warn!("dev release check failed: {e}");
-                        None
-                    }
-                    Err(e) => {
-                        tracing::warn!("dev release check stopped: {e}");
-                        None
-                    }
-                }
+                blocking("dev release check", move || fetch_dev(&u, platform))
+                    .await
+                    .flatten()
             }
             Channel::Dev => None,
         };
