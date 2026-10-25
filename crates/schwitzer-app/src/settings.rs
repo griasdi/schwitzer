@@ -206,7 +206,6 @@ impl Settings {
         match std::fs::read_to_string(&path) {
             Ok(text) => match toml::from_str::<Settings>(&text) {
                 Ok(mut settings) => {
-                    settings.migrate_room_keys();
                     let problem = (settings.mcp_port == 0).then(|| {
                         settings.mcp_port = DEFAULT_MCP_PORT;
                         LoadProblem::PortReplaced
@@ -217,28 +216,6 @@ impl Settings {
             },
             Err(e) if e.kind() == io::ErrorKind::NotFound => (Self::default(), None),
             Err(e) => unreadable(&e),
-        }
-    }
-
-    /// Before projects, a `repos` key was the room alone; the server's schema migration gave
-    /// every room of that time project 1, so such keys move there.
-    fn migrate_room_keys(&mut self) {
-        let old: Vec<String> = self
-            .repos
-            .keys()
-            .filter(|key| !key.contains('/'))
-            .cloned()
-            .collect();
-        for key in old {
-            let Some(paths) = self.repos.remove(&key) else {
-                continue;
-            };
-            let linked = self.repos.entry(format!("{key}/1")).or_default();
-            for path in paths {
-                if !linked.contains(&path) {
-                    linked.push(path);
-                }
-            }
         }
     }
 
@@ -610,26 +587,6 @@ mod tests {
             Some(&[code, ubuntu_work][..])
         );
         assert_eq!(settings.wsl_distros, ["Ubuntu", "Debian"]);
-    }
-
-    #[test]
-    fn room_keys_from_before_projects_move_to_project_one() {
-        let dir = tempfile::tempdir().unwrap();
-        let hex = "ab".repeat(32);
-        std::fs::write(
-            dir.path().join(FILE),
-            format!("[repos]\n\"{hex}\" = [\"/a\"]\n\"{hex}/1\" = [\"/a\", \"/b\"]\n"),
-        )
-        .unwrap();
-        let (settings, problem) = Settings::load(dir.path());
-        assert_eq!(problem, None);
-        assert_eq!(
-            settings.repos,
-            BTreeMap::from([(
-                format!("{hex}/1"),
-                vec![PathBuf::from("/a"), PathBuf::from("/b")]
-            )])
-        );
     }
 
     #[test]
