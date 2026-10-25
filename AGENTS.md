@@ -31,7 +31,7 @@ cargo deny check
 
 stkn.org runs the latest release and installs it itself (`schwitzer-server --auto-update`, release channel); no agent deploys, restarts or replaces it (see "Finishing a change").
 
-`cargo deny check` (`deny.toml`) fetches the RustSec advisory database and checks the graph with every feature: it fails on every vulnerability, on an "unmaintained" notice only for a direct dependency, on a license outside the allow list, and on a source other than crates.io and the two git repositories listed there; a crate in two versions is a warning. An advisory is never silenced, a license never allowed and a source never added without the user's decision. Install it with `cargo install --locked cargo-deny`.
+`cargo deny check` (`deny.toml`) fetches the RustSec advisory database and checks the graph with every feature: it fails on every vulnerability, on an "unmaintained" notice only for a direct dependency, on a license outside the allow list, and on a source other than crates.io; a crate in two versions is a warning. An advisory is never silenced, a license never allowed and a source never added without the user's decision. Install it with `cargo install --locked cargo-deny`.
 
 A change to doc comments also runs `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`. A UI change is checked the way a user meets it: clicked through headless and screenshotted, not only compiled. `crates/schwitzer-client/tests/flow.rs` starts a real server on loopback UDP and restarts it on the same data dir; it needs no network beyond `127.0.0.1`.
 
@@ -97,7 +97,7 @@ Keep pure logic (`app/logic.rs`, `store.rs`, `proto`) free of iced types so it s
 - Errors: `thiserror` in the libraries (`schwitzer-proto`, `schwitzer-client`), `anyhow` in `schwitzer-server`; the app shows errors as text (`ApiError`'s `Display`). Log with `tracing`, to stderr: stdout belongs to the server's `server url:` line and to `ctl` replies. Poisoned mutexes are taken over with `unwrap_or_else(PoisonError::into_inner)`.
 - `unsafe_code` is forbidden workspace-wide.
 - UI work reads DESIGN.md (normative, with Daylight and Night tokens) and PRODUCT.md first and uses the impeccable skill (`.omp/skills/impeccable`). Only the style functions in `theme.rs` read the tokens; views never hard-code colours or sizes.
-- `weida` is pinned to an exact git revision in the root `Cargo.toml`: it is alpha and its wire protocol may break within 0.x; moving the rev is its own change. `iced_impeccable` comes from crates.io.
+- `weida` is pinned to an exact version (`=0.1.0-alpha.9`) in the root `Cargo.toml`: it is alpha and its wire protocol may break within 0.x; moving the version is its own change. `iced_impeccable` comes from crates.io.
 - `SCHWITZER_PLAN.md` (the first cut's plan) and other local planning files stay untracked; the code is authoritative where they differ.
 
 ## Environment gotchas

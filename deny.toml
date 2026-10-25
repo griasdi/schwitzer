@@ -37,17 +37,10 @@ allow = [
 ]
 
 # https://embarkstudios.github.io/cargo-deny/checks/sources/cfg.html
-# Crates come from crates.io and from the git repository of the root `Cargo.toml` (weida),
-# nowhere else; a new source is a decision, not a side effect.
+# Crates come from crates.io, nowhere else; a new source is a decision, not a side effect.
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-# A git dependency names its commit (`rev`), never a branch that moves.
-required-git-spec = "rev"
-allow-git = [
-    # `weida` (`[workspace.dependencies]`), pinned to a rev: alpha, not on crates.io at this rev.
-    "https://github.com/tuco86/weida.git",
-]
 
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
 [bans]

@@ -86,7 +86,7 @@ flowchart LR
   client -.->|flow test, dev only| server
 ```
 
-Pins (root `Cargo.toml`): weida rev `8e29fcb6…` is an exact git revision, because weida is alpha and its wire protocol may break within 0.x; moving the rev is its own change. iced_impeccable 0.3 from crates.io, iced 0.14, rmcp 3.5, axum 0.8, rusqlite 0.37 with bundled SQLite.
+Pins (root `Cargo.toml`): weida `=0.1.0-alpha.9` from crates.io is an exact version, because weida is alpha and its wire protocol may break within 0.x; moving the version is its own change. iced_impeccable 0.3 from crates.io, iced 0.14, rmcp 3.5, axum 0.8, rusqlite 0.37 with bundled SQLite.
 
 ## 4. Rooms, projects and tasks
 
@@ -150,7 +150,7 @@ Sources: `crates/schwitzer-app/src/app/logic.rs` (`Group::of`, `stage_label`), `
 
 ## 5. Transport: weida
 
-weida is a QUIC framework with mutual TLS; Schwitzer pins it to an exact revision because it is alpha. The server accepts any client key (`ClientTrust::AnyKey`) and `auth::caller` turns the key fingerprint into the `MemberId`. The client trusts only the server key whose fingerprint is in the `ServerAddr` (`Trust::by_address()`, `crates/schwitzer-client/src/conn.rs`). There is no certificate authority and no account.
+weida is a QUIC framework with mutual TLS; Schwitzer pins it to an exact version because it is alpha. The server accepts any client key (`ClientTrust::AnyKey`) and `auth::caller` turns the key fingerprint into the `MemberId`. The client trusts only the server key whose fingerprint is in the `ServerAddr` (`Trust::by_address()`, `crates/schwitzer-client/src/conn.rs`). There is no certificate authority and no account.
 
 |Path|weida pattern|Payload|Limits|
 |---|---|---|---|

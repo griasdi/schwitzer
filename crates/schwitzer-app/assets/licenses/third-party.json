@@ -1,5 +1,5 @@
 {
-  "lock": "7ec703a3ee10de9284692bed6bb96909870e7baa6f53522bc361c56b24aee314",
+  "lock": "7d4c6b4c87192253c888fbe60faab0de60cd388bd2a4338452d9e4eaf166a5c8",
   "licenses": [
     {
       "id": "Apache-2.0",
@@ -1292,28 +1292,28 @@
         },
         {
           "name": "weida",
-          "version": "0.1.0-alpha.8-dev",
-          "source": "https://github.com/tuco86/weida/tree/8e29fcb681fd36cd4ae668c991391a0f3d098519"
+          "version": "0.1.0-alpha.9",
+          "source": "https://crates.io/crates/weida/0.1.0-alpha.9"
         },
         {
           "name": "weida-core",
-          "version": "0.1.0-alpha.8-dev",
-          "source": "https://github.com/tuco86/weida/tree/8e29fcb681fd36cd4ae668c991391a0f3d098519"
+          "version": "0.1.0-alpha.9",
+          "source": "https://crates.io/crates/weida-core/0.1.0-alpha.9"
         },
         {
           "name": "weida-protocol",
-          "version": "0.1.0-alpha.8-dev",
-          "source": "https://github.com/tuco86/weida/tree/8e29fcb681fd36cd4ae668c991391a0f3d098519"
+          "version": "0.1.0-alpha.9",
+          "source": "https://crates.io/crates/weida-protocol/0.1.0-alpha.9"
         },
         {
           "name": "weida-runtime",
-          "version": "0.1.0-alpha.8-dev",
-          "source": "https://github.com/tuco86/weida/tree/8e29fcb681fd36cd4ae668c991391a0f3d098519"
+          "version": "0.1.0-alpha.9",
+          "source": "https://crates.io/crates/weida-runtime/0.1.0-alpha.9"
         },
         {
           "name": "weida-winpipe",
-          "version": "0.1.0-alpha.8-dev",
-          "source": "https://github.com/tuco86/weida/tree/8e29fcb681fd36cd4ae668c991391a0f3d098519"
+          "version": "0.1.0-alpha.9",
+          "source": "https://crates.io/crates/weida-winpipe/0.1.0-alpha.9"
         },
         {
           "name": "windows",
@@ -2810,6 +2810,11 @@
       "name": "MIT License",
       "text": "The MIT License (MIT)\n\nCopyright (c) 2015 Carl Lerche + nix-rust Authors\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in\nall copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\nTHE SOFTWARE.\n",
       "crates": [
+        {
+          "name": "nix",
+          "version": "0.30.1",
+          "source": "https://crates.io/crates/nix/0.30.1"
+        },
         {
           "name": "nix",
           "version": "0.31.3",

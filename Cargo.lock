@@ -2644,6 +2644,19 @@ dependencies = [
 
 [[package]]
 name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+ "memoffset",
+]
+
+[[package]]
+name = "nix"
 version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
@@ -5486,8 +5499,9 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
 name = "weida"
-version = "0.1.0-alpha.8-dev"
-source = "git+https://github.com/tuco86/weida.git?rev=8e29fcb681fd36cd4ae668c991391a0f3d098519#8e29fcb681fd36cd4ae668c991391a0f3d098519"
+version = "0.1.0-alpha.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2eb813c0b3d0195f5b539fc51cd75f63b1d4ccd53702c5d136de7a79e2f2510"
 dependencies = [
  "bytes",
  "futures-io",
@@ -5508,13 +5522,15 @@ dependencies = [
 
 [[package]]
 name = "weida-core"
-version = "0.1.0-alpha.8-dev"
-source = "git+https://github.com/tuco86/weida.git?rev=8e29fcb681fd36cd4ae668c991391a0f3d098519#8e29fcb681fd36cd4ae668c991391a0f3d098519"
+version = "0.1.0-alpha.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa8f71f0760b40e3c2df488da6d09b3eb15099df8b5d6a8d46926be07c8b77bd"
 
 [[package]]
 name = "weida-protocol"
-version = "0.1.0-alpha.8-dev"
-source = "git+https://github.com/tuco86/weida.git?rev=8e29fcb681fd36cd4ae668c991391a0f3d098519#8e29fcb681fd36cd4ae668c991391a0f3d098519"
+version = "0.1.0-alpha.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8f5f32e6e0a43590093d453e76852cfeea1aa8e262b68e6c9ce234e5906c51a"
 dependencies = [
  "minicbor",
  "weida-core",
@@ -5522,9 +5538,11 @@ dependencies = [
 
 [[package]]
 name = "weida-runtime"
-version = "0.1.0-alpha.8-dev"
-source = "git+https://github.com/tuco86/weida.git?rev=8e29fcb681fd36cd4ae668c991391a0f3d098519#8e29fcb681fd36cd4ae668c991391a0f3d098519"
+version = "0.1.0-alpha.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e16fdf574a6fe6af50403bf7dcb2f1036074e48665d9b3d7126dabb9310ed8b"
 dependencies = [
+ "nix 0.30.1",
  "tokio",
  "weida-core",
  "weida-winpipe",
@@ -5532,8 +5550,9 @@ dependencies = [
 
 [[package]]
 name = "weida-winpipe"
-version = "0.1.0-alpha.8-dev"
-source = "git+https://github.com/tuco86/weida.git?rev=8e29fcb681fd36cd4ae668c991391a0f3d098519#8e29fcb681fd36cd4ae668c991391a0f3d098519"
+version = "0.1.0-alpha.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "becf9cc9570cafccb110863e220d36460c2ed6371328bd5e779d6e7d8febb6f5"
 dependencies = [
  "tokio",
  "windows-sys 0.61.2",
@@ -6289,7 +6308,7 @@ dependencies = [
  "flate2",
  "indexmap",
  "memchr",
- "nix",
+ "nix 0.31.3",
  "typed-path",
 ]
 

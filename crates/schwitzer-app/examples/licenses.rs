@@ -168,13 +168,6 @@ fn source_url(name: &str, version: &str, source: &str) -> Result<String, Box<dyn
     {
         return Ok(format!("https://crates.io/crates/{name}/{version}"));
     }
-    if let Some(git) = source.strip_prefix("git+")
-        && let Some((url, rev)) = git.rsplit_once('#')
-    {
-        let url = url.split('?').next().unwrap_or(url);
-        let url = url.strip_suffix(".git").unwrap_or(url);
-        return Ok(format!("{url}/tree/{rev}"));
-    }
     Err(format!("{name} {version} comes from {source}: no source link for it").into())
 }
 
@@ -268,7 +261,6 @@ mod tests {
         );
     }
 
-    const WEIDA_SOURCE: &str = "git+https://github.com/tuco86/weida.git?rev=8e29fcb681fd36cd4ae668c991391a0f3d098519#8e29fcb681fd36cd4ae668c991391a0f3d098519";
     const CRATES_IO: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
     fn used(name: &str, version: &str, source: Option<&str>) -> UsedBy {
@@ -321,7 +313,7 @@ mod tests {
             license(
                 "Apache-2.0",
                 "B",
-                vec![used("weida", "0.1.0-alpha.8-dev", Some(WEIDA_SOURCE))],
+                vec![used("weida", "0.1.0-alpha.9", Some(CRATES_IO))],
             ),
             license(
                 "MIT OR Apache-2.0",
@@ -341,8 +333,8 @@ mod tests {
                         text: "B".to_owned(),
                         crates: vec![component(
                             "weida",
-                            "0.1.0-alpha.8-dev",
-                            "https://github.com/tuco86/weida/tree/8e29fcb681fd36cd4ae668c991391a0f3d098519"
+                            "0.1.0-alpha.9",
+                            "https://crates.io/crates/weida/0.1.0-alpha.9"
                         )],
                     },
                     Entry {
@@ -368,6 +360,20 @@ mod tests {
                 "foo",
                 "1.0.0",
                 Some("registry+https://example.org/index"),
+            )],
+        )];
+        assert!(merge("h".to_owned(), inputs).is_err());
+    }
+
+    #[test]
+    fn a_crate_from_git_is_an_error() {
+        let inputs = vec![license(
+            "MIT",
+            "A",
+            vec![used(
+                "foo",
+                "1.0.0",
+                Some("git+https://example.org/foo.git?rev=abc#abc"),
             )],
         )];
         assert!(merge("h".to_owned(), inputs).is_err());
