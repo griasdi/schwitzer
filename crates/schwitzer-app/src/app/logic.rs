@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::mcp::McpStatus;
 use crate::omp_plugin::Coverage;
-use crate::sessions::LocalSession;
+use crate::sessions::{self, LocalSession};
 use crate::theme::Dot;
 use crate::update::{Lookup, UpdateState};
 use crate::{settings, wsl};
@@ -439,13 +439,13 @@ pub fn split_idea(text: &str) -> Option<(&str, &str)> {
 pub fn pick_prompt(room: &str, task: &Task, token: &ClaimToken) -> String {
     format!(
         "Work on schwitzer task #{number} in room \"{room}\": {title}\n\
-         schwitzer-claim: {token}\n\
+         {marker}\n\
          The build is claimed for you. Read the task and its approved plan with the tool \
          schwitzer_get_task (room \"{room}\", task {number}), implement the plan, then call \
          schwitzer_finish with a short note, or schwitzer_unclaim if you stop.",
         number = task.number,
         title = task.title,
-        token = token.to_hex(),
+        marker = sessions::marker_line(token),
     )
 }
 

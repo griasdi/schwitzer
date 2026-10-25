@@ -38,6 +38,11 @@ const TASK_MESSAGE: &str = "schwitzer-task";
 /// Hex digits of a claim token.
 const MARKER_HEX: usize = ClaimToken::LEN * 2;
 
+/// The line an agent echoes to link its session to the task `token` claims.
+pub fn marker_line(token: &ClaimToken) -> String {
+    format!("{MARKER}{token}")
+}
+
 /// An active omp session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalSession {

@@ -21,6 +21,7 @@ use serde_json::{Value, json};
 
 use crate::app::logic;
 use crate::debug;
+use crate::sessions;
 
 /// Longest a tool call runs; a stuck server fails the call, not the agent.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -639,8 +640,8 @@ fn claim_text(
         Work::Build => "Implement the approved plan, then call finish (or unclaim if you stop).",
     };
     Ok(format!(
-        "schwitzer-claim: {}\n{next}\n{}",
-        claim.token,
+        "{}\n{next}\n{}",
+        sessions::marker_line(&claim.token),
         pretty(&task_json(task, members, projects, tasks))?
     ))
 }
