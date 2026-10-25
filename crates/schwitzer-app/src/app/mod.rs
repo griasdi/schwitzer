@@ -145,7 +145,6 @@ pub enum Message {
     DebugJoin,
     /// Leaves the selected room's debug session; the master ends it, after confirming.
     DebugLeave,
-    DebugDone(Result<(), String>),
     /// A debug worker's counts changed.
     DebugTraffic(debug::Traffic),
     /// Puts a text of the debug page on the clipboard.
@@ -1309,35 +1308,29 @@ impl App {
                 self.notify("Room removed from this app");
                 self.leave_room_page()
             }
-            Message::DebugStart | Message::DebugJoin | Message::DebugLeave => {
-                let leave = matches!(message, Message::DebugLeave);
-                if leave {
-                    self.confirm = None;
+            Message::DebugStart => match self.selected {
+                Some(room) => {
+                    let client = self.client.clone();
+                    fire(async move { client.debug_start(room).await })
                 }
-                let Some(room) = self.selected else {
-                    return Task::none();
-                };
-                let client = self.client.clone();
-                match message {
-                    Message::DebugStart => call(
-                        async move { client.debug_start(room).await.map(drop) },
-                        Message::DebugDone,
-                    ),
-                    Message::DebugJoin => call(
-                        async move { client.debug_join(room).await.map(drop) },
-                        Message::DebugDone,
-                    ),
-                    _ => call(
-                        async move { client.debug_leave(room).await },
-                        Message::DebugDone,
-                    ),
+                None => Task::none(),
+            },
+            Message::DebugJoin => match self.selected {
+                Some(room) => {
+                    let client = self.client.clone();
+                    fire(async move { client.debug_join(room).await })
                 }
-            }
-            Message::DebugDone(result) => {
-                if let Err(e) = result {
-                    self.banner = Some(e);
+                None => Task::none(),
+            },
+            Message::DebugLeave => {
+                self.confirm = None;
+                match self.selected {
+                    Some(room) => {
+                        let client = self.client.clone();
+                        fire(async move { client.debug_leave(room).await })
+                    }
+                    None => Task::none(),
                 }
-                Task::none()
             }
             Message::DebugTraffic(traffic) => {
                 self.debug_traffic.insert(traffic.room, traffic);
