@@ -60,7 +60,10 @@ async function setupDownloads() {
     const release = await res.json();
     const assets = Array.isArray(release.assets) ? release.assets : [];
     for (const link of document.querySelectorAll("[data-asset]")) {
-      const asset = assets.find((a) => typeof a.name === "string" && a.name.endsWith(`-${link.dataset.asset}`));
+      // The app's assets are schwitzer-<version>-…; schwitzer-server-<version>-… are the server's.
+      const asset = assets.find(
+        (a) => typeof a.name === "string" && /^schwitzer-\d/.test(a.name) && a.name.endsWith(`-${link.dataset.asset}`),
+      );
       if (asset?.browser_download_url) link.href = asset.browser_download_url;
     }
     if (typeof release.tag_name === "string" && release.tag_name) {
