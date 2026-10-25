@@ -21,7 +21,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use crate::{settings, wsl};
+use crate::settings::{self, ProjectKey};
+use crate::wsl;
 
 /// The package name, and its key in the lock file.
 const NAME: &str = "schwitzer";
@@ -71,49 +72,48 @@ fn lock_path(repo: &Path) -> PathBuf {
     repo.join(".omp/plugins").join(LOCK_FILE)
 }
 
-/// The projects (keys of `repos`, in map order) that `repo` is linked to; malformed keys are
-/// skipped. `trailers` holds the keys whose commit trailer switch is on.
-pub fn projects_of(
-    repos: &BTreeMap<String, Vec<PathBuf>>,
-    trailers: &BTreeSet<String>,
-    repo: &Path,
-) -> Vec<PluginProject> {
+/// The projects `repo` is linked to, in map order.
+fn linked_keys<'a>(
+    repos: &'a BTreeMap<ProjectKey, Vec<PathBuf>>,
+    repo: &'a Path,
+) -> impl Iterator<Item = &'a ProjectKey> {
     repos
         .iter()
-        .filter(|(_, paths)| paths.iter().any(|path| path == repo))
-        .filter_map(|(key, _)| {
-            let (room, project) = settings::parse_repo_key(key)?;
-            Some(PluginProject {
-                room: room.to_owned(),
-                project,
-                commit_trailer: trailers.contains(key),
-            })
+        .filter(move |(_, paths)| paths.iter().any(|path| path == repo))
+        .map(|(key, _)| key)
+}
+
+/// The projects (keys of `repos`, in map order) that `repo` is linked to. `trailers` holds the
+/// projects whose commit trailer switch is on.
+pub fn projects_of(
+    repos: &BTreeMap<ProjectKey, Vec<PathBuf>>,
+    trailers: &BTreeSet<ProjectKey>,
+    repo: &Path,
+) -> Vec<PluginProject> {
+    linked_keys(repos, repo)
+        .map(|key| PluginProject {
+            room: key.0.to_hex(),
+            project: key.1,
+            commit_trailer: trailers.contains(key),
         })
         .collect()
 }
 
 /// The repos of the projects `repo` is not linked to, in map order, as the plugin in `repo`
-/// sees them ([`wsl::path_for`]). Malformed keys are skipped, and so are a repo of one of
-/// `repo`'s own projects (also `repo` itself) and a repo in another WSL distro than `repo`,
-/// which the plugin cannot reach.
-pub fn other_repos(repos: &BTreeMap<String, Vec<PathBuf>>, repo: &Path) -> Vec<OtherRepo> {
-    // Only room and project are compared here, so the trailer switches do not matter.
-    let own = projects_of(repos, &BTreeSet::new(), repo);
-    let is_own = |room: &str, project| own.iter().any(|p| p.room == room && p.project == project);
+/// sees them ([`wsl::path_for`]). A repo of one of `repo`'s own projects (also `repo` itself)
+/// is skipped, and so is a repo in another WSL distro than `repo`, which the plugin cannot
+/// reach.
+pub fn other_repos(repos: &BTreeMap<ProjectKey, Vec<PathBuf>>, repo: &Path) -> Vec<OtherRepo> {
+    let own: Vec<&ProjectKey> = linked_keys(repos, repo).collect();
     let own_paths: Vec<&PathBuf> = repos
         .iter()
-        .filter(|(key, _)| {
-            settings::parse_repo_key(key).is_some_and(|(room, project)| is_own(room, project))
-        })
+        .filter(|(key, _)| own.contains(key))
         .flat_map(|(_, paths)| paths)
         .collect();
     let repo_distro = wsl::distro_of(repo);
     let mut others = Vec::new();
     for (key, paths) in repos {
-        let Some((room, project)) = settings::parse_repo_key(key) else {
-            continue;
-        };
-        if is_own(room, project) {
+        if own.contains(&key) {
             continue;
         }
         for path in paths {
@@ -126,8 +126,8 @@ pub fn other_repos(repos: &BTreeMap<String, Vec<PathBuf>>, repo: &Path) -> Vec<O
                 continue;
             }
             others.push(OtherRepo {
-                room: room.to_owned(),
-                project,
+                room: key.0.to_hex(),
+                project: key.1,
                 path: wsl::path_for(repo, path),
             });
         }
@@ -328,6 +328,8 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use schwitzer_proto::RoomId;
+
     use super::*;
 
     fn config() -> PluginConfig {
@@ -445,84 +447,78 @@ mod tests {
 
     #[test]
     fn projects_of_matches_whole_paths() {
-        let (a, c) = ("aa".repeat(32), "cc".repeat(32));
+        let (a, c) = (RoomId([0xaa; 32]), RoomId([0xcc; 32]));
         let repos = BTreeMap::from([
-            (format!("{a}/1"), vec![PathBuf::from("/code/app")]),
-            (format!("{a}/2"), vec![PathBuf::from("/code/app-old")]),
+            ((a, 1), vec![PathBuf::from("/code/app")]),
+            ((a, 2), vec![PathBuf::from("/code/app-old")]),
             (
-                format!("{c}/3"),
+                (c, 3),
                 vec![PathBuf::from("/code/x"), PathBuf::from("/code/app")],
             ),
-            ("malformed".to_owned(), vec![PathBuf::from("/code/app")]),
         ]);
-        let linked = |room: &str, project, commit_trailer| PluginProject {
-            room: room.to_owned(),
+        let linked = |room: RoomId, project, commit_trailer| PluginProject {
+            room: room.to_hex(),
             project,
             commit_trailer,
         };
         assert_eq!(
             projects_of(&repos, &BTreeSet::new(), Path::new("/code/app")),
-            [linked(&a, 1, false), linked(&c, 3, false)]
+            [linked(a, 1, false), linked(c, 3, false)]
         );
         assert_eq!(
-            projects_of(
-                &repos,
-                &BTreeSet::from([format!("{c}/3")]),
-                Path::new("/code/app")
-            ),
-            [linked(&a, 1, false), linked(&c, 3, true)]
+            projects_of(&repos, &BTreeSet::from([(c, 3)]), Path::new("/code/app")),
+            [linked(a, 1, false), linked(c, 3, true)]
         );
         assert!(projects_of(&repos, &BTreeSet::new(), Path::new("/code/other")).is_empty());
     }
 
     #[test]
     fn other_repos_skip_own_projects() {
-        let (a, c) = ("aa".repeat(32), "cc".repeat(32));
+        let (a, c) = (RoomId([0xaa; 32]), RoomId([0xcc; 32]));
         let repos = BTreeMap::from([
-            (format!("{a}/1"), vec![PathBuf::from("/code/app")]),
-            (format!("{a}/2"), vec![PathBuf::from("/code/lib")]),
+            ((a, 1), vec![PathBuf::from("/code/app")]),
+            ((a, 2), vec![PathBuf::from("/code/lib")]),
             (
-                format!("{c}/3"),
+                (c, 3),
                 vec![PathBuf::from("/code/shared"), PathBuf::from("/code/app")],
             ),
             (
-                format!("{c}/4"),
+                (c, 4),
                 vec![PathBuf::from("/code/shared"), PathBuf::from("/code/tool")],
             ),
-            ("malformed".to_owned(), vec![PathBuf::from("/code/x")]),
         ]);
-        let other = |room: &str, project, path: &str| OtherRepo {
-            room: room.to_owned(),
+        let other = |room: RoomId, project, path: &str| OtherRepo {
+            room: room.to_hex(),
             project,
             path: PathBuf::from(path),
         };
         assert_eq!(
             other_repos(&repos, Path::new("/code/app")),
-            [other(&a, 2, "/code/lib"), other(&c, 4, "/code/tool")]
+            [other(a, 2, "/code/lib"), other(c, 4, "/code/tool")]
         );
         assert_eq!(
             other_repos(&repos, Path::new("/code/none")),
             [
-                other(&a, 1, "/code/app"),
-                other(&a, 2, "/code/lib"),
-                other(&c, 3, "/code/shared"),
-                other(&c, 3, "/code/app"),
-                other(&c, 4, "/code/shared"),
-                other(&c, 4, "/code/tool"),
+                other(a, 1, "/code/app"),
+                other(a, 2, "/code/lib"),
+                other(c, 3, "/code/shared"),
+                other(c, 3, "/code/app"),
+                other(c, 4, "/code/shared"),
+                other(c, 4, "/code/tool"),
             ]
         );
     }
 
     #[test]
     fn other_repos_as_seen_from_a_wsl_repo() {
-        let a = "aa".repeat(32);
+        let a = RoomId([0xaa; 32]);
         let repos = BTreeMap::from([
             (
-                format!("{a}/1"),
+                (a, 1),
                 vec![PathBuf::from(r"\\wsl.localhost\Ubuntu\code\app")],
             ),
             (
-                format!("{a}/2"),
+                (a, 2),
                 vec![
                     PathBuf::from(r"\\wsl.localhost\Ubuntu\code\lib"),
                     PathBuf::from(r"\\wsl.localhost\Debian\code\x"),

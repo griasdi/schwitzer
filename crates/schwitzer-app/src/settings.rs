@@ -68,13 +68,15 @@ pub struct Settings {
     /// plan or finished a build.
     pub notify_hand_ins: bool,
     /// Per project (key `<room id hex>/<project id>`), the local repositories linked to it;
-    /// omp sessions in them are shared with the project's room.
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub repos: BTreeMap<String, Vec<PathBuf>>,
+    /// omp sessions in them are shared with the project's room. A key that does not parse is
+    /// dropped on load.
+    #[serde(with = "project_map", skip_serializing_if = "BTreeMap::is_empty")]
+    pub repos: BTreeMap<ProjectKey, Vec<PathBuf>>,
     /// The projects (keys like `repos`: `<room id hex>/<project id>`) whose builds by this
-    /// member's agents put `Schwitzer-Task: #<number>` into every commit.
-    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
-    pub commit_trailers: BTreeSet<String>,
+    /// member's agents put `Schwitzer-Task: #<number>` into every commit. A key that does not
+    /// parse is dropped on load.
+    #[serde(with = "project_set", skip_serializing_if = "BTreeSet::is_empty")]
+    pub commit_trailers: BTreeSet<ProjectKey>,
     /// Per room, the project last picked in it; the app shows it again after a restart.
     /// Keys are room ids in hex; a key that is no room id is dropped on load.
     #[serde(with = "room_map", skip_serializing_if = "BTreeMap::is_empty")]
@@ -133,6 +135,69 @@ mod room_map {
         Ok(raw
             .into_iter()
             .filter_map(|(key, project)| Some((key.parse().ok()?, project)))
+            .collect())
+    }
+}
+
+/// A project: its room and its id in the room.
+pub type ProjectKey = (RoomId, u64);
+
+/// A [`ProjectKey`] as `<room id hex>/<project id>`.
+fn project_key_text((room, project): &ProjectKey) -> String {
+    format!("{room}/{project}")
+}
+
+/// The [`ProjectKey`] of `<room id hex>/<project id>`; `None` if it is malformed.
+fn parse_project_key(text: &str) -> Option<ProjectKey> {
+    let (room, project) = text.rsplit_once('/')?;
+    Some((room.parse().ok()?, project.parse().ok()?))
+}
+
+/// `BTreeMap<ProjectKey, V>` as a TOML table keyed by `<room id hex>/<project id>`.
+mod project_map {
+    use std::collections::BTreeMap;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::{ProjectKey, parse_project_key, project_key_text};
+
+    pub fn serialize<S: Serializer, V: Serialize>(
+        map: &BTreeMap<ProjectKey, V>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        s.collect_map(map.iter().map(|(key, v)| (project_key_text(key), v)))
+    }
+
+    /// A key that does not parse is dropped, like those of `chosen_projects`.
+    pub fn deserialize<'de, D: Deserializer<'de>, V: Deserialize<'de>>(
+        d: D,
+    ) -> Result<BTreeMap<ProjectKey, V>, D::Error> {
+        let raw = BTreeMap::<String, V>::deserialize(d)?;
+        Ok(raw
+            .into_iter()
+            .filter_map(|(key, v)| Some((parse_project_key(&key)?, v)))
+            .collect())
+    }
+}
+
+/// `BTreeSet<ProjectKey>` as a TOML array of `<room id hex>/<project id>`.
+mod project_set {
+    use std::collections::BTreeSet;
+
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use super::{ProjectKey, parse_project_key, project_key_text};
+
+    pub fn serialize<S: Serializer>(set: &BTreeSet<ProjectKey>, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(set.iter().map(project_key_text))
+    }
+
+    /// A key that does not parse is dropped, like those of `chosen_projects`.
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeSet<ProjectKey>, D::Error> {
+        let raw = Vec::<String>::deserialize(d)?;
+        Ok(raw
+            .iter()
+            .filter_map(|key| parse_project_key(key))
             .collect())
     }
 }
@@ -243,19 +308,17 @@ impl Settings {
 
     /// The repos linked to `project` of `room`.
     pub fn project_repos(&self, room: &RoomId, project: u64) -> &[PathBuf] {
-        self.repos
-            .get(&repo_key(room, project))
-            .map_or(&[], Vec::as_slice)
+        self.repos.get(&(*room, project)).map_or(&[], Vec::as_slice)
     }
 
     /// Whether builds of `project` in `room` need `Schwitzer-Task: #<number>` in every commit.
     pub fn commit_trailer(&self, room: &RoomId, project: u64) -> bool {
-        self.commit_trailers.contains(&repo_key(room, project))
+        self.commit_trailers.contains(&(*room, project))
     }
 
     /// Links `path` to `project` of `room`, unless it is linked already.
     pub fn link_repo(&mut self, room: &RoomId, project: u64, path: PathBuf) {
-        let repos = self.repos.entry(repo_key(room, project)).or_default();
+        let repos = self.repos.entry((*room, project)).or_default();
         if !repos.contains(&path) {
             repos.push(path);
         }
@@ -264,7 +327,7 @@ impl Settings {
     /// Unlinks the repo at `index` of [`Settings::project_repos`] from `project` of `room`; an
     /// index past the end unlinks nothing. A project left without repos has no entry.
     pub fn unlink_repo(&mut self, room: &RoomId, project: u64, index: usize) {
-        let key = repo_key(room, project);
+        let key = (*room, project);
         if let Some(repos) = self.repos.get_mut(&key) {
             if index < repos.len() {
                 repos.remove(index);
@@ -277,7 +340,7 @@ impl Settings {
 
     /// Sets whether builds of `project` in `room` need the commit trailer.
     pub fn set_commit_trailer(&mut self, room: &RoomId, project: u64, on: bool) {
-        let key = repo_key(room, project);
+        let key = (*room, project);
         if on {
             self.commit_trailers.insert(key);
         } else {
@@ -290,35 +353,25 @@ impl Settings {
     /// not in `rooms`.
     pub fn retain_rooms(&mut self, rooms: impl IntoIterator<Item = (RoomId, String)>) {
         let (joined, keys): (Vec<RoomId>, Vec<String>) = rooms.into_iter().unzip();
-        let hexes: BTreeSet<String> = joined.iter().map(RoomId::to_hex).collect();
-        let joined_key =
-            |key: &str| parse_repo_key(key).is_some_and(|(room, _)| hexes.contains(room));
         self.rooms = keys;
-        self.repos.retain(|key, _| joined_key(key));
-        self.commit_trailers.retain(|key| joined_key(key));
+        self.repos.retain(|(room, _), _| joined.contains(room));
+        self.commit_trailers
+            .retain(|(room, _)| joined.contains(room));
         self.chosen_projects.retain(|room, _| joined.contains(room));
     }
 
     /// The projects of `room` with linked repos, and those repos, ordered by project id.
     pub fn room_project_repos(&self, room: &RoomId) -> Vec<(u64, &[PathBuf])> {
-        let hex = room.to_hex();
-        let mut linked: Vec<(u64, &[PathBuf])> = self
-            .repos
-            .iter()
-            .filter_map(|(key, paths)| match parse_repo_key(key) {
-                Some((r, project)) if r == hex => Some((project, paths.as_slice())),
-                _ => None,
-            })
-            .collect();
-        linked.sort_by_key(|(project, _)| *project);
-        linked
+        self.repos
+            .range((*room, 0)..=(*room, u64::MAX))
+            .map(|(&(_, project), paths)| (project, paths.as_slice()))
+            .collect()
     }
 
     /// Forgets the repos linked to, the commit trailer switch of, and the choice of, projects
     /// of `room` that are not in `projects` (the room's current list) any more; `true` when
     /// anything changed.
     pub fn forget_deleted_projects(&mut self, room: &RoomId, projects: &[Project]) -> bool {
-        let hex = room.to_hex();
         let exists = |id: u64| projects.iter().any(|p| p.id == id);
         let counts = |s: &Self| {
             (
@@ -328,15 +381,9 @@ impl Settings {
             )
         };
         let before = counts(self);
-        self.repos.retain(|key, _| match parse_repo_key(key) {
-            Some((r, id)) => r != hex || exists(id),
-            None => true,
-        });
+        self.repos.retain(|(r, id), _| r != room || exists(*id));
         self.commit_trailers
-            .retain(|key| match parse_repo_key(key) {
-                Some((r, id)) => r != hex || exists(id),
-                None => true,
-            });
+            .retain(|(r, id)| r != room || exists(*id));
         if self
             .chosen_projects
             .get(room)
@@ -353,21 +400,6 @@ impl Settings {
         std::fs::create_dir_all(dir)?;
         write_atomic(&dir.join(FILE), text.as_bytes())
     }
-}
-
-/// The `repos` key of `project` in `room`: `<room id hex>/<project id>`.
-pub fn repo_key(room: &RoomId, project: u64) -> String {
-    format!("{}/{project}", room.to_hex())
-}
-
-/// The room id in hex and the project id of a `repos` key; `None` if it is malformed.
-pub fn parse_repo_key(key: &str) -> Option<(&str, u64)> {
-    let (room, project) = key.rsplit_once('/')?;
-    let hex = room.len() == 64 && room.bytes().all(|b| b.is_ascii_hexdigit());
-    if !hex {
-        return None;
-    }
-    Some((room, project.parse().ok()?))
 }
 
 /// `$SCHWITZER_HOME`, else the platform's data directory for the app.
@@ -513,11 +545,8 @@ mod tests {
             auto_restart_updates: false,
             update_channel: Some(schwitzer_release::Channel::Dev),
             notify_hand_ins: true,
-            repos: BTreeMap::from([(
-                format!("{}/1", "ab".repeat(32)),
-                vec![PathBuf::from("/code/x")],
-            )]),
-            commit_trailers: BTreeSet::from([format!("{}/1", "ab".repeat(32))]),
+            repos: BTreeMap::from([((RoomId([0xab; 32]), 1), vec![PathBuf::from("/code/x")])]),
+            commit_trailers: BTreeSet::from([(RoomId([0xab; 32]), 1)]),
             chosen_projects: BTreeMap::from([(RoomId([0xab; 32]), 2)]),
             projects_dirs: Some(vec![PathBuf::from("/code"), PathBuf::from("/work")]),
             wsl_distros: vec!["Ubuntu".to_owned()],
@@ -590,17 +619,36 @@ mod tests {
     }
 
     #[test]
-    fn repo_keys_need_a_room_id_and_a_project_number() {
+    fn repo_and_trailer_keys_keep_their_text_and_drop_bad_ones() {
+        let dir = tempfile::tempdir().unwrap();
         let hex = "ab".repeat(32);
-        assert_eq!(parse_repo_key(&format!("{hex}/3")), Some((hex.as_str(), 3)));
-        for bad in [
+        let bad = [
             hex.clone(),
             format!("{hex}/x"),
             "ab/1".to_owned(),
             format!("{}/1", "zz".repeat(32)),
-        ] {
-            assert_eq!(parse_repo_key(&bad), None, "{bad}");
+        ];
+        let mut text = format!("commit_trailers = [\"{hex}/3\"");
+        for key in &bad {
+            text.push_str(&format!(", \"{key}\""));
         }
+        text.push_str(&format!("]\n\n[repos]\n\"{hex}/3\" = [\"/a\"]\n"));
+        for key in &bad {
+            text.push_str(&format!("\"{key}\" = [\"/b\"]\n"));
+        }
+        std::fs::write(dir.path().join(FILE), text).unwrap();
+        let (settings, problem) = Settings::load(dir.path());
+        assert_eq!(problem, None);
+        let room = RoomId([0xab; 32]);
+        assert_eq!(
+            settings.repos,
+            BTreeMap::from([((room, 3), vec![PathBuf::from("/a")])])
+        );
+        assert_eq!(settings.commit_trailers, BTreeSet::from([(room, 3)]));
+        settings.save(dir.path()).unwrap();
+        let saved = std::fs::read_to_string(dir.path().join(FILE)).unwrap();
+        assert_eq!(saved.matches(&format!("\"{hex}/3\"")).count(), 2);
+        assert!(!saved.contains("/x") && !saved.contains("/b"));
     }
 
     #[test]
@@ -608,11 +656,11 @@ mod tests {
         let (a, b) = (RoomId([1; 32]), RoomId([2; 32]));
         let mut settings = Settings {
             repos: BTreeMap::from([
-                (repo_key(&a, 1), vec![PathBuf::from("/app")]),
-                (repo_key(&a, 2), vec![PathBuf::from("/old")]),
-                (repo_key(&b, 2), vec![PathBuf::from("/other")]),
+                ((a, 1), vec![PathBuf::from("/app")]),
+                ((a, 2), vec![PathBuf::from("/old")]),
+                ((b, 2), vec![PathBuf::from("/other")]),
             ]),
-            commit_trailers: BTreeSet::from([repo_key(&a, 1), repo_key(&a, 2), repo_key(&b, 2)]),
+            commit_trailers: BTreeSet::from([(a, 1), (a, 2), (b, 2)]),
             chosen_projects: BTreeMap::from([(a, 2)]),
             ..Settings::default()
         };
@@ -622,13 +670,10 @@ mod tests {
         }];
         assert!(settings.forget_deleted_projects(&a, &projects));
         assert_eq!(
-            settings.repos.keys().cloned().collect::<Vec<_>>(),
-            [repo_key(&a, 1), repo_key(&b, 2)]
+            settings.repos.keys().copied().collect::<Vec<_>>(),
+            [(a, 1), (b, 2)]
         );
-        assert_eq!(
-            settings.commit_trailers,
-            BTreeSet::from([repo_key(&a, 1), repo_key(&b, 2)])
-        );
+        assert_eq!(settings.commit_trailers, BTreeSet::from([(a, 1), (b, 2)]));
         assert!(settings.chosen_projects.is_empty());
         assert!(!settings.forget_deleted_projects(&a, &projects));
     }
@@ -643,15 +688,9 @@ mod tests {
             settings.chosen_projects.insert(*room, 1);
         }
         settings.link_repo(&b, 1, PathBuf::from("/app"));
-        settings
-            .repos
-            .insert("junk".to_owned(), vec![PathBuf::from("/x")]);
         settings.retain_rooms([(b, "schwitzer://b".to_owned())]);
         assert_eq!(settings.rooms, ["schwitzer://b"]);
-        assert_eq!(
-            settings.repos.keys().cloned().collect::<Vec<_>>(),
-            [repo_key(&b, 1)]
-        );
+        assert_eq!(settings.repos.keys().copied().collect::<Vec<_>>(), [(b, 1)]);
         assert_eq!(settings.project_repos(&b, 1), [PathBuf::from("/app")]);
         assert!(settings.commit_trailer(&b, 1) && !settings.commit_trailer(&a, 1));
         assert_eq!(settings.chosen_projects, BTreeMap::from([(b, 1)]));
