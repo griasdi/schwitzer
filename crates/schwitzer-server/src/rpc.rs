@@ -364,8 +364,11 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             room,
             session,
             to,
-            text,
-        } => debug_instruct(state, caller, room, session, to, text).await,
+            text: instruction,
+        } => {
+            let instruction = text("instruction", &instruction, caps::INSTRUCTION, true)?;
+            debug_instruct(state, caller, room, session, to, instruction).await
+        }
     }
 }
 

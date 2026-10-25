@@ -156,15 +156,6 @@ impl DebugRuns {
         if !s.members.contains(&from) {
             return Err(ApiError::NotInDebugSession);
         }
-        if text.trim().is_empty() {
-            return Err(ApiError::Invalid("the instruction is empty".into()));
-        }
-        if text.len() > caps::INSTRUCTION {
-            return Err(ApiError::Invalid(format!(
-                "the instruction is longer than {} bytes",
-                caps::INSTRUCTION
-            )));
-        }
         let to = if to.is_empty() {
             s.members
                 .iter()
