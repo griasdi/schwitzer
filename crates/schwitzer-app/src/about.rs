@@ -1,4 +1,4 @@
-//! The licenses the Licenses page shows: Schwitzer's own (MIT or Apache-2.0), those of the
+//! The licenses the About page shows: Schwitzer's own (MIT or Apache-2.0), those of the
 //! bundled Figtree font and Lucide icons, and those of the open source components the app is
 //! built from (`assets/licenses/third-party.json`, written by
 //! `cargo run -p schwitzer-app --example licenses`).

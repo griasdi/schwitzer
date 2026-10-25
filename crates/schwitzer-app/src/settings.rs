@@ -50,7 +50,7 @@ pub struct Settings {
     pub mcp_port: u16,
     /// Where omp keeps its session files.
     pub omp_sessions_dir: PathBuf,
-    /// The server of the last created room; prefills "Create room".
+    /// The server of the last created room; prefills "Create a room".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_server: Option<String>,
     /// The room keys, in the order the rooms are listed.

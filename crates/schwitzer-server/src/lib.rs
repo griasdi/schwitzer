@@ -46,8 +46,8 @@ pub struct Options {
     pub data_dir: PathBuf,
     /// GitHub API URL of the release list, checked every two minutes; `None` checks nothing.
     pub releases_url: Option<String>,
-    /// Installs newer stable releases over the program file and stops with [`Stop::Updated`];
-    /// needs `releases_url`.
+    /// Installs the newest build of its channel (see [`AutoUpdate`]) over the program file and
+    /// stops with [`Stop::Updated`]; needs `releases_url`.
     pub auto_update: Option<AutoUpdate>,
 }
 
