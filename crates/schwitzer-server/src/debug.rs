@@ -91,12 +91,7 @@ impl DebugRuns {
             map.remove(room);
             return Ok(None);
         }
-        run.session.members.retain(|m| *m != member);
-        if run.session.members.is_empty() {
-            map.remove(room);
-            return Ok(None);
-        }
-        Ok(Some(run.session.clone()))
+        Ok(remove_from(&mut map, room, &member).flatten())
     }
 
     /// Drops `member` from the members of `room`'s session, because they left the room or
