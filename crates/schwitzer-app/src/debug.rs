@@ -12,6 +12,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use futures::channel::mpsc::Sender;
 use futures::{SinkExt, Stream};
 use iced::Subscription;
 use schwitzer_client::{Client, ClientError, ClientEvent};
@@ -261,7 +262,8 @@ pub struct Traffic {
     pub received: BTreeMap<String, u64>,
     /// Received data was lost because this machine fell behind.
     pub lost: bool,
-    /// The last send error.
+    /// The last error of the worker: a refused send, an out folder it cannot read or an in
+    /// folder it cannot write.
     pub error: Option<String>,
 }
 
@@ -333,15 +335,17 @@ fn work(key: &DebugKey) -> impl Stream<Item = Traffic> + use<> {
                 fs::create_dir_all(&out_dir).and_then(|()| fs::create_dir_all(&in_dir))
             })
             .await;
-            if let Ok(Err(e)) = made {
-                tracing::warn!("creating the debug folders: {e}");
+            match made {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::warn!("creating the debug folders: {e}"),
+                Err(e) => tracing::warn!("creating the debug folders failed: {e}"),
             }
         }
         let mut rx = client.subscribe();
         let mut tick = tokio::time::interval(SEND_EVERY);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut outbox = Some(Outbox::default());
-        let mut inbox = Some(Inbox::default());
+        let mut outbox = Outbox::default();
+        let mut inbox = Inbox::default();
         let mut dirs: HashMap<MemberId, String> = HashMap::new();
         let mut traffic = Traffic::new(room);
         let mut reported = traffic.clone();
@@ -360,19 +364,29 @@ fn work(key: &DebugKey) -> impl Stream<Item = Traffic> + use<> {
                         }
                         let label = format!("{dir}/{stream}");
                         let file = in_dir.join(&dir).join(&stream);
-                        let Some(mut ib) = inbox.take() else { return };
+                        let mut ib = std::mem::take(&mut inbox);
                         let written = tokio::task::spawn_blocking(move || {
                             let n = ib.write(&file, from, &stream, offset, &data);
                             (ib, n)
                         })
                         .await;
-                        let Ok((ib, n)) = written else { return };
-                        inbox = Some(ib);
+                        let (ib, n) = match written {
+                            Ok(done) => done,
+                            Err(e) => {
+                                tracing::error!("writing debug log failed: {e}");
+                                give_up(&mut out, &mut traffic, "Writing the received debug files failed unexpectedly").await;
+                                return;
+                            }
+                        };
+                        inbox = ib;
                         match n {
                             Ok(n) => {
                                 *traffic.received.entry(label).or_default() += n;
                             }
-                            Err(e) => tracing::warn!("writing debug log: {e}"),
+                            Err(e) => {
+                                tracing::warn!("writing debug log: {e}");
+                                traffic.error = Some(format!("Cannot write the received files: {e}"));
+                            }
                         }
                     }
                     Ok(_) => {}
@@ -383,19 +397,29 @@ fn work(key: &DebugKey) -> impl Stream<Item = Traffic> + use<> {
                     Err(RecvError::Closed) => return,
                 },
                 _ = tick.tick() => {
-                    let Some(mut ob) = outbox.take() else { return };
                     let dir = out_dir.clone();
+                    let mut ob = std::mem::take(&mut outbox);
                     let collected = tokio::task::spawn_blocking(move || {
                         let chunks = ob.collect(&dir);
                         (ob, chunks)
                     })
                     .await;
-                    let Ok((mut ob, chunks)) = collected else { return };
+                    let (mut ob, chunks) = match collected {
+                        Ok(done) => done,
+                        Err(e) => {
+                            tracing::error!("reading the debug out folder failed: {e}");
+                            give_up(&mut out, &mut traffic, "Reading the out folder failed unexpectedly").await;
+                            return;
+                        }
+                    };
                     match chunks {
                         Ok(chunks) => send(&client, room, session, &mut ob, chunks, &mut traffic).await,
-                        Err(e) => tracing::warn!("reading the debug out folder: {e}"),
+                        Err(e) => {
+                            tracing::warn!("reading the debug out folder: {e}");
+                            traffic.error = Some(format!("Cannot read the out folder: {e}"));
+                        }
                     }
-                    outbox = Some(ob);
+                    outbox = ob;
                 }
             }
             if traffic != reported {
@@ -440,6 +464,12 @@ async fn send(
             }
         }
     }
+}
+
+/// The worker cannot go on: reports `why` as the last error, then the caller ends it.
+async fn give_up(out: &mut Sender<Traffic>, traffic: &mut Traffic, why: &str) {
+    traffic.error = Some(why.to_owned());
+    let _ = out.send(traffic.clone()).await;
 }
 
 /// The members of `room` as the client knows them, empty when the room is unknown.
