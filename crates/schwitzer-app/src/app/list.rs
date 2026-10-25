@@ -94,14 +94,12 @@ pub fn idea_bar(app: &App) -> Element<'_, Message> {
         top: 12.0,
         ..Padding::ZERO
     });
-    container(
+    widgets::bar(
         row![lamp_box, editor]
             .spacing(SP_2)
             .align_y(Alignment::Start),
+        SP_2,
     )
-    .padding([SP_2, SP_2])
-    .width(Length::Fill)
-    .style(theme::bar)
     .into()
 }
 

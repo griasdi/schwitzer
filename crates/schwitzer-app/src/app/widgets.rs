@@ -3,8 +3,10 @@
 //! iced 0.14 buttons carry no id, so a button that has to be addressed (by tests, by the
 //! headless control) sits in a container that has one.
 
-use iced::widget::{Space, button, container, pick_list, row, svg, text, text_input, tooltip};
-use iced::{Alignment, Element, Length, Theme};
+use iced::widget::{
+    Container, Space, button, container, pick_list, row, svg, text, text_input, tooltip,
+};
+use iced::{Alignment, Element, Length, Padding, Theme};
 use schwitzer_proto::{Member, MemberId, Priority, Stage, Task};
 
 use super::Message;
@@ -80,6 +82,18 @@ pub fn segment<'a>(
         theme::button_segment(on),
         Length::Shrink,
     )
+}
+
+/// A bar of the window: the header, the members row, the idea bar, the status bar and the
+/// footer of a page. Full width, on the bar surface; the caller adds height or alignment.
+pub fn bar<'a>(
+    content: impl Into<Element<'a, Message>>,
+    padding: impl Into<Padding>,
+) -> Container<'a, Message> {
+    container(content)
+        .padding(padding)
+        .width(Length::Fill)
+        .style(theme::bar)
 }
 
 /// The fold chevron of a group header, a fold head or a license: 14 px, muted.

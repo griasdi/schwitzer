@@ -5,7 +5,7 @@ use iced::{Alignment, Element, Length};
 
 use super::Message;
 use super::icons::{Icon, Tone};
-use super::widgets::{bar_icon_button, hrule};
+use super::widgets::{bar, bar_icon_button, hrule};
 use crate::theme::{self, SEMIBOLD, SP_1, SP_2, SP_3, TS_20};
 
 /// The widest the body of a page grows in a wide window.
@@ -22,7 +22,7 @@ pub fn frame<'a>(
     body: Element<'a, Message>,
     footer: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let header = container(
+    let header = bar(
         row![
             bar_icon_button(
                 "back",
@@ -36,10 +36,8 @@ pub fn frame<'a>(
         ]
         .spacing(SP_2)
         .align_y(Alignment::Center),
-    )
-    .padding([SP_2, SP_2])
-    .width(Length::Fill)
-    .style(theme::bar);
+        SP_2,
+    );
     let mut col = column![
         header,
         hrule(),
@@ -54,12 +52,7 @@ pub fn frame<'a>(
         .id(BODY_ID),
     ];
     if let Some(footer) = footer {
-        col = col.push(hrule()).push(
-            container(footer)
-                .padding([SP_2, SP_3])
-                .width(Length::Fill)
-                .style(theme::bar),
-        );
+        col = col.push(hrule()).push(bar(footer, [SP_2, SP_3]));
     }
     container(col)
         .id(id)

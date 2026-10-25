@@ -141,7 +141,7 @@ pub fn header(app: &App) -> Element<'_, Message> {
     } else {
         Tone::Text
     };
-    container(
+    widgets::bar(
         bar.push(Space::new().width(Length::Fill))
             .push(members)
             .push(bar_icon_button(
@@ -170,10 +170,8 @@ pub fn header(app: &App) -> Element<'_, Message> {
             ))
             .spacing(SP_1)
             .align_y(Alignment::Center),
+        SP_2,
     )
-    .padding([SP_2, SP_2])
-    .width(Length::Fill)
-    .style(theme::bar)
     .into()
 }
 
@@ -202,16 +200,14 @@ pub fn members(app: &App) -> Option<Element<'_, Message>> {
             )
         });
     Some(
-        container(
+        widgets::bar(
             Row::with_children(entries)
                 .spacing(SP_2)
                 .wrap()
                 .vertical_spacing(SP_1),
+            SP_2,
         )
         .id("members-list")
-        .padding(SP_2)
-        .width(Length::Fill)
-        .style(theme::bar)
         .into(),
     )
 }
@@ -242,12 +238,9 @@ pub fn status_bar(app: &App) -> Element<'_, Message> {
         container(lamp).id("status-lamp"),
         status_card(statuses),
     ));
-    container(bar)
-        .padding([SP_1, SP_2])
+    widgets::bar(bar, [SP_1, SP_2])
         .height(theme::CONTROL)
         .align_y(Alignment::Center)
-        .width(Length::Fill)
-        .style(theme::bar)
         .into()
 }
 
