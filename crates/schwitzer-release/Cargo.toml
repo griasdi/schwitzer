@@ -11,10 +11,14 @@ semver.workspace = true
 serde.workspace = true
 sha2.workspace = true
 hex.workspace = true
+# The gzip of the Unix archives; on Windows zip's deflate-flate2 picks no backend of its own.
+flate2.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 tar.workspace = true
-flate2.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+zip.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

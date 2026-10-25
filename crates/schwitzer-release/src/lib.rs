@@ -1,13 +1,14 @@
 //! What the app's self-update and the server's `--auto-update` share: the GitHub release list and
 //! its downloads, the `sha256:` digest GitHub publishes, the bounded HTTPS requests, the size and
-//! digest check of a download, the member of a `.tar.gz` and the swap of a program file.
+//! digest check of a download, the member of a `.tar.gz` or `.zip` and the swap of a program
+//! file.
 //!
 //! What differs stays with the callers: which release to look at and which asset to take, the
 //! archive formats beyond `.tar.gz`, and how the new program starts.
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::ffi::OsStr;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -292,6 +293,27 @@ pub fn extract_tar_gz(bytes: &[u8], name: &str, limit: u64) -> Result<Vec<u8>, S
     Err(format!("the archive holds no {name}"))
 }
 
+/// The regular file named `name` at any depth of the `.zip` `bytes`, at most `limit` bytes of it.
+#[cfg(windows)]
+pub fn extract_zip(bytes: &[u8], name: &str, limit: u64) -> Result<Vec<u8>, String> {
+    let mut archive = zip::ZipArchive::new(io::Cursor::new(bytes)).map_err(unreadable)?;
+    for index in 0..archive.len() {
+        let file = archive.by_index(index).map_err(unreadable)?;
+        let is_member = file.is_file()
+            && file
+                .enclosed_name()
+                .is_some_and(|path| path.file_name() == Some(OsStr::new(name)));
+        if is_member {
+            let mut member = Vec::new();
+            file.take(limit)
+                .read_to_end(&mut member)
+                .map_err(unreadable)?;
+            return Ok(member);
+        }
+    }
+    Err(format!("the archive holds no {name}"))
+}
+
 /// `exe` with `suffix` appended to its file name.
 pub fn sibling(exe: &Path, suffix: &str) -> PathBuf {
     let mut path = exe.as_os_str().to_owned();
@@ -313,6 +335,31 @@ pub fn replace(exe: &Path, binary: &[u8]) -> io::Result<()> {
         let _ = std::fs::remove_file(&new);
     }
     swapped
+}
+
+/// Writes `binary` beside `exe` and swaps it in. A running program may be renamed but not
+/// deleted on Windows, so the old one moves to `<exe>.old` until the next start removes it.
+#[cfg(windows)]
+pub fn replace(exe: &Path, binary: &[u8]) -> io::Result<()> {
+    let new = sibling(exe, ".new");
+    let old = sibling(exe, ".old");
+    std::fs::write(&new, binary)?;
+    match std::fs::remove_file(&old) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    std::fs::rename(exe, &old)?;
+    if let Err(e) = std::fs::rename(&new, exe) {
+        let _ = std::fs::rename(&old, exe);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Removes what an update left beside `exe`: an unfinished `<exe>.new`, the replaced `<exe>.old`.
+pub fn clean_leftovers(exe: &Path) {
+    let _ = std::fs::remove_file(sibling(exe, ".new"));
+    let _ = std::fs::remove_file(sibling(exe, ".old"));
 }
 
 #[cfg(test)]
@@ -488,5 +535,40 @@ mod tests {
         assert!(!sibling(&exe, ".new").exists());
         let mode = std::fs::metadata(&exe).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o755);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn extract_zip_finds_the_member_at_any_depth() {
+        use std::io::Write;
+
+        let mut zip = zip::ZipWriter::new(io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("README", options).unwrap();
+        zip.write_all(b"read me").unwrap();
+        zip.start_file("schwitzer.exe", options).unwrap();
+        zip.write_all(b"program").unwrap();
+        let archive = zip.finish().unwrap().into_inner();
+        assert_eq!(
+            extract_zip(&archive, "schwitzer.exe", 1 << 10),
+            Ok(b"program".to_vec())
+        );
+        assert_eq!(
+            extract_zip(&archive, "schwitzer-server.exe", 1 << 10),
+            Err("the archive holds no schwitzer-server.exe".into())
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn replace_swaps_the_program_through_old() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("schwitzer.exe");
+        std::fs::write(&exe, b"old").unwrap();
+        replace(&exe, b"new").unwrap();
+        assert_eq!(std::fs::read(&exe).unwrap(), b"new");
+        assert!(!sibling(&exe, ".new").exists());
+        assert_eq!(std::fs::read(sibling(&exe, ".old")).unwrap(), b"old");
     }
 }

@@ -4086,7 +4086,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "winresource",
- "zip",
 ]
 
 [[package]]
@@ -4128,6 +4127,7 @@ dependencies = [
  "tar",
  "tempfile",
  "ureq",
+ "zip",
 ]
 
 [[package]]

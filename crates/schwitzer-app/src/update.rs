@@ -13,10 +13,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use futures::channel::oneshot;
-#[cfg(unix)]
-use schwitzer_release::replace;
 use schwitzer_release::{
-    ApiError, Channel, Download, GitHubRelease, PLATFORM, RELEASES_URL, sibling,
+    ApiError, Channel, Download, GitHubRelease, PLATFORM, RELEASES_URL, replace,
 };
 
 /// Whether this build updates itself: only the release builds from CI (`--features self-update`).
@@ -223,12 +221,6 @@ pub async fn install(release: Release, program: Program) -> Result<semver::Versi
     .await
 }
 
-/// Removes what an update left beside `exe`: an unfinished `<exe>.new`, the replaced `<exe>.old`.
-pub fn clean_leftovers(exe: &Path) {
-    let _ = std::fs::remove_file(sibling(exe, ".new"));
-    let _ = std::fs::remove_file(sibling(exe, ".old"));
-}
-
 /// Starts `exe` with this process's arguments and environment; the caller then exits.
 pub fn restart(exe: &Path) -> io::Result<()> {
     // The new program gets no file descriptor this process inherited (Rust opens its own ones
@@ -291,54 +283,11 @@ fn fetch_release(
 }
 
 /// The program file in the release archive `bytes`.
-#[cfg(unix)]
 fn extract(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    schwitzer_release::extract_tar_gz(bytes, BINARY, MAX_ARCHIVE)
-}
-
-/// The program file in the release archive `bytes`.
-#[cfg(windows)]
-fn extract(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    use std::ffi::OsStr;
-    use std::io::Read;
-
-    use schwitzer_release::unreadable;
-
-    let mut archive = zip::ZipArchive::new(io::Cursor::new(bytes)).map_err(unreadable)?;
-    for index in 0..archive.len() {
-        let file = archive.by_index(index).map_err(unreadable)?;
-        let is_binary = file.is_file()
-            && file
-                .enclosed_name()
-                .is_some_and(|path| path.file_name() == Some(OsStr::new(BINARY)));
-        if is_binary {
-            let mut binary = Vec::new();
-            file.take(MAX_ARCHIVE)
-                .read_to_end(&mut binary)
-                .map_err(unreadable)?;
-            return Ok(binary);
-        }
-    }
-    Err(format!("the archive holds no {BINARY}"))
-}
-
-/// Writes `binary` beside `exe` and swaps it in. A running program may be renamed but not
-/// deleted on Windows, so the old one moves to `<exe>.old` until the next start removes it.
-#[cfg(windows)]
-fn replace(exe: &Path, binary: &[u8]) -> io::Result<()> {
-    let new = sibling(exe, ".new");
-    let old = sibling(exe, ".old");
-    std::fs::write(&new, binary)?;
-    match std::fs::remove_file(&old) {
-        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
-        _ => {}
-    }
-    std::fs::rename(exe, &old)?;
-    if let Err(e) = std::fs::rename(&new, exe) {
-        let _ = std::fs::rename(&old, exe);
-        return Err(e);
-    }
-    Ok(())
+    #[cfg(unix)]
+    return schwitzer_release::extract_tar_gz(bytes, BINARY, MAX_ARCHIVE);
+    #[cfg(windows)]
+    return schwitzer_release::extract_zip(bytes, BINARY, MAX_ARCHIVE);
 }
 
 #[cfg(test)]
@@ -555,32 +504,5 @@ mod tests {
             Program::locate(Some("/usr/bin/schwitzer".into()), None, appdir),
             outside
         );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn extract_finds_the_program_in_the_zip() {
-        use std::io::Write;
-        let mut zip = zip::ZipWriter::new(io::Cursor::new(Vec::new()));
-        let options = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Stored);
-        zip.start_file("README", options).unwrap();
-        zip.write_all(b"read me").unwrap();
-        zip.start_file("schwitzer.exe", options).unwrap();
-        zip.write_all(b"program").unwrap();
-        let archive = zip.finish().unwrap().into_inner();
-        assert_eq!(extract(&archive), Ok(b"program".to_vec()));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn replace_swaps_the_program() {
-        let dir = tempfile::tempdir().unwrap();
-        let exe = dir.path().join(BINARY);
-        std::fs::write(&exe, b"old").unwrap();
-        replace(&exe, b"new").unwrap();
-        assert_eq!(std::fs::read(&exe).unwrap(), b"new");
-        assert!(!sibling(&exe, ".new").exists());
-        assert_eq!(std::fs::read(sibling(&exe, ".old")).unwrap(), b"old");
     }
 }

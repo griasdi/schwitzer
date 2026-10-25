@@ -652,7 +652,7 @@ impl App {
         if update::ENABLED
             && let Some(program) = &app.program
         {
-            update::clean_leftovers(&program.path);
+            schwitzer_release::clean_leftovers(&program.path);
         }
         if let Some(resume) = resumed.0.clone() {
             app.apply_resume(resume);

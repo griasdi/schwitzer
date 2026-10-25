@@ -49,9 +49,6 @@ notify-rust.workspace = true
 [target.'cfg(unix)'.dependencies]
 close_fds.workspace = true
 
-[target.'cfg(windows)'.dependencies]
-zip.workspace = true
-
 [lints]
 workspace = true
 
