@@ -37,23 +37,40 @@ async fn start_server(listen: SocketAddr, data: &TempDir) -> Server {
     panic!("server did not start: {:?}", last);
 }
 
-/// The next `Room` event for which `pred` holds.
-async fn room_where(
+/// What `pick` takes out of the next event it accepts. Panics when none does within `WAIT` or
+/// the channel closes.
+async fn event_where<T>(
     rx: &mut Receiver<ClientEvent>,
-    pred: impl Fn(&RoomState) -> bool,
-) -> RoomState {
+    pick: impl Fn(&ClientEvent) -> Option<T>,
+) -> T {
     let wait = async {
         loop {
             match rx.recv().await {
-                Ok(ClientEvent::Room(state)) if pred(&state) => return *state,
-                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Ok(event) => {
+                    if let Some(found) = pick(&event) {
+                        return found;
+                    }
+                }
+                Err(RecvError::Lagged(_)) => {}
                 Err(RecvError::Closed) => panic!("the event channel closed"),
             }
         }
     };
     tokio::time::timeout(WAIT, wait)
         .await
-        .expect("no room event matched in time")
+        .expect("no event matched in time")
+}
+
+/// The next `Room` event for which `pred` holds.
+async fn room_where(
+    rx: &mut Receiver<ClientEvent>,
+    pred: impl Fn(&RoomState) -> bool,
+) -> RoomState {
+    event_where(rx, |event| match event {
+        ClientEvent::Room(state) if pred(state) => Some(RoomState::clone(state)),
+        _ => None,
+    })
+    .await
 }
 
 fn task(response: Response) -> Task {
@@ -714,34 +731,28 @@ async fn a_debug_session_relays_logs_and_instructions_while_it_runs() {
     )
     .await
     .unwrap();
-    let log = tokio::time::timeout(WAIT, async {
-        loop {
-            if let Ok(ClientEvent::DebugLog {
-                from,
-                stream,
-                offset,
-                data,
-                ..
-            }) = rx_a.recv().await
-            {
-                return (from, stream, offset, data);
-            }
-        }
+    let log = event_where(&mut rx_a, |event| match event {
+        ClientEvent::DebugLog {
+            from,
+            stream,
+            offset,
+            data,
+            ..
+        } => Some((*from, stream.clone(), *offset, data.clone())),
+        _ => None,
     })
-    .await
-    .expect("alice got no log");
+    .await;
     assert_eq!(log.0, b.member());
     assert_eq!(
         (log.1.as_str(), log.2, &*log.3),
         ("sender.log", 0, &b"hello\n"[..])
     );
-    let carol_got_log = tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if let Ok(ClientEvent::DebugLog { .. }) = rx_c.recv().await {
-                return;
-            }
-        }
-    })
+    let carol_got_log = tokio::time::timeout(
+        Duration::from_secs(1),
+        event_where(&mut rx_c, |event| {
+            matches!(event, ClientEvent::DebugLog { .. }).then_some(())
+        }),
+    )
     .await;
     assert!(carol_got_log.is_err(), "carol is not in the session");
     assert!(matches!(
@@ -761,15 +772,10 @@ async fn a_debug_session_relays_logs_and_instructions_while_it_runs() {
         .await
         .unwrap();
     assert_eq!((sent.id, sent.to.as_slice()), (1, &[b.member()][..]));
-    tokio::time::timeout(WAIT, async {
-        loop {
-            if let Ok(ClientEvent::DebugInbox { .. }) = rx_b.recv().await {
-                return;
-            }
-        }
+    event_where(&mut rx_b, |event| {
+        matches!(event, ClientEvent::DebugInbox { .. }).then_some(())
     })
-    .await
-    .expect("bob got no instruction");
+    .await;
     assert_eq!(b.take_debug_instruction(room), Some(sent.clone()));
     assert_eq!(b.take_debug_instruction(room), None);
     assert!(c.debug_inbox(room).is_empty());
@@ -933,10 +939,6 @@ async fn a_member_is_in_at_most_50_rooms() {
     let too_many = ApiError::Invalid(
         "you are in 50 rooms already; leave one to create or join another".into(),
     );
-    let refusal = |result: Result<_, ClientError>| match result {
-        Err(ClientError::Api(e)) => e,
-        other => panic!("expected an API error, got {other:?}"),
-    };
 
     let mut first = None;
     for i in 0..50 {
@@ -947,7 +949,7 @@ async fn a_member_is_in_at_most_50_rooms() {
         first.get_or_insert(RoomId::of(&key.token));
     }
     assert_eq!(
-        refusal(
+        api_error(
             a.create_room(addr.clone(), "one more".into())
                 .await
                 .map(|_| ())
@@ -957,7 +959,7 @@ async fn a_member_is_in_at_most_50_rooms() {
 
     let key_b = b.create_room(addr.clone(), "bob's".into()).await.unwrap();
     assert_eq!(
-        refusal(a.join_room(key_b.clone()).await.map(|_| ())),
+        api_error(a.join_room(key_b.clone()).await.map(|_| ())),
         too_many
     );
 
@@ -1025,17 +1027,11 @@ async fn the_server_announces_the_newest_release_even_above_its_own_version() {
     let a = Client::start(dir.path(), "alice".into()).unwrap();
     let mut rx = a.subscribe();
     a.create_room(addr.clone(), "crew".into()).await.unwrap();
-    let (server_of, version) = tokio::time::timeout(WAIT, async {
-        loop {
-            match rx.recv().await {
-                Ok(ClientEvent::Release { server, version }) => return (server, version),
-                Ok(_) | Err(RecvError::Lagged(_)) => {}
-                Err(RecvError::Closed) => panic!("the event channel closed"),
-            }
-        }
+    let (server_of, version) = event_where(&mut rx, |event| match event {
+        ClientEvent::Release { server, version } => Some((server.clone(), version.clone())),
+        _ => None,
     })
-    .await
-    .expect("no release announced");
+    .await;
     assert_eq!(version, "999.0.0");
     assert_eq!(server_of, addr);
 
