@@ -125,6 +125,30 @@ pub fn fold_button<'a>(
     )
 }
 
+/// The header of a foldable group: chevron, title, count pill and, after the spacer, the
+/// `extra` control (an icon button takes the press before the header). `on_toggle` folds it.
+pub fn group_head<'a>(
+    id: impl Into<String>,
+    title: impl text::IntoFragment<'a>,
+    count: usize,
+    open: bool,
+    on_toggle: Message,
+    extra: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let mut line = row![
+        chevron(open),
+        text(title).size(TS_12).font(SEMIBOLD),
+        pill(count.to_string()),
+        Space::new().width(Length::Fill),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center);
+    if let Some(extra) = extra {
+        line = line.push(extra);
+    }
+    fold_button(id, line, Some(on_toggle))
+}
+
 /// A text button: 32 px tall, label in medium weight.
 pub fn text_button<'a>(
     id: impl Into<String>,

@@ -10,8 +10,8 @@ use super::icons::{Icon, Tone, icon};
 use super::logic::{self, Group, MissingSession};
 use super::task_view;
 use super::widgets::{
-    self, LAMP, chevron, fold_button, icon_button, icon_text_button, id_button, lamp, lamp_kind,
-    member_tag_of, muted, priority_pill, with_tip,
+    self, LAMP, icon_button, icon_text_button, id_button, lamp, lamp_kind, member_tag_of, muted,
+    priority_pill, with_tip,
 };
 use super::{App, Expanded, Message};
 use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
@@ -127,42 +127,33 @@ pub fn empty<'a>(
 }
 
 fn group_header<'a>(group: Group, count: usize, open: bool) -> Element<'a, Message> {
-    let mut line = row![
-        chevron(open),
-        text(group.title()).size(TS_12).font(SEMIBOLD),
-        widgets::pill(count.to_string()),
-        Space::new().width(Length::Fill),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center);
     // The `+` takes the press before the header does.
-    match group {
-        Group::Proposals => {
-            line = line.push(icon_button(
-                "add-proposal",
-                Icon::Plus,
-                Tone::Text,
-                "New proposal  (Ctrl+N)",
-                Some(Message::OpenNewTask { idea: false }),
-                theme::button_ghost,
-            ))
-        }
-        Group::Ideas => {
-            line = line.push(icon_button(
-                "add-idea",
-                Icon::Plus,
-                Tone::Text,
-                "New idea",
-                Some(Message::OpenNewTask { idea: true }),
-                theme::button_ghost,
-            ))
-        }
-        _ => {}
-    }
-    fold_button(
+    let add = match group {
+        Group::Proposals => Some(icon_button(
+            "add-proposal",
+            Icon::Plus,
+            Tone::Text,
+            "New proposal  (Ctrl+N)",
+            Some(Message::OpenNewTask { idea: false }),
+            theme::button_ghost,
+        )),
+        Group::Ideas => Some(icon_button(
+            "add-idea",
+            Icon::Plus,
+            Tone::Text,
+            "New idea",
+            Some(Message::OpenNewTask { idea: true }),
+            theme::button_ghost,
+        )),
+        _ => None,
+    };
+    widgets::group_head(
         format!("group-{}", group.slug()),
-        line,
-        Some(Message::ToggleGroup(group)),
+        group.title(),
+        count,
+        open,
+        Message::ToggleGroup(group),
+        add,
     )
 }
 

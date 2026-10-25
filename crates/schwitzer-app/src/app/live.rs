@@ -2,14 +2,14 @@
 //! task they work on, how long and how many tokens.
 
 use iced::widget::text::Wrapping;
-use iced::widget::{Space, column, container, row, scrollable, text};
+use iced::widget::{column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{Member, MemberId, RoomState, SessionInfo};
 
 use super::logic;
-use super::widgets::{self, chevron, fold_button, id_button, member_tag_of, muted};
+use super::widgets::{self, id_button, member_tag_of, muted};
 use super::{App, Message};
-use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
+use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, TS_12, TS_14};
 
 /// Height of a session slab: two lines and their padding.
 const SLAB_HEIGHT: f32 = 60.0;
@@ -25,18 +25,13 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, project: u64) -> Element<'a,
             rows = rows.push(session_row(app, &state.members, member, session));
         }
     }
-    let line = row![
-        chevron(app.sessions_open),
-        text("Sessions").size(TS_12).font(SEMIBOLD),
-        widgets::pill(count.to_string()),
-        Space::new().width(Length::Fill),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center);
-    let header = container(fold_button(
+    let header = container(widgets::group_head(
         "group-sessions",
-        line,
-        Some(Message::ToggleSessions),
+        "Sessions",
+        count,
+        app.sessions_open,
+        Message::ToggleSessions,
+        None,
     ))
     .padding([SP_1, SP_2]);
     if !app.sessions_open {
