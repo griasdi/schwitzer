@@ -1,4 +1,5 @@
-//! Full-window pages with a back button: Settings and its topic pages, About.
+//! Full-window pages with a back button: Settings and its topic pages, About, and the reading
+//! page of the open task's proposal or plan.
 
 use iced::widget::{column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
@@ -10,6 +11,8 @@ use crate::theme::{self, SEMIBOLD, SP_1, SP_2, SP_3, TS_20};
 
 /// The widest the body of a page grows in a wide window.
 const MAX_WIDTH: f32 = 560.0;
+/// The widest the reading page's text grows: about 75 characters of 16 px Figtree.
+const READ_WIDTH: f32 = 640.0;
 
 /// The widget id of a page's scrolling body. The pages share one, and iced keeps its offset
 /// from page to page, so a page that should not open where the last one was scrolled snaps it.
@@ -21,6 +24,26 @@ pub fn frame<'a>(
     title: impl text::IntoFragment<'a>,
     body: Element<'a, Message>,
     footer: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    framed(id, title, body, footer, MAX_WIDTH)
+}
+
+/// The reading page: a page without footer whose body grows wider than a settings page's.
+pub fn reading_frame<'a>(
+    id: &'static str,
+    title: impl text::IntoFragment<'a>,
+    body: Element<'a, Message>,
+) -> Element<'a, Message> {
+    framed(id, title, body, None, READ_WIDTH)
+}
+
+/// A page whose body grows at most `max_width` wide.
+fn framed<'a>(
+    id: &'static str,
+    title: impl text::IntoFragment<'a>,
+    body: Element<'a, Message>,
+    footer: Option<Element<'a, Message>>,
+    max_width: f32,
 ) -> Element<'a, Message> {
     let header = bar(
         row![
@@ -42,7 +65,7 @@ pub fn frame<'a>(
         header,
         hrule(),
         scrollable(
-            container(container(body).max_width(MAX_WIDTH).width(Length::Fill))
+            container(container(body).max_width(max_width).width(Length::Fill))
                 .center_x(Length::Fill)
                 .padding(SP_3)
         )

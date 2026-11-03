@@ -13,6 +13,7 @@ mod main_view;
 mod pages;
 mod plugins;
 mod projects;
+mod reading;
 mod resume;
 mod rooms;
 mod settings_view;
@@ -111,8 +112,8 @@ pub enum Message {
     /// is open.
     ToggleTask(u64),
     /// Esc, the back button, the close button of the open task and Cancel on a draft: drops a
-    /// pending confirmation, closes the open task or draft, else goes up one page: from a topic
-    /// page to Settings, from Settings to the main page.
+    /// pending confirmation, closes the reading page, closes the open task or draft, else goes
+    /// up one page: from a topic page to Settings, from Settings to the main page.
     Back,
     ToggleGroup(Group),
     /// Folds or unfolds the sessions panel.
@@ -123,6 +124,8 @@ pub enum Message {
     ToggleProposal,
     /// Folds or unfolds the Plan block of the open task.
     TogglePlan,
+    /// Shows a text of the open task as the reading page.
+    Read(Reading),
 
     SelectRoom(RoomId),
     ServerUrl(String),
@@ -200,6 +203,8 @@ pub enum Message {
     UpdateAllPlugins,
     AutoUpdatePlugins(bool),
     NotifyHandIns(bool),
+    /// The member picked a text size in Settings.
+    TextSize(settings::TextSize),
     CommitTrailers(bool),
 
     ProposalTitle(String),
@@ -278,6 +283,13 @@ pub enum TaskText {
     Plan,
     /// Note `i` in note order.
     Note(usize),
+}
+
+/// A text of the open task shown across the window for reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reading {
+    Proposal,
+    Plan,
 }
 
 /// Which page fills the window.
@@ -486,6 +498,9 @@ pub struct App {
     proposal_folded: bool,
     /// Whether the open task's Plan block is folded; every task opens unfolded.
     plan_folded: bool,
+    /// The text of open task `n` shown as the reading page, on the main page only; not kept
+    /// over a restart.
+    reading: Option<(u64, Reading)>,
     /// The task whose pick is under way.
     picking: Option<u64>,
     /// The open proposal accepted last, until the list returned to its place.
@@ -630,6 +645,7 @@ impl App {
             members_open: false,
             proposal_folded: false,
             plan_folded: false,
+            reading: None,
             picking: None,
             accept_return: None,
             noting_idea: None,
@@ -697,6 +713,11 @@ impl App {
         self.theme.clone()
     }
 
+    /// The window's scale factor, from the member's text size.
+    pub fn scale_factor(&self) -> f32 {
+        self.settings.text_size.scale()
+    }
+
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![
             Subscription::run_with(
@@ -737,13 +758,16 @@ impl App {
         }
         let body: Element<'_, Message> = match self.page {
             Page::FirstStart => settings_view::first_start(self),
-            Page::Main => {
-                let mut main = column![chrome::header(self), widgets::hrule()];
-                if let Some(members) = chrome::members(self) {
-                    main = main.push(members).push(widgets::hrule());
+            Page::Main => match (self.reading, self.open()) {
+                (Some((_, part)), Some((state, task))) => reading::page(self, state, task, part),
+                _ => {
+                    let mut main = column![chrome::header(self), widgets::hrule()];
+                    if let Some(members) = chrome::members(self) {
+                        main = main.push(members).push(widgets::hrule());
+                    }
+                    main.push(self.main()).into()
                 }
-                main.push(self.main()).into()
-            }
+            },
             Page::Settings => settings_view::view(self),
             Page::Licenses => licenses_view::view(self),
             Page::RoomSettings => settings_view::room_page(self),
@@ -789,13 +813,33 @@ impl App {
             self.page = Page::Main;
             self.reset_drafts();
         }
+        self.reading = None;
         true
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
+        self.settle_reading();
         self.refresh_markdown();
         task
+    }
+
+    /// Drops the reading page unless the main page shows it, its task is still the open one and
+    /// that task still has the text: Ctrl+N, Ctrl+, , a room or project switch, a task that
+    /// vanished or lost its plan all close it.
+    fn settle_reading(&mut self) {
+        let Some((number, part)) = self.reading else {
+            return;
+        };
+        let keep = self.page == Page::Main
+            && self.expanded == Some(Expanded::Task(number))
+            && self.open().is_some_and(|(_, task)| match part {
+                Reading::Proposal => !task.body.is_empty(),
+                Reading::Plan => task.has_plan(),
+            });
+        if !keep {
+            self.reading = None;
+        }
     }
 
     fn handle(&mut self, message: Message) -> Task<Message> {
@@ -1008,6 +1052,9 @@ impl App {
                 if self.confirm.take().is_some() {
                     return Task::none();
                 }
+                if self.reading.take().is_some() {
+                    return reveal("open-task");
+                }
                 if self.expanded.take().is_some() {
                     self.reset_drafts();
                     return Task::none();
@@ -1038,6 +1085,13 @@ impl App {
             Message::TogglePlan => {
                 self.plan_folded = !self.plan_folded;
                 Task::none()
+            }
+            Message::Read(part) => {
+                let Some(Expanded::Task(n)) = self.expanded else {
+                    return Task::none();
+                };
+                self.reading = Some((n, part));
+                operation::snap_to(pages::BODY_ID, operation::RelativeOffset::START)
             }
 
             Message::SelectRoom(id) => {
@@ -1204,6 +1258,11 @@ impl App {
             }
             Message::NotifyHandIns(on) => {
                 self.settings.notify_hand_ins = on;
+                self.save_settings();
+                Task::none()
+            }
+            Message::TextSize(size) => {
+                self.settings.text_size = size;
                 self.save_settings();
                 Task::none()
             }

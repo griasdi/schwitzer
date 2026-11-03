@@ -6,8 +6,8 @@ use iced::font::Weight;
 use iced::theme::Palette;
 use iced::theme::palette::{Extended, Pair};
 use iced::widget::{
-    button, container, markdown, overlay::menu, pick_list, scrollable, text_editor, text_input,
-    toggler,
+    button, checkbox, container, markdown, overlay::menu, pick_list, scrollable, text_editor,
+    text_input, toggler,
 };
 use iced::{Background, Border, Color, Font, Pixels, Shadow, Theme, Vector, color};
 
@@ -27,6 +27,14 @@ pub const TS_12: f32 = 12.0;
 pub const TS_14: f32 = 14.0;
 /// Page titles.
 pub const TS_20: f32 = 20.0;
+/// Task text read in full: proposal, plan, notes, and the editors that hold them.
+pub const TS_16: f32 = 16.0;
+/// Headings in task Markdown.
+pub const TS_18: f32 = 18.0;
+/// Headings in task Markdown.
+pub const TS_24: f32 = 24.0;
+/// Line height of task text read in full, relative to its size.
+pub const READ_LINE_HEIGHT: f32 = 1.5;
 
 /// Corner radius of rows, inputs and buttons.
 pub const RADIUS: f32 = 8.0;
@@ -406,6 +414,21 @@ pub fn rule(theme: &Theme) -> container::Style {
     }
 }
 
+/// A fenced code block in task Markdown: the well's tone with a hairline, text in `text`.
+pub fn code_block(theme: &Theme) -> container::Style {
+    let t = tokens(theme);
+    container::Style {
+        text_color: Some(t.text),
+        background: Some(t.ground.into()),
+        border: Border {
+            color: t.line,
+            width: 1.0,
+            radius: RADIUS.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
 /// A member's name tag.
 pub fn tag(hue: usize) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
@@ -735,6 +758,29 @@ pub fn input(theme: &Theme, status: text_input::Status) -> text_input::Style {
     }
 }
 
+/// The read-only box of a `- [ ]` task item in task Markdown: an outlined box, filled when done.
+pub fn task_check(theme: &Theme, status: checkbox::Status) -> checkbox::Style {
+    let t = tokens(theme);
+    let (checkbox::Status::Active { is_checked }
+    | checkbox::Status::Hovered { is_checked }
+    | checkbox::Status::Disabled { is_checked }) = status;
+    let (background, border) = if is_checked {
+        (t.primary, t.primary)
+    } else {
+        (t.raised, t.line_strong)
+    };
+    checkbox::Style {
+        background: background.into(),
+        icon_color: t.on_primary,
+        border: Border {
+            color: border,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        text_color: None,
+    }
+}
+
 pub fn editor(theme: &Theme, status: text_editor::Status) -> text_editor::Style {
     let t = tokens(theme);
     let (border, width) = match status {
@@ -835,7 +881,8 @@ pub fn scroll(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
     style
 }
 
-/// Markdown in the open task (details, plan, notes): body size, the UI face, headings one step above the body.
+/// Markdown in the open task (details, plan, notes): 16 px reading text in the UI face, headings 24/20/18,
+/// code 14 px.
 pub fn task_markdown(theme: &Theme) -> markdown::Settings {
     let t = tokens(theme);
     let mut style = markdown::Style::from_palette(theme.palette());
@@ -850,14 +897,15 @@ pub fn task_markdown(theme: &Theme) -> markdown::Settings {
             radius: 4.0.into(),
         },
     };
-    let mut settings = markdown::Settings::with_text_size(TS_14, style);
-    settings.h1_size = Pixels(TS_20);
-    settings.h2_size = Pixels(17.0);
-    settings.h3_size = Pixels(15.0);
-    settings.h4_size = Pixels(TS_14);
-    settings.h5_size = Pixels(TS_14);
-    settings.h6_size = Pixels(TS_14);
-    settings.spacing = Pixels(SP_2);
+    let mut settings = markdown::Settings::with_text_size(TS_16, style);
+    settings.h1_size = Pixels(TS_24);
+    settings.h2_size = Pixels(TS_20);
+    settings.h3_size = Pixels(TS_18);
+    settings.h4_size = Pixels(TS_16);
+    settings.h5_size = Pixels(TS_16);
+    settings.h6_size = Pixels(TS_16);
+    settings.code_size = Pixels(TS_14);
+    settings.spacing = Pixels(SP_3);
     settings
 }
 

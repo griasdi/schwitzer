@@ -40,6 +40,27 @@ impl LoadProblem {
 /// File name of the settings inside the data directory.
 const FILE: &str = "settings.toml";
 
+/// How large the window draws everything; `settings.toml` key `text_size`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextSize {
+    #[default]
+    Normal,
+    Large,
+    Larger,
+}
+
+impl TextSize {
+    /// The app's scale factor: 1, 1.15 or 1.3.
+    pub fn scale(self) -> f32 {
+        match self {
+            Self::Normal => 1.0,
+            Self::Large => 1.15,
+            Self::Larger => 1.3,
+        }
+    }
+}
+
 /// The contents of `settings.toml`. Missing keys take their defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -67,6 +88,8 @@ pub struct Settings {
     /// Whether a system notification tells this member that one of their agents handed in a
     /// plan or finished a build.
     pub notify_hand_ins: bool,
+    /// How large the window draws everything.
+    pub text_size: TextSize,
     /// Per project (key `<room id hex>/<project id>`), the local repositories linked to it;
     /// omp sessions in them are shared with the project's room. A key that does not parse is
     /// dropped on load.
@@ -106,6 +129,7 @@ impl Default for Settings {
             auto_restart_updates: true,
             update_channel: None,
             notify_hand_ins: false,
+            text_size: TextSize::Normal,
             repos: BTreeMap::new(),
             commit_trailers: BTreeSet::new(),
             chosen_projects: BTreeMap::new(),
@@ -518,6 +542,7 @@ mod tests {
         assert!(settings.auto_restart_updates);
         assert_eq!(settings.update_channel, None);
         assert!(!settings.notify_hand_ins);
+        assert_eq!(settings.text_size, TextSize::Normal);
     }
 
     #[test]
@@ -545,6 +570,7 @@ mod tests {
             auto_restart_updates: false,
             update_channel: Some(schwitzer_release::Channel::Dev),
             notify_hand_ins: true,
+            text_size: TextSize::Larger,
             repos: BTreeMap::from([((RoomId([0xab; 32]), 1), vec![PathBuf::from("/code/x")])]),
             commit_trailers: BTreeSet::from([(RoomId([0xab; 32]), 1)]),
             chosen_projects: BTreeMap::from([(RoomId([0xab; 32]), 2)]),

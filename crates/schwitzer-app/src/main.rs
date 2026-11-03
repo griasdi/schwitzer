@@ -38,9 +38,9 @@ fn main() -> iced::Result {
 
     // Before the window opens: after a restart for an update it opens where the old one was.
     let resumed = app::Resumed::take();
-    // A narrow window beside the editor.
+    // A narrow window beside the editor, wide enough to read a plan in.
     let window = resumed.place(iced::window::Settings {
-        size: iced::Size::new(400.0, 780.0),
+        size: iced::Size::new(480.0, 780.0),
         min_size: Some(iced::Size::new(340.0, 520.0)),
         icon: brand::window_icon(),
         // Matches `StartupWMClass` in deploy/schwitzer.desktop: desktops find the icon by it.
@@ -54,6 +54,7 @@ fn main() -> iced::Result {
     let mut app = iced::application(move || App::boot(&resumed), App::update, App::view)
         .title(App::title)
         .theme(App::theme)
+        .scale_factor(App::scale_factor)
         .subscription(App::subscription)
         .default_font(theme::REGULAR)
         .window(window);

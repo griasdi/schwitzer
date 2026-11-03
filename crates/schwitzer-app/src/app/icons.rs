@@ -30,6 +30,7 @@ icons! {
     ChevronDown => "chevron-down",
     ChevronRight => "chevron-right",
     Copy => "copy",
+    Expand => "maximize-2",
     Leave => "log-out",
     Folder => "folder",
     FolderPlus => "folder-plus",

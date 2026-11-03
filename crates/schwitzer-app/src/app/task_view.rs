@@ -2,7 +2,8 @@
 
 use std::fmt;
 
-use iced::widget::{Row, Space, column, container, markdown, row, text, text_editor};
+use iced::widget::text::LineHeight;
+use iced::widget::{Row, Space, column, container, row, text, text_editor};
 use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task, caps};
 
@@ -14,8 +15,10 @@ use super::widgets::{
     self, LAMP, chevron, fold_button, heading, hrule, icon_button, icon_text_button, id_button,
     lamp, member_tag_of, muted, segment, text_button,
 };
-use super::{App, Message, TaskText, sticky};
-use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
+use super::{App, Message, Reading, TaskText, reading, sticky};
+use crate::theme::{
+    self, Lamp, MEDIUM, READ_LINE_HEIGHT, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, TS_16,
+};
 
 /// Task `task` open in place: the slab's two lines as a head that closes it again, then
 /// the proposal, people, decisions, plan, priority, project, waits and notes; proposal and
@@ -180,7 +183,7 @@ pub fn new_task(app: &App, idea: bool, list_height: f32) -> Element<'_, Message>
                     .min_height(100)
                     .max_height(editor_max(list_height, DRAFT_RESERVE, 100.0))
                     .padding(SP_2)
-                    .size(TS_14)
+                    .size(TS_16)
                     .on_action(Message::ProposalBody)
                     .style(theme::editor),
             )
@@ -292,7 +295,7 @@ fn details<'a>(app: &'a App, task: &'a Task, list_height: f32) -> Option<Element
                     .min_height(100)
                     .max_height(editor_max(list_height, DETAILS_RESERVE, 100.0))
                     .padding(SP_2)
-                    .size(TS_14)
+                    .size(TS_16)
                     .on_action(Message::EditBody)
                     .style(theme::editor),
                 buttons,
@@ -308,19 +311,21 @@ fn details<'a>(app: &'a App, task: &'a Task, list_height: f32) -> Option<Element
     let mut col = column![fold_head(
         "fold-proposal",
         open,
-        line(),
+        line().push(icon_button(
+            "read-proposal",
+            Icon::Expand,
+            Tone::Muted,
+            "Read in full window",
+            Some(Message::Read(Reading::Proposal)),
+            theme::button_ghost,
+        )),
         Some(Message::ToggleProposal)
     )]
     .spacing(SP_2);
     if open {
-        col = col.push(rich(app, &app.open_md.body));
+        col = col.push(reading::markdown(app, &app.open_md.body));
     }
     Some(col.into())
-}
-
-/// Task text as Markdown; a click on a link opens it.
-fn rich<'a>(app: &'a App, md: &'a super::ParsedMarkdown) -> Element<'a, Message> {
-    markdown::view(md.items(), theme::task_markdown(&app.theme)).map(Message::OpenLink)
 }
 
 /// Who proposed it and who works on it.
@@ -470,6 +475,14 @@ fn plan<'a>(
     head = head.push(Space::new().width(Length::Fill));
     if ready && app.plan_draft.is_none() {
         head = head.push(icon_button(
+            "read-plan",
+            Icon::Expand,
+            Tone::Muted,
+            "Read in full window",
+            Some(Message::Read(Reading::Plan)),
+            theme::button_ghost,
+        ));
+        head = head.push(icon_button(
             "copy-plan",
             Icon::Copy,
             Tone::Muted,
@@ -501,7 +514,7 @@ fn plan<'a>(
             return col.into();
         }
         return if ready {
-            col.push(rich(app, &app.open_md.plan))
+            col.push(reading::markdown(app, &app.open_md.plan))
         } else {
             col.push(muted(
                 "No plan yet. Once the task is accepted, an agent claims it and writes one.",
@@ -519,7 +532,7 @@ fn plan<'a>(
                     .min_height(180)
                     .max_height(editor_max(list_height, PLAN_RESERVE, 180.0))
                     .padding(SP_2)
-                    .size(TS_14)
+                    .size(TS_16)
                     .on_action(Message::PlanAction)
                     .style(theme::editor),
             )
@@ -701,8 +714,11 @@ fn notes<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, 
                 theme::button_ghost,
             ));
         let body = match app.open_md.notes.get(i) {
-            Some(md) => rich(app, md),
-            None => text(&note.text).size(TS_14).into(),
+            Some(md) => reading::markdown(app, md),
+            None => text(&note.text)
+                .size(TS_16)
+                .line_height(LineHeight::Relative(READ_LINE_HEIGHT))
+                .into(),
         };
         col = col.push(column![who, body].spacing(SP_1));
     }

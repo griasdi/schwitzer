@@ -19,10 +19,12 @@ pub use room::{room_page, rooms_page};
 use super::icons::{Icon, Tone, icon};
 use super::logic::{self, folder_label};
 use super::pages::{frame, section};
-use super::widgets::{heading, icon_button, id_button, input, muted, path_text, text_button};
+use super::widgets::{
+    heading, icon_button, id_button, input, muted, path_text, segment, text_button,
+};
 use super::{App, FolderFor, Message, Page};
 use crate::omp_plugin::{Coverage, count_outdated};
-use crate::settings::tilde;
+use crate::settings::{TextSize, tilde};
 use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 use crate::update::{self, UpdateState};
 use crate::wsl;
@@ -105,6 +107,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             group_label("You"),
             column![
                 section(you(app)),
+                section(text_size(app)),
                 switch_row(
                     "settings-notify",
                     Switch::Slab(Icon::Bell),
@@ -280,6 +283,31 @@ fn you(app: &App) -> Element<'_, Message> {
         .spacing(SP_2)
         .align_y(Alignment::Center),
         muted("Shown on your tags in every room."),
+    ]
+    .spacing(SP_2)
+    .into()
+}
+
+/// How large the window draws everything.
+fn text_size(app: &App) -> Element<'_, Message> {
+    let option = |id: &'static str, label: &'static str, value: TextSize| {
+        segment(
+            id,
+            label,
+            app.settings.text_size == value,
+            Message::TextSize(value),
+        )
+    };
+    column![
+        row![
+            heading("Text size").width(Length::Fill),
+            option("text-size-100", "100%", TextSize::Normal),
+            option("text-size-115", "115%", TextSize::Large),
+            option("text-size-130", "130%", TextSize::Larger),
+        ]
+        .spacing(SP_1)
+        .align_y(Alignment::Center),
+        muted("Draws the whole window larger."),
     ]
     .spacing(SP_2)
     .into()

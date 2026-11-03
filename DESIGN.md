@@ -99,6 +99,12 @@ typography:
     fontWeight: 500
     lineHeight: 1.3
     letterSpacing: "normal"
+  reading:
+    fontFamily: "Figtree"
+    fontSize: "16px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "normal"
   label:
     fontFamily: "Figtree"
     fontSize: "12px"
@@ -284,7 +290,7 @@ components:
 
 **Creative North Star: "The Slab Rack"**
 
-The room is a rack of physical slabs. Every task is a raised, full-width plate lying in a recessed well; it carries its own stage lamp, its labels, the name tag of whoever works on it and one button for the next step. The construction is taken from the classic Steam client of the early 2000s: stacked full-width panels in a well, header bars, buttons and status labels inside the entries. The colours are not: the palette stays mint and green, the finish is clean and modern, Figtree is the typeface. It lives as a narrow window (400x780) beside the editor and terminal and is read in a glance, so everything is quiet and tinted toward green; the only saturated things on screen are the lamps, the name tags and the green action fills.
+The room is a rack of physical slabs. Every task is a raised, full-width plate lying in a recessed well; it carries its own stage lamp, its labels, the name tag of whoever works on it and one button for the next step. The construction is taken from the classic Steam client of the early 2000s: stacked full-width panels in a well, header bars, buttons and status labels inside the entries. The colours are not: the palette stays mint and green, the finish is clean and modern, Figtree is the typeface. It lives as a narrow window (480x780) beside the editor and terminal and is read in a glance, so everything is quiet and tinted toward green; the only saturated things on screen are the lamps, the name tags and the green action fills.
 
 The system is tactile but calm. Depth is a pair of tones (the `ground` well is darker than every raised slab, by day and by night) plus a soft under-edge shadow that makes slabs and buttons look like plates lifted by a pixel or two. The shadow deepens under the pointer and vanishes when the plate is pressed in. Menus and tooltips float higher with a larger shadow. There is no motion by design: state changes are instant swaps, nothing animates, nothing blurs. Two themes, Daylight and Night, follow the system appearance (no preference means Night); every colour comes from the active theme's token set.
 
@@ -295,7 +301,7 @@ The signature is the press: a slab or button loses its under-edge shadow and dar
 - One saturated green for actions (`Action Green`), a separate leaf green for ink and focus, a separate running green for the lamp.
 - Every neutral leans mint-green; no cool or pure greys.
 - Six member tag hues, fixed per member, identical for everyone; light fills with dark text by day, dark fills with light text by night.
-- Figtree only, four weights (400 / 500 / 600 / 700), three sizes in practice (12 / 14 / 20).
+- Figtree only, four weights (400 / 500 / 600 / 700), three UI sizes in practice (12 / 14 / 20); task text is read at 16.
 - Raised plates with a 1px hairline and a soft under-edge shadow; settings is an overview of slabs that each open a page with a back button, a task opens in place in the list and new tasks are drafted there too.
 
 ## Colors
@@ -354,37 +360,40 @@ Six hues, picked per member by a fixed hash, the same on every machine. Day: lig
 
 **Display Font:** Figtree (bundled, no fallback needed; the app sets it as the default font)
 **Body Font:** Figtree
-**Label/Mono Font:** Figtree (no monospace; inline code in plans keeps the UI face)
+**Label/Mono Font:** Figtree for labels; inline code and code blocks in task Markdown use the system monospace face.
 
 **Character:** Figtree is a friendly geometric sans with slightly rounded terminals, the right register for a tool that sits beside the editor all day. Hierarchy comes from weight and from three sizes, not from many faces or tracking (iced has no letter spacing; all tracking is normal).
 
 ### Hierarchy
-- **Title** (600, 20px, 1.3): page titles ("Settings"); markdown `h1` in task details, plans and notes.
+- **Title** (600, 20px, 1.3): page titles ("Settings").
 - **Heading** (600, 14px, 1.3): a block heading inside a page section or the open task ("Plan", "Priority", "Notes", "Your name"); the room switcher.
-- **Body** (400, 14px, 1.3): task details, inputs, session titles, plan text.
+- **Body** (400, 14px, 1.3): inputs, session titles, everything read as content outside task text.
+- **Reading** (400, 16px, 1.5): task text read in full: proposal, plan and notes as Markdown, and the editors that hold them. Markdown headings `h1` 24, `h2` 20, `h3` 18, the rest 16; paragraphs 12px apart; code 14px monospace, code blocks on the Mint Well with a hairline and 8px radius, long lines scroll sideways instead of wrapping.
 - **Body Medium** (500, 14px, 1.3): task titles on slabs and in the head of the open task, button labels.
 - **Label** (600, 12px, 1.3): group headers, "Sessions", member name tags, the status-bar user name.
 - **Caption Medium** (500, 12px, 1.3): `#n` on slabs, pills, session runtime, segment labels.
 - **Caption** (400, 12px, 1.3, Moss Grey): hints, project names, token counts, tooltips, empty-state hints.
 
-Line height is iced's default relative 1.3 everywhere; no override.
+Line height is iced's default relative 1.3 everywhere except Reading (1.5). The member's **text size** (Settings → You: 100 / 115 / 130 %) scales the whole window, every size and spacing alike.
 
 ### Named Rules
-**The Three Sizes Rule.** 12 for captions, tags and counters; 14 for anything read as content; 20 for titles. Task markdown steps `h2` 17 and `h3` 15 between them; nothing else invents a size.
+**The Three Sizes Rule.** 12 for captions, tags and counters; 14 for UI content; 20 for titles. Task text is the one exception: it is read at 16, with its Markdown headings at 18 / 20 / 24; nothing else invents a size.
 
 **The Weight Does the Work Rule.** Emphasis is a weight step (400, 500, 600, 700), never a size jump, an underline or tracking.
 
 ## Layout
 
-A single narrow column, designed for a 400x780 window (minimum 340x520), pinned beside the editor. The window shows one **page** at a time above a 1px hairline and the 32px **status bar**, which stays on every page; an optional dismissable error strip (8px inset) tops all of it.
+A single narrow column, designed for a 480x780 window (minimum 340x520), pinned beside the editor. The window shows one **page** at a time above a 1px hairline and the 32px **status bar**, which stays on every page; an optional dismissable error strip (8px inset) tops all of it.
 
 **Main page**, top to bottom: the **header bar** (room switcher and project picker left; members, invite, debug and settings controls right; 8px padding), a hairline, the **members row** and a hairline while the members button is open, the **task list** (takes the remaining height), a hairline, the **quick idea bar**, a hairline, the **sessions** panel (its header plus its slabs: it grows with its sessions up to three, then scrolls).
 
 **Pages** replace the main column: a header bar with a ghost back button (`Esc` tooltip) and the title (20px semibold), a hairline, a scrolling body, an optional footer bar (hairline, 8px 12px padding, right-aligned Cancel + primary action). The body is centred, at most 560px wide, 12px inset; its blocks are **sections**, one raised slab each, 16px apart. Every page opens at its top. A task is not a page: it opens in place in the list, and a new task is drafted there (see Slabs).
 
+**Reading page** ("Proposal", "Idea" or "Plan", opened from the ghost expand icon, tooltip "Read in full window", in the head of the open task's Proposal or Plan block): the page frame without footer, its body up to 640px wide, one section with the task's two slab lines, a hairline and the text in Reading type. It has no actions; decisions stay in the open task. Back and `Esc` return to the main page with the task still open and in view; anything that leaves the main page or closes the task closes it.
+
 **Debug page** ("Debug session", opened from the bug button in the header bar; Back and `Esc` return to the main page) is the room's debug session, in sections. Without a session: a muted explanation, an "In omp" section with the command `/schwitzer debug` and a Copy button, and the primary "Start debug session" in the footer. While others run one and you have not joined: who started it as member tags, the "In omp" section, and the primary "Join". Once you are in: People (member tags, a "master" and an "offline" pill where they apply), Your folders (the Out and In paths with Copy buttons and an example command), Sending and Receiving (file names with byte counts, "Nothing yet" when empty), Sent (the master's instructions) or Instructions (a participant's), and "In omp". The footer holds a secondary "Leave" for a participant; for the master a danger "End session", which asks in place like the settings danger actions: "End the debug session for everyone?" with Cancel and "End".
 
-**Settings** is an overview of **nav slabs** grouped by scope, each group under a 12px semibold label inset 4px, groups 12px apart and slabs 4px apart: Room (the selected room, the selected project, all rooms), This machine (omp, projects folders, updates), You (the name in a section and the notification switch as a slab), then About on its own. Each nav slab opens the page of its topic, whose back button (and `Esc`) returns to the overview; the overview's returns to the main page. A danger action (leave or remove a room, delete a project) asks in place: its button becomes the question, Cancel and the danger action; `Esc` cancels.
+**Settings** is an overview of **nav slabs** grouped by scope, each group under a 12px semibold label inset 4px, groups 12px apart and slabs 4px apart: Room (the selected room, the selected project, all rooms), This machine (omp, projects folders, updates), You (the name in a section, the text size as a section with a 100% / 115% / 130% segment row, and the notification switch as a slab), then About on its own. Each nav slab opens the page of its topic, whose back button (and `Esc`) returns to the overview; the overview's returns to the main page. A danger action (leave or remove a room, delete a project) asks in place: its button becomes the question, Cancel and the danger action; `Esc` cancels.
 
 Spacing is a four-step scale: 4 / 8 / 12 / 16 (`sp-1`..`sp-4`). The list well is inset 8px; groups stack 12px apart, slabs inside a group 4px apart. The scrollable embeds its rail beside the slabs (4px), so slabs span the full width and the rail never overlaps them. Controls are 32px tall (text buttons, icon buttons at 16px glyph + 8px padding, group headers, status bar, sessions header).
 
@@ -487,7 +496,7 @@ iced 0.14 exposes no accessibility tree and screen readers cannot read the windo
 - **Do** keep controls at 32px height and slabs at 8px radius, 8px 12px padding, 4px apart.
 - **Do** put a tooltip on every icon-only button and name the shortcut where one exists (`Settings  (Ctrl+,)`, `Back  (Esc)`, `Close  (Esc)`).
 - **Do** make Settings an overview of nav slabs whose topics are pages with a back button; open tasks and drafts in place in the list, one at a time.
-- **Do** write weight, not size, to emphasise: 400 / 500 / 600 / 700 in 12 / 14 / 20.
+- **Do** write weight, not size, to emphasise: 400 / 500 / 600 / 700 in 12 / 14 / 20 (16 for task text).
 
 ### Don't:
 - **Don't** recolour slabs, tint backgrounds or add side stripes to show status; the lamp is the status.
@@ -498,10 +507,10 @@ iced 0.14 exposes no accessibility tree and screen readers cannot read the windo
 - **Don't** nest slabs: rows inside a section stay flat.
 - **Don't** add animation or transitions to the app; it is motionless by design (the product site's demo is the documented exception).
 - **Don't** use pure grey, pure black or a cool grey; the Night well is green-black `#0d1310`, not `#000000`.
-- **Don't** use a second typeface, tracking, or sizes beyond 12 / 14 / 20 (plus plan headings 15 / 17).
+- **Don't** use a second typeface (monospace for code excepted), tracking, or sizes beyond 12 / 14 / 20 (plus task text at 16 with Markdown headings 18 / 24).
 - **Don't** rely on colour alone: a stage needs the lamp form (hollow for Idea and New) and a label; a person needs a named tag.
 - **Don't** assume buttons are keyboard focusable in iced 0.14; every action reachable only by button needs a shortcut or an obvious pointer path.
 
 ### Not canonized (defects the build carries)
-- Layout literals outside the token scale: 6px icon-label gaps and button padding, 2px gaps in session and repo rows, 10px lamp, 1px/2px pill and tag padding, tooltip radius 6px, inline-code radius 4px, plan heading sizes 15 / 17. They are one-offs of the build, kept above for fidelity but not extended to new surfaces.
+- Layout literals outside the token scale: 6px icon-label gaps and button padding, 2px gaps in session and repo rows, 10px lamp, 1px/2px pill and tag padding, tooltip radius 6px, inline-code radius 4px. They are one-offs of the build, kept above for fidelity but not extended to new surfaces.
 - No visible focus indicator on buttons, slabs and the room switcher (a limit of iced 0.14's button status).
