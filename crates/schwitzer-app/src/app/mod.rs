@@ -52,7 +52,7 @@ use crate::omp_plugin::PluginState;
 use crate::sessions::{self, LocalSession};
 use crate::settings::{self, Settings};
 use crate::system_notify;
-use crate::theme::{self, SP_2};
+use crate::theme::{self, SP_1, SP_2};
 use crate::update::{self, UpdateState};
 use crate::wsl;
 
@@ -231,6 +231,9 @@ pub enum Message {
     AddWait(u64),
     RemoveWait(u64),
     Decide(u64, Decision),
+    /// Accept on the open proposal after its slab was laid out closed: the slab's distance from
+    /// the top of the list, `None` when not found. Sends the decision.
+    AcceptPlaced(u64, Option<f32>),
     Unclaim(u64),
     NoteInput(String),
     AddNote,
@@ -329,6 +332,17 @@ enum Expanded {
     Task(u64),
     /// The draft of a new proposal, or of an idea, at the top of its group.
     New { idea: bool },
+}
+
+/// Accept pressed on the open proposal: once the task has left Proposals, the list scrolls
+/// `anchor` to where its slab stood, `dy` below the top of the list.
+struct AcceptReturn {
+    room: RoomId,
+    project: u64,
+    task: u64,
+    anchor: logic::ReturnAnchor,
+    /// `None` until measured, or when the slab was not found.
+    dy: Option<f32>,
 }
 
 /// A short confirmation in the status bar.
@@ -470,6 +484,8 @@ pub struct App {
     plan_folded: bool,
     /// The task whose pick is under way.
     picking: Option<u64>,
+    /// The open proposal accepted last, until the list returned to its place.
+    accept_return: Option<AcceptReturn>,
     /// The text of the quick idea being sent; Enter does nothing while it is under way.
     noting_idea: Option<String>,
     /// Tasks seen approved (Planned → Ready, unclaimed), with the local time, while the
@@ -611,6 +627,7 @@ impl App {
             proposal_folded: false,
             plan_folded: false,
             picking: None,
+            accept_return: None,
             noting_idea: None,
             handoffs: HashMap::new(),
             folder_dialog: false,
@@ -832,6 +849,7 @@ impl App {
             }
             Message::Failed(e) => {
                 self.banner = Some(e);
+                self.accept_return = None;
                 Task::none()
             }
             Message::DismissBanner => {
@@ -1336,7 +1354,20 @@ impl App {
             Message::SetPriority(priority) => self.set_priority(priority),
             Message::AddWait(n) => self.set_waits(|w| w.push(n)),
             Message::RemoveWait(n) => self.set_waits(|w| w.retain(|x| *x != n)),
+            Message::Decide(number, Decision::Accept)
+                if self.expanded == Some(Expanded::Task(number)) =>
+            {
+                self.accept_open(number)
+            }
             Message::Decide(number, decision) => self.decide(number, decision),
+            Message::AcceptPlaced(number, dy) => {
+                if let Some(r) = &mut self.accept_return
+                    && r.task == number
+                {
+                    r.dy = dy;
+                }
+                self.decide(number, Decision::Accept)
+            }
             Message::Unclaim(number) => self.unclaim(number),
             Message::NoteInput(s) => {
                 self.forms.note = s;
@@ -1662,7 +1693,8 @@ impl App {
                 if self.selected.is_none() {
                     self.select(Some(id));
                 }
-                Task::batch(shown_notices.into_iter().chain([self.publish()]))
+                let back = self.return_after_accept(id);
+                Task::batch(shown_notices.into_iter().chain([self.publish(), back]))
             }
             ClientEvent::RoomRemoved(_) => {
                 // A removed room may take the announcement the update followed with it.
@@ -1926,9 +1958,10 @@ struct ListView {
 /// given the list and the element's bounds; `None` leaves the list where it is. Runs after the
 /// next layout, so it finds an element the same update opened.
 fn reveal_by(
-    id: &'static str,
-    offset: fn(&ListView, iced::Rectangle) -> Option<f32>,
+    id: impl Into<String>,
+    offset: impl Fn(&ListView, iced::Rectangle) -> Option<f32> + Clone + Send + 'static,
 ) -> Task<Message> {
+    let id = id.into();
     selector::find(selector::id(list::LIST_ID)).then(move |list| {
         let Some(Target::Scrollable {
             bounds,
@@ -1944,6 +1977,7 @@ fn reveal_by(
             content_bounds,
             translation,
         };
+        let (id, offset) = (id.clone(), offset.clone());
         selector::find(selector::id(id)).then(move |target| {
             let Some(target) = target else {
                 return Task::none();
@@ -1978,6 +2012,36 @@ fn reveal_bottom(id: &'static str) -> Task<Message> {
         }
         Some((el.y + el.height + SP_2 - list.content_bounds.y - list.bounds.height).max(0.0))
     })
+}
+
+/// The distance from the top of the task list to the top of element `id`, after the next
+/// layout; `None` when either is not shown.
+pub(super) fn list_top_of(id: String) -> Task<Option<f32>> {
+    selector::find(selector::id(list::LIST_ID)).then(move |list| {
+        let Some(Target::Scrollable {
+            bounds,
+            translation,
+            ..
+        }) = list
+        else {
+            return Task::done(None);
+        };
+        selector::find(selector::id(id.clone()))
+            .map(move |t| t.map(|t| t.bounds().y - translation.y - bounds.y))
+    })
+}
+
+/// Scrolls the task list so `anchor` stands where the accepted slab stood, `dy` below the
+/// list's top.
+pub(super) fn return_to(anchor: logic::ReturnAnchor, dy: f32) -> Task<Message> {
+    match anchor {
+        logic::ReturnAnchor::Next(id) => reveal_by(id, move |list, el| {
+            Some((el.y - list.content_bounds.y - dy).max(0.0))
+        }),
+        logic::ReturnAnchor::Above(id) => reveal_by(id, move |list, el| {
+            Some((el.y + el.height + SP_1 - list.content_bounds.y - dy).max(0.0))
+        }),
+    }
 }
 
 /// Env var a headless instance answers the folder dialog with (it never opens one).

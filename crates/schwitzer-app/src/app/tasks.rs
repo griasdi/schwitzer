@@ -9,8 +9,10 @@ use schwitzer_proto::{
     Decision, Priority, Request, Response, RoomId, Stage, Task as RoomTask, Work,
 };
 
-use super::{App, Expanded, Message, logic};
+use super::logic::Group;
+use super::{AcceptReturn, App, Expanded, Message, Page, list_top_of, logic, return_to};
 use crate::bridge::{call, fire};
+use crate::theme::SP_2;
 
 /// The agent name a pick claims the build with; the picker's own agent finishes it.
 const PICK_AGENT: &str = "omp";
@@ -337,6 +339,57 @@ impl App {
                 },
             )),
             None => Task::none(),
+        }
+    }
+
+    /// Accept on the open proposal: closes it, measures where its slab stands, then sends the
+    /// decision; once the task has moved, `return_after_accept` puts the list back.
+    pub(super) fn accept_open(&mut self, number: u64) -> Task<Message> {
+        let Some((room, project, anchor)) = self.selected_state().and_then(|state| {
+            let task = state.tasks.iter().find(|t| t.number == number)?;
+            let proposals = logic::tasks_in(state, task.project, Group::Proposals);
+            let anchor = logic::return_anchor(&proposals, number)?;
+            Some((state.id, task.project, anchor))
+        }) else {
+            return self.decide(number, Decision::Accept);
+        };
+        self.accept_return = Some(AcceptReturn {
+            room,
+            project,
+            task: number,
+            anchor,
+            dy: None,
+        });
+        self.expanded = None;
+        self.reset_drafts();
+        list_top_of(format!("task-{number}")).map(move |dy| Message::AcceptPlaced(number, dy))
+    }
+
+    /// Scrolls the list back to where the accepted proposal stood, once room `room` shows it
+    /// out of Proposals and the user still looks at its project's list.
+    pub(super) fn return_after_accept(&mut self, room: RoomId) -> Task<Message> {
+        let Some(r) = self.accept_return.as_ref().filter(|r| r.room == room) else {
+            return Task::none();
+        };
+        let proposed = self.rooms.state(room).is_some_and(|s| {
+            s.tasks
+                .iter()
+                .any(|t| t.number == r.task && t.stage == Stage::Proposed)
+        });
+        if proposed {
+            return Task::none();
+        }
+        let Some(r) = self.accept_return.take() else {
+            return Task::none();
+        };
+        let here = self.selected == Some(room)
+            && self.page == Page::Main
+            && self.expanded.is_none()
+            && self.selected_project().map(|p| p.id) == Some(r.project);
+        if here {
+            return_to(r.anchor, r.dy.unwrap_or(SP_2))
+        } else {
+            Task::none()
         }
     }
 

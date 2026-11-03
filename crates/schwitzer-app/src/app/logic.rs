@@ -211,6 +211,27 @@ pub fn tasks_in(state: &RoomState, project: u64, group: Group) -> Vec<&Task> {
     tasks
 }
 
+/// What the task list scrolls to after the open proposal is accepted, as a widget id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReturnAnchor {
+    /// The proposal after it: its top goes where the accepted slab's top was.
+    Next(String),
+    /// The proposal before it, else the Proposals header: its bottom plus the slab spacing
+    /// goes there.
+    Above(String),
+}
+
+/// The anchor for accepting proposal `number`; `proposals` is the Proposals group in list
+/// order (`tasks_in(.., Group::Proposals)`). `None` when `number` is not among them.
+pub fn return_anchor(proposals: &[&Task], number: u64) -> Option<ReturnAnchor> {
+    let i = proposals.iter().position(|t| t.number == number)?;
+    Some(match proposals.get(i + 1) {
+        Some(next) => ReturnAnchor::Next(format!("task-{}", next.number)),
+        None if i > 0 => ReturnAnchor::Above(format!("task-{}", proposals[i - 1].number)),
+        None => ReturnAnchor::Above(format!("group-{}", Group::Proposals.slug())),
+    })
+}
+
 /// At most this many folders are suggested for one project.
 pub const MAX_SUGGESTIONS: usize = 8;
 /// A name shorter than this (letters and digits) never matches as part of another.
@@ -855,6 +876,29 @@ mod tests {
         ] {
             assert!(!is_web_link(url), "{url}");
         }
+    }
+
+    #[test]
+    fn return_anchor_is_the_proposal_after_else_before_else_the_header() {
+        let (t1, t2, t3) = (
+            task(1, Stage::Proposed, None),
+            task(2, Stage::Proposed, None),
+            task(3, Stage::Proposed, None),
+        );
+        let all = [&t1, &t2, &t3];
+        assert_eq!(
+            return_anchor(&all, 2),
+            Some(ReturnAnchor::Next("task-3".to_owned()))
+        );
+        assert_eq!(
+            return_anchor(&all, 3),
+            Some(ReturnAnchor::Above("task-2".to_owned()))
+        );
+        assert_eq!(
+            return_anchor(&[&t1], 1),
+            Some(ReturnAnchor::Above("group-proposals".to_owned()))
+        );
+        assert_eq!(return_anchor(&[&t1], 9), None);
     }
 
     fn task(number: u64, stage: Stage, claim: Option<Claim>) -> Task {
