@@ -13,8 +13,8 @@ use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabiliti
 use rmcp::{ServerHandler, schemars, tool, tool_handler, tool_router};
 use schwitzer_client::Client;
 use schwitzer_proto::{
-    Claim, DebugSession, Member, MemberId, Priority, Project, Request, Response, RoomId, RoomState,
-    Stage, Task, Work,
+    ApiError, Claim, DebugSession, Member, MemberId, Priority, Project, Request, Response, RoomId,
+    RoomState, Stage, Task, Work,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -123,6 +123,10 @@ struct ProposeArgs {
     /// building, for example `[12]`. With `idea`, they are added to what the idea already waits for.
     #[serde(default)]
     waits_for: Vec<u64>,
+    /// Number of a task in the same room that cannot go on before this proposal is done, usually
+    /// the one you work on: the proposal is added to the tasks it waits for.
+    #[serde(default)]
+    blocks: Option<u64>,
 }
 
 /// Arguments of `add_idea`.
@@ -811,8 +815,21 @@ impl Tools {
         description = "Propose a task to a room, or write up one of its ideas into a proposal (pass `idea`). Any project of a joined room takes proposals, also one the current repo does not belong to: a change another project needs, for example a dependency, is proposed to that project. Room members accept or reject it; you cannot."
     )]
     async fn propose(&self, Parameters(args): Parameters<ProposeArgs>) -> CallToolResult {
-        Self::bounded(self.update_task(args.room, |room| {
-            Ok(match args.idea {
+        Self::bounded(async {
+            let room = self.room(args.room.as_deref())?;
+            // Look the blocked task up first, so a wrong number proposes nothing.
+            let blocked = match args.blocks {
+                Some(b) => Some(
+                    room.loaded()?
+                        .tasks
+                        .iter()
+                        .find(|t| t.number == b)
+                        .cloned()
+                        .ok_or_else(|| ApiError::NoSuchTask.to_string())?,
+                ),
+                None => None,
+            };
+            let request = match args.idea {
                 Some(task) => Request::ProposeIdea {
                     room: room.id,
                     task,
@@ -827,8 +844,30 @@ impl Tools {
                     body: args.body,
                     waits_for: args.waits_for,
                 },
-            })
-        }))
+            };
+            let task = self.task_request(&room, request).await?;
+            let mut json = task_json(&task, room.members(), room.projects(), room.tasks());
+            if let Some(blocked) = blocked {
+                let mut waits_for = blocked.waits_for.clone();
+                waits_for.push(task.number);
+                waits_for.sort_unstable();
+                waits_for.dedup();
+                let request = Request::SetWaits {
+                    room: room.id,
+                    task: blocked.number,
+                    waits_for,
+                };
+                // The proposal exists either way: an error here would make the agent propose
+                // again, so it is reported beside the task.
+                if let Err(e) = self.task_request(&room, request).await {
+                    json["blocks_error"] = json!(format!(
+                        "#{} does not wait for #{}: {e}",
+                        blocked.number, task.number
+                    ));
+                }
+            }
+            pretty(&json)
+        })
         .await
     }
 
