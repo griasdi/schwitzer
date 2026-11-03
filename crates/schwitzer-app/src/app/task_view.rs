@@ -9,7 +9,7 @@ use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task, caps};
 use super::chrome::ProjectChoice;
 use super::icons::{Icon, Tone, icon};
 use super::list;
-use super::logic;
+use super::logic::{self, OmpStart};
 use super::widgets::{
     self, LAMP, chevron, fold_button, heading, hrule, icon_button, icon_text_button, id_button,
     lamp, member_tag_of, muted, segment, text_button,
@@ -38,6 +38,23 @@ pub fn view<'a>(
             Some(Message::CopyText(TaskText::Details)),
             theme::button_ghost,
         ));
+        if let Some(start) = logic::omp_start(state, task, app.client.member(), &app.local_sessions)
+        {
+            let ready = app.omp_command(state.id, task.project, &start).is_some();
+            let tip = if ready {
+                command_tip(&start)
+            } else {
+                "Link a repo to this project to copy an omp command"
+            };
+            icons = icons.push(icon_button(
+                "copy-command",
+                Icon::Terminal,
+                Tone::Muted,
+                tip,
+                ready.then_some(Message::CopyCommand),
+                theme::button_ghost,
+            ));
+        }
     }
     if editable && app.task_draft.is_none() {
         icons = icons.push(icon_button(
@@ -101,6 +118,16 @@ pub fn view<'a>(
     .width(Length::Fill)
     .style(theme::slab_open)
     .into()
+}
+
+/// The tip of the open task's "Copy omp command" icon.
+fn command_tip(start: &OmpStart) -> &'static str {
+    match start {
+        OmpStart::Plan(_) => "Copy omp command: plan this task",
+        OmpStart::Build(_) => "Copy omp command: build this task",
+        OmpStart::WriteUp(_) => "Copy omp command: write up this idea",
+        OmpStart::Resume(_) => "Copy omp command: resume your session",
+    }
 }
 
 /// What the open task, its form and their paddings take beside the details editor.
@@ -398,6 +425,18 @@ fn actions<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Option<Ele
                 text_button(id, label, message, theme::button_secondary)
             }
         });
+        if decision == Decision::Accept
+            && app
+                .omp_command(state.id, task.project, &OmpStart::Plan(task.number))
+                .is_some()
+        {
+            row = row.push(text_button(
+                "accept-copy",
+                "Accept & copy omp command",
+                Some(Message::AcceptAndCopy(task.number)),
+                theme::button_secondary,
+            ));
+        }
     }
     if task.claim.is_some() {
         any = true;

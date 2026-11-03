@@ -53,6 +53,7 @@ icons! {
     Download => "download",
     DoorOpen => "door-open",
     Bug => "bug",
+    Terminal => "square-terminal",
 }
 
 /// How an icon is coloured; resolved against the theme when drawn.

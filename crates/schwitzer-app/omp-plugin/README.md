@@ -7,8 +7,8 @@ The Schwitzer app writes an omp extension into every repository linked to a proj
 |Command|Does|
 |---|---|
 |`/schwitzer`|Menu of the five subcommands|
-|`/schwitzer plan [#n]`|Pick an accepted, unclaimed task (or take task `#n`), claim it for planning, start plan mode|
-|`/schwitzer build [#n]`|Pick an approved (`ready`), unclaimed task (or take task `#n`), claim it for building|
+|`/schwitzer plan [#n [now]]`|Pick an accepted, unclaimed task (or take task `#n`), claim it for planning, start plan mode; with `now` the planning starts without Enter|
+|`/schwitzer build [#n [now]]`|Pick an approved (`ready`), unclaimed task (or take task `#n`), claim it for building; with `now` the build starts without Enter|
 |`/schwitzer build new`|Open a new omp session with `/schwitzer build` in its editor|
 |`/schwitzer propose [#n \| text]`|The agent drafts a proposal (or writes up an open idea, or idea `#n`), asks, then sends it|
 |`/schwitzer idea <text>`|Note an idea in a project right away, without an agent turn|
@@ -20,7 +20,7 @@ The menu of a bare `/schwitzer` shows "plan · plan a task that waits for a plan
 
 For all of them:
 
-- An unknown subcommand is refused with `Schwitzer: unknown subcommand "<sub>". Usage: /schwitzer plan [#n] | build [#n | new] | propose [#n | text] | idea <text> | debug [stop]`. An argument to `plan` or `build` that is no task number (and not `new` for `build`), or to `debug` other than `stop`, is refused with `Schwitzer: unknown argument "<arg>".` and the same usage line.
+- An unknown subcommand is refused with `Schwitzer: unknown subcommand "<sub>". Usage: /schwitzer plan [#n [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop]`. An argument to `plan` or `build` that is no task number, optionally followed by `now` (and not `new` for `build`), or to `debug` other than `stop`, is refused with `Schwitzer: unknown argument "<arg>".` and the same usage line.
 - When `schwitzer.json` lists no project, the plugin says "This repo is not linked to a Schwitzer project."
 - Every subcommand except `idea` needs the agent idle, otherwise: "Wait until the agent is idle, then run /schwitzer again." `idea` works while the agent is busy.
 - Only projects that are in `schwitzer.json` and exist in a room joined by the app (`list_rooms`) count. A configured project of a room the app has left is skipped.
@@ -42,6 +42,8 @@ With a task number (`/schwitzer plan #12`) there is no picker. The plugin looks 
 - Claimed by someone: "Schwitzer: Task #<n> is claimed already."
 
 With tasks of that number in several projects, each reason is prefixed by `<project>: `.
+
+`/schwitzer plan <n> now` claims the task like `/schwitzer plan <n>`, then switches omp into plan mode and sends the prompt of step 5 as a user message right away, saying "Task #<n> is claimed for planning." This is the command the app copies from an accepted task ("Copy omp command") or with "Accept & copy omp command" on a proposal, as `omp --cwd <repo> '/schwitzer plan <n> now'`: omp runs the command at startup. When omp cannot enter plan mode (no TUI, mode control off in its settings, or busy), the plugin falls back to the editor as in step 5.
 
 The review stays open. Refining the plan sends it again, which the server accepts while the task is `planned`: it takes a plan for an `accepted` task only from the member holding the planning claim, for a `planned` task from anyone, and leaves the task `planned` and unclaimed. A human then approves the plan in the app ("Approve" on the task's slab, "Approve & build" in the open task) or asks for a new one ("Replan").
 
@@ -86,7 +88,7 @@ sequenceDiagram
 - `/schwitzer build #<n>` takes task `<n>` like `plan #<n>`. A task in another stage is refused with "Schwitzer: Task #<n> is <stage>; only an approved (ready) task can be built.", one that still waits with "Schwitzer: Task #<n> waits for #<a>, #<b>, not done yet."
 - No session entry is stored, so the plan review hook never sends a build task's plan.
 - The task message tells the agent to implement the approved plan and then call `schwitzer_finish` with room, task and a note on what was done, or `schwitzer_unclaim` with a note on why if it stops without finishing.
-- The editor gets `Build Schwitzer task #<n> "<title>" from project "<project>" in room "<room>". schwitzer-claim: <token>`, and the plugin says "Task #<n> is claimed for building. Press Enter to start."
+- The editor gets `Build Schwitzer task #<n> "<title>" from project "<project>" in room "<room>". schwitzer-claim: <token>`, and the plugin says "Task #<n> is claimed for building. Press Enter to start." With `/schwitzer build <n> now` (copied by the app from an approved task) the plugin sends that prompt right away instead and says "Task #<n> is claimed for building."
 - After a `schwitzer_finish` without error from the main agent (not from a subagent), the plugin waits for the end of that run and, when omp has a UI, offers the first unclaimed approved task of the configured projects in a dialog `Build #<n> "<title>" next?`, with ` from project "<project>"` before `next?` when the repo is linked to more than one project. The choices are:
   - "In a fresh session (recommended)": the editor gets `/schwitzer build new` and the plugin says "Press Enter for a new session with /schwitzer build; a fresh session keeps the context small."
   - "In this session": the task is claimed at once, as by `/schwitzer build` with that task picked. In plan mode the plugin says "Leave plan mode, then run /schwitzer build again." instead.

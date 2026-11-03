@@ -107,6 +107,7 @@ interface Ctx {
     setEditorText(text: string): void;
   };
   isIdle(): boolean;
+  sessionModes?: { set(request: { mode: "plan"; action: "enter" }): Promise<{ ok: boolean }> };
   sessionManager: { getBranch(): SessionEntry[] };
   agent?: { kind: string };
   hasUI: boolean;
@@ -216,7 +217,7 @@ const SUBCOMMANDS = [
   { name: "idea", label: "idea · note an idea for later" },
   { name: "debug", label: "debug · test together: start or join a debug session" },
 ] as const;
-const COMMAND_ARGS = "plan [#n] | build [#n | new] | propose [#n | text] | idea <text> | debug [stop]";
+const COMMAND_ARGS = "plan [#n [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop]";
 const USAGE = `Usage: /schwitzer ${COMMAND_ARGS}`;
 const LEAVE_PLAN_MODE = "Leave plan mode, then run /schwitzer build again.";
 const NOT_JOINED = "The Schwitzer app has not joined a room with a project this repo is linked to.";
@@ -864,8 +865,8 @@ function planMode(ctx: Ctx): boolean {
 }
 
 /** Claims task `number` for `work`, or lets the user pick a free task when there is none; puts
- *  the prompt in the editor. */
-async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, number: number | undefined): Promise<void> {
+ *  the prompt in the editor, or with `now` starts the work at once. */
+async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, number: number | undefined, now: boolean): Promise<void> {
   const planning = planMode(ctx);
   if (work === "build" && planning) {
     ctx.ui.notify(LEAVE_PLAN_MODE, "info");
@@ -885,7 +886,7 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, number: n
       return;
     }
     const numbered = await pickNumbered(ctx, free, title);
-    if (numbered) await claimPicked(pi, ctx, config, numbered, work, planning);
+    if (numbered) await claimPicked(pi, ctx, config, numbered, work, planning, now);
     return;
   }
   const open = await unclaimed(config, STAGE[work]);
@@ -902,11 +903,20 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, number: n
   );
   const picked = await choose(ctx, title, labels, open);
   if (!picked) return;
-  await claimPicked(pi, ctx, config, picked, work, planning);
+  await claimPicked(pi, ctx, config, picked, work, planning, now);
 }
 
-/** Claims `picked` for `work`, sends the task as the next turn's message and puts the prompt in the editor. */
-async function claimPicked(pi: Pi, ctx: Ctx, config: Config, picked: Candidate, work: Work, planning: boolean): Promise<void> {
+/** Claims `picked` for `work`, sends the task as the next turn's message and puts the prompt in
+ *  the editor, or with `now` sends it at once. */
+async function claimPicked(
+  pi: Pi,
+  ctx: Ctx,
+  config: Config,
+  picked: Candidate,
+  work: Work,
+  planning: boolean,
+  now: boolean,
+): Promise<void> {
   const got = await claimFor(config, picked.room, picked.projectName, picked.task.number, work);
   if ("refused" in got) {
     ctx.ui.notify(`Schwitzer: ${got.refused}`, "info");
@@ -929,11 +939,26 @@ async function claimPicked(pi: Pi, ctx: Ctx, config: Config, picked: Candidate, 
   // The marker must sit in a user message: that is where the app's session scanner looks.
   const verb = work === "plan" ? "Plan" : "Build";
   const prompt = `${verb} Schwitzer task #${claim.task} "${claim.title}" from project "${claim.projectName}" in room "${claim.roomName}". schwitzer-claim: ${marker}`;
+  if (now && (await startNow(pi, ctx, work, planning, prompt, claim.task))) return;
   ctx.ui.setEditorText(work === "build" || planning ? prompt : `/plan ${prompt}`);
   ctx.ui.notify(
     `Task #${claim.task} is claimed for ${work === "plan" ? "planning" : "building"}. Press Enter to start.`,
     "info",
   );
+}
+
+/** `now`: starts the claimed work at once (plan mode on for a plan, the prompt sent) instead of
+ *  leaving it in the editor. False when omp cannot enter plan mode here (no TUI, setting off,
+ *  busy); the caller then puts the prompt in the editor. */
+async function startNow(pi: Pi, ctx: Ctx, work: Work, planning: boolean, prompt: string, task: number): Promise<boolean> {
+  if (work === "plan" && !planning) {
+    const entered = await ctx.sessionModes?.set({ mode: "plan", action: "enter" });
+    if (!entered?.ok) return false;
+  }
+  // The marker stays in a user message: sendUserMessage writes one, which the session scanner reads.
+  pi.sendUserMessage(prompt);
+  ctx.ui.notify(`Task #${task} is claimed for ${work === "plan" ? "planning" : "building"}.`, "info");
+  return true;
 }
 
 const NEXT_CHOICES = ["In a fresh session (recommended)", "In this session", "Not now"] as const;
@@ -956,7 +981,7 @@ async function offerNext(pi: Pi, ctx: Ctx): Promise<void> {
         ctx.ui.notify(LEAVE_PLAN_MODE, "info");
         return;
       }
-      await claimPicked(pi, ctx, config, next, "build", false);
+      await claimPicked(pi, ctx, config, next, "build", false, false);
     }
   } catch (e) {
     ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
@@ -1130,7 +1155,7 @@ function writeUpPrompt(c: Candidate): string {
   ].join("\n");
 }
 
-/** `/schwitzer [plan [#n] | build [#n | new] | propose [#n | text] | idea <text> | debug [stop]]`. */
+/** `/schwitzer [plan [#n [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop]]`. */
 async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
   const trimmed = args.trim();
   const cut = trimmed.search(/\s/);
@@ -1140,15 +1165,13 @@ async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
     ctx.ui.notify(`Schwitzer: unknown subcommand "${sub}". ${USAGE}`, "error");
     return;
   }
-  if (
-    (sub === "plan" || sub === "build") &&
-    rest !== "" &&
-    taskNumber(rest) === undefined &&
-    !(sub === "build" && rest === "new")
-  ) {
+  const words = rest === "" ? [] : rest.split(/\s+/);
+  const numbered = words.length >= 1 && words.length <= 2 && taskNumber(words[0]) !== undefined && (words.length === 1 || words[1] === "now");
+  if ((sub === "plan" || sub === "build") && words.length > 0 && !numbered && !(sub === "build" && rest === "new")) {
     ctx.ui.notify(`Schwitzer: unknown argument "${rest}". ${USAGE}`, "error");
     return;
   }
+  const now = words.length === 2;
   if (sub === "debug" && rest !== "" && rest !== "stop") {
     ctx.ui.notify(`Schwitzer: unknown argument "${rest}". ${USAGE}`, "error");
     return;
@@ -1171,7 +1194,7 @@ async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
     sub = picked.name;
   }
   if (sub === "build" && rest === "new") await buildInNewSession(ctx);
-  else if (sub === "plan" || sub === "build") await claimTask(pi, ctx, config, sub, taskNumber(rest));
+  else if (sub === "plan" || sub === "build") await claimTask(pi, ctx, config, sub, taskNumber(words[0] ?? ""), now);
   else if (sub === "idea") await addIdea(ctx, config, rest);
   else if (sub === "debug") await debugCommand(pi, ctx, config, rest === "stop");
   else await proposeTask(pi, ctx, config, rest);

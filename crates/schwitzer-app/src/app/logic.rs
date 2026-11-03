@@ -470,6 +470,86 @@ pub fn pick_prompt(room: &str, task: &Task, token: &ClaimToken) -> String {
     )
 }
 
+/// What a copied omp command starts for a task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OmpStart {
+    /// `/schwitzer plan <n> now`: claims the accepted task for planning, in plan mode.
+    Plan(u64),
+    /// `/schwitzer build <n> now`: claims the approved task and builds it.
+    Build(u64),
+    /// `/schwitzer propose <n>`: writes the idea up into a proposal.
+    WriteUp(u64),
+    /// `omp --resume <id>`: this member's local session that carries the task's claim.
+    Resume(String),
+}
+
+/// What a copied omp command starts for `task`, seen by `me`: the plugin command that fits its
+/// stage, or for a task claimed by `me` the newest local session carrying the claim. `None`
+/// for someone else's claim, a proposal (its command comes with accepting it) and a stage no
+/// agent works on. A session id comes from an omp file and goes into a shell, so one with
+/// other characters than ASCII letters, digits, `-` and `_` is never offered.
+pub fn omp_start(
+    state: &RoomState,
+    task: &Task,
+    me: MemberId,
+    local: &[LocalSession],
+) -> Option<OmpStart> {
+    if let Some(claim) = &task.claim {
+        if claim.member != me {
+            return None;
+        }
+        let shell_safe = |id: &str| {
+            !id.is_empty()
+                && id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        };
+        return local
+            .iter()
+            .filter(|s| s.markers.contains(&claim.token) && shell_safe(&s.id))
+            .max_by_key(|s| s.active_ms)
+            .map(|s| OmpStart::Resume(s.id.clone()));
+    }
+    match task.stage {
+        Stage::Idea => Some(OmpStart::WriteUp(task.number)),
+        Stage::Accepted => Some(OmpStart::Plan(task.number)),
+        Stage::Ready if task.open_waits(&state.tasks).is_empty() => {
+            Some(OmpStart::Build(task.number))
+        }
+        _ => None,
+    }
+}
+
+/// The shell command that starts `start`: `omp --cwd <repo> '<slash command>'`, or
+/// `omp --resume <id>`, which needs no repo. A repo in a WSL distro gets its Linux path and
+/// POSIX quoting, for the distro's shell; on Windows any other repo is double-quoted for cmd
+/// and PowerShell. `None` without a repo, or for a path that is no UTF-8.
+pub fn omp_command(start: &OmpStart, repo: Option<&Path>, windows: bool) -> Option<String> {
+    let slash = match start {
+        OmpStart::Resume(id) => return Some(format!("omp --resume {id}")),
+        OmpStart::Plan(n) => format!("/schwitzer plan {n} now"),
+        OmpStart::Build(n) => format!("/schwitzer build {n} now"),
+        OmpStart::WriteUp(n) => format!("/schwitzer propose {n}"),
+    };
+    let repo = repo?;
+    let (cwd, slash) = if let Some((_, linux)) = wsl::to_linux(repo) {
+        (sh_quote(&linux), sh_quote(&slash))
+    } else {
+        let path = repo.to_str()?;
+        if windows {
+            (format!("\"{path}\""), format!("\"{slash}\""))
+        } else {
+            (sh_quote(path), sh_quote(&slash))
+        }
+    };
+    Some(format!("omp --cwd {cwd} {slash}"))
+}
+
+/// `s` in single quotes for a POSIX shell.
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
 /// The task's title as a level-one heading over its details, the Markdown the copy button of
 /// the open task puts on the clipboard; details start at `##`.
 pub fn details_markdown(title: &str, body: &str) -> String {
@@ -956,6 +1036,78 @@ mod tests {
             tokens: 30,
             markers,
         }
+    }
+
+    #[test]
+    fn omp_start_follows_the_stage_and_the_own_claim() {
+        let me = member(1);
+        let state = room(vec![task(5, Stage::Accepted, None)]);
+        let start = |t: &Task, me, local: &[LocalSession]| omp_start(&state, t, me, local);
+        assert_eq!(
+            start(&task(4, Stage::Idea, None), me, &[]),
+            Some(OmpStart::WriteUp(4))
+        );
+        assert_eq!(
+            start(&task(5, Stage::Accepted, None), me, &[]),
+            Some(OmpStart::Plan(5))
+        );
+        let mut ready = task(6, Stage::Ready, None);
+        assert_eq!(start(&ready, me, &[]), Some(OmpStart::Build(6)));
+        ready.waits_for = vec![5];
+        assert_eq!(start(&ready, me, &[]), None);
+        for stage in [
+            Stage::Proposed,
+            Stage::Planned,
+            Stage::Done,
+            Stage::Rejected,
+        ] {
+            assert_eq!(start(&task(7, stage, None), me, &[]), None);
+        }
+
+        let token = ClaimToken([3; 16]);
+        let claimed = task(8, Stage::Ready, Some(claim(Work::Build, token)));
+        let mut a = local("a", "/x", vec![token]);
+        a.active_ms = 1;
+        let mut b = local("b", "/x", vec![token]);
+        b.active_ms = 2;
+        let other = local("c", "/x", vec![ClaimToken([4; 16])]);
+        let sessions = [a, b, other];
+        assert_eq!(
+            start(&claimed, me, &sessions),
+            Some(OmpStart::Resume("b".to_owned()))
+        );
+        assert_eq!(start(&claimed, member(2), &sessions), None);
+        assert_eq!(start(&claimed, me, &[]), None);
+        assert_eq!(
+            start(&claimed, me, &[local("x;rm", "/x", vec![token])]),
+            None
+        );
+    }
+
+    #[test]
+    fn omp_command_quotes_for_the_shell_it_runs_in() {
+        assert_eq!(
+            omp_command(&OmpStart::Plan(12), Some(Path::new("/tmp/it's")), false).as_deref(),
+            Some(r"omp --cwd '/tmp/it'\''s' '/schwitzer plan 12 now'")
+        );
+        assert_eq!(
+            omp_command(&OmpStart::Build(3), Some(Path::new(r"C:\code\repo")), true).as_deref(),
+            Some(r#"omp --cwd "C:\code\repo" "/schwitzer build 3 now""#)
+        );
+        assert_eq!(
+            omp_command(
+                &OmpStart::WriteUp(7),
+                Some(Path::new(r"\\wsl.localhost\Ubuntu\home\felix\repo")),
+                true
+            )
+            .as_deref(),
+            Some("omp --cwd '/home/felix/repo' '/schwitzer propose 7'")
+        );
+        assert_eq!(
+            omp_command(&OmpStart::Resume("abc-1".to_owned()), None, false).as_deref(),
+            Some("omp --resume abc-1")
+        );
+        assert_eq!(omp_command(&OmpStart::Plan(1), None, false), None);
     }
 
     #[test]

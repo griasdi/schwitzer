@@ -2,6 +2,8 @@
 //! priority, waits, and what each reply does to the forms and drafts. The slabs and the open
 //! task are `list.rs` and `task_view.rs`.
 
+use std::path::PathBuf;
+
 use iced::Task;
 use iced::widget::text_editor;
 use schwitzer_client::ClientError;
@@ -9,7 +11,7 @@ use schwitzer_proto::{
     Decision, Priority, Request, Response, RoomId, Stage, Task as RoomTask, Work,
 };
 
-use super::logic::Group;
+use super::logic::{Group, OmpStart};
 use super::{AcceptReturn, App, Expanded, Message, Page, list_top_of, logic, return_to};
 use crate::bridge::{call, fire};
 use crate::theme::SP_2;
@@ -363,6 +365,55 @@ impl App {
         self.expanded = None;
         self.reset_drafts();
         list_top_of(format!("task-{number}")).map(move |dy| Message::AcceptPlaced(number, dy))
+    }
+
+    /// The omp command that starts `start` for a task of `project` in room `room`, in the first
+    /// repo this member linked to that project; `None` without one (a resume needs none).
+    pub(super) fn omp_command(
+        &self,
+        room: RoomId,
+        project: u64,
+        start: &OmpStart,
+    ) -> Option<String> {
+        let repo = self
+            .settings
+            .project_repos(&room, project)
+            .first()
+            .map(PathBuf::as_path);
+        logic::omp_command(start, repo, cfg!(windows))
+    }
+
+    /// "Copy omp command" on the open task.
+    pub(super) fn copy_command(&mut self) -> Task<Message> {
+        let command = {
+            let Some((state, task)) = self.open() else {
+                return Task::none();
+            };
+            logic::omp_start(state, task, self.client.member(), &self.local_sessions)
+                .and_then(|start| self.omp_command(state.id, task.project, &start))
+        };
+        let Some(command) = command else {
+            return Task::none();
+        };
+        self.notify("omp command copied");
+        iced::clipboard::write(command)
+    }
+
+    /// "Accept & copy omp command" on the open proposal: accepts it like Accept and copies the
+    /// command that plans it.
+    pub(super) fn accept_and_copy(&mut self, number: u64) -> Task<Message> {
+        let command = self.selected_state().and_then(|state| {
+            let task = state
+                .tasks
+                .iter()
+                .find(|t| t.number == number && t.stage == Stage::Proposed)?;
+            self.omp_command(state.id, task.project, &OmpStart::Plan(number))
+        });
+        let Some(command) = command else {
+            return Task::none();
+        };
+        self.notify("Accepted, omp command copied");
+        Task::batch([iced::clipboard::write(command), self.accept_open(number)])
     }
 
     /// Scrolls the list back to where the accepted proposal stood, once room `room` shows it

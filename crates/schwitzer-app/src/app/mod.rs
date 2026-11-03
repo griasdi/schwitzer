@@ -241,6 +241,10 @@ pub enum Message {
     Published(RoomId, Result<(), String>),
     /// Puts a Markdown text of the open task on the clipboard.
     CopyText(TaskText),
+    /// Puts the omp command of the open task on the clipboard.
+    CopyCommand,
+    /// Accepts proposal n and puts the omp command that plans it on the clipboard.
+    AcceptAndCopy(u64),
     /// The five-minute update check; a server's announcement checks too.
     CheckUpdate,
     /// "Check now": asks GitHub for its latest release, whatever the servers announce.
@@ -1310,6 +1314,8 @@ impl App {
                 self.notify(notice);
                 iced::clipboard::write(text)
             }
+            Message::CopyCommand => self.copy_command(),
+            Message::AcceptAndCopy(number) => self.accept_and_copy(number),
             Message::EditTitle(s) => {
                 if let Some(draft) = &mut self.task_draft {
                     draft.title = s;
