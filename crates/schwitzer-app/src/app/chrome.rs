@@ -69,8 +69,8 @@ impl ProjectChoice {
     }
 }
 
-/// The header bar: room and project switchers on the left; members, the fast lane, debug session,
-/// invite and settings on the right.
+/// The header bar: members, room and project switchers on the left; the fast lane, debug
+/// session, invite and settings on the right.
 pub fn header(app: &App) -> Element<'_, Message> {
     let in_room = app.selected_state().is_some();
     let choices: Vec<RoomChoice> = app.room_choices();
@@ -85,8 +85,8 @@ pub fn header(app: &App) -> Element<'_, Message> {
         .id("room-picker")
         .into()
     };
-    let mut bar = row![rooms];
     let mut members = None;
+    let mut project = None;
     if let Some(state) = app.selected_state() {
         let online = state.members.iter().filter(|m| m.online).count();
         let total = state.members.len();
@@ -115,7 +115,7 @@ pub fn header(app: &App) -> Element<'_, Message> {
             .chain([ProjectChoice::New])
             .collect();
         let selected = app.selected_project().map(ProjectChoice::of);
-        bar = bar.push(
+        project = Some(
             container(
                 widgets::picker(choices, selected, |choice| match choice {
                     ProjectChoice::Project { id, .. } => Message::SelectProject(id),
@@ -141,7 +141,11 @@ pub fn header(app: &App) -> Element<'_, Message> {
     } else {
         Tone::Text
     };
-    let mut bar = bar.push(Space::new().width(Length::Fill)).push(members);
+    let mut bar = row![]
+        .push(members)
+        .push(rooms)
+        .push(project)
+        .push(Space::new().width(Length::Fill));
     if let (Some(room), Some(project)) = (app.selected, app.selected_project()) {
         let on = app.settings.fast_lane(&room, project.id);
         let tip = if on {
