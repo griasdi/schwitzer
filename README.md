@@ -43,6 +43,8 @@ Humans decide: accept, reject, approve, replan, reopen, mark planned and mark do
 
 Every change of a task's title and details, and of its plan, is kept as a version (the newest 50 per task). The history icon of the open task shows the versions, each with what changed against the one before; "Restore" puts an old version into the editor, and saving makes it the newest. Agents only suggest a new version: the open task lists pending suggestions, "Review" shows the changes against the current text, and "Apply" or "Discard" decides.
 
+Room members comment on single blocks of a task's details or plan: hovering a paragraph, heading, code block, table or list item shows a comment icon, and the comment then sits under that block, in the open task and on the full-window reading page. When an edit removes or changes the block, the comment moves to "Outdated comments" under the text with the block it quoted. "Resolve" hides a comment until "Show resolved comments"; "Reopen" brings it back. Agents read the open comments with `get_task` and take them up in `/schwitzer revise`; they cannot comment or resolve.
+
 An agent claims one task at a time. Claims never expire; anyone in the room can press "Unclaim" to free a stuck one. The full state machine is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#4-rooms-projects-and-tasks).
 
 ### Agents

@@ -820,6 +820,105 @@ async fn suggestions_are_applied_and_kept_in_the_history() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn comments_reach_every_member_and_are_resolved() {
+    let data = TempDir::new().unwrap();
+    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
+    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
+    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
+    let mut rx_a = a.subscribe();
+
+    let key = a
+        .create_room(server.addr.clone(), "crew".into())
+        .await
+        .unwrap();
+    let room = RoomId::of(&key.token);
+    assert_eq!(b.join_room(key).await.unwrap(), room);
+    let app = project(
+        a.request(
+            room,
+            Request::CreateProject {
+                room,
+                name: "app".into(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let proposal = task(
+        a.request(
+            room,
+            Request::Propose {
+                room,
+                project: app.id,
+                title: "t".into(),
+                body: "a\n\nb".into(),
+                waits_for: vec![],
+            },
+        )
+        .await
+        .unwrap(),
+    );
+
+    b.request(
+        room,
+        Request::Annotate {
+            room,
+            task: proposal.number,
+            part: Part::Details,
+            version: 1,
+            quote: "b".into(),
+            text: "why?".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let state = room_where(&mut rx_a, |s| {
+        s.tasks.iter().any(|t| t.annotations.len() == 1)
+    })
+    .await;
+    let comment = &state.tasks[0].annotations[0];
+    assert_eq!(
+        (comment.quote.as_str(), comment.text.as_str()),
+        ("b", "why?")
+    );
+
+    let resolved = task(
+        a.request(
+            room,
+            Request::ResolveAnnotation {
+                room,
+                task: proposal.number,
+                annotation: comment.id,
+                resolved: true,
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    assert!(resolved.annotations[0].resolved);
+    assert_eq!(
+        api_error(
+            a.request(
+                room,
+                Request::ResolveAnnotation {
+                    room,
+                    task: proposal.number,
+                    annotation: 999,
+                    resolved: true,
+                },
+            )
+            .await
+        ),
+        ApiError::NoSuchAnnotation
+    );
+
+    a.shutdown();
+    b.shutdown();
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_debug_session_relays_logs_and_instructions_while_it_runs() {
     let data = TempDir::new().unwrap();
     let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;

@@ -47,7 +47,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 
 |Crate|Owns|Must not know about|
 |---|---|---|
-|`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `Part`, `Revision`, `Suggestion`, `RoomState`, `DebugSession`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (9), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
+|`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `Part`, `Revision`, `Suggestion`, `Annotation`, `RoomState`, `DebugSession`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (10), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
 |`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `debug.rs`, `limit.rs` (the request budget and the debug log `ByteBudget`), `release.rs`, `update.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
 |`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
 |`schwitzer-release`|what both updaters share: `RELEASES_URL`, `PLATFORM`, `GitHubRelease`, `Asset`/`Download` with the `sha256:` digest parsing, `parse_tag`/`is_stable`, `VERSION`/`version()`/`user_agent(program)` (this build's version: `SCHWITZER_VERSION` at build time, else the workspace version), `is_update` (newer always, older only across stable/dev), `Channel` (`release`/`dev`), `DEV_TAG`, `newest_asset`, `api_get`, `api_get_dev` and `fetch` (bounded HTTPS download, then the size and sha256 check), `extract_tar_gz`/`extract_zip` (Windows), `sibling`, `replace` (Unix swap; Windows swap through `.old`), `clean_leftovers`|iced, SQLite, weida, tokio|
@@ -167,6 +167,7 @@ The client holds one `Requester` per endpoint, so two QUIC connections per serve
 |rooms|`CreateRoom`, `JoinRoom`, `LeaveRoom`|
 |tasks|`Propose`, `AddIdea`, `ProposeIdea`, `EditTask`, `SetPriority`, `MoveTask`, `AddNote`, `SetWaits`|
 |revisions|`SuggestRevision` (an agent's whole new text of the details or the plan, written on a version; changes nothing), `ApplySuggestion`, `DiscardSuggestion` (UI only), `History` and `GetSuggestion` (read only, no event)|
+|comments|`Annotate` (a member's comment on one block of the details or the plan; not once the task is Done or Rejected), `ResolveAnnotation` (resolve or reopen, in every stage); both UI only|
 |decisions|`Decide`|
 |work|`Claim`, `SubmitPlan`, `Finish`, `Unclaim`|
 |projects|`CreateProject`, `RenameProject`, `DeleteProject` (only a project without tasks in any stage; its id is never given again)|
@@ -229,7 +230,7 @@ sequenceDiagram
 - Room and task size (`lib.rs`): a room snapshot (`Event::Room`) stays under `ROOM_BYTES = MAX_EVENT_FRAME − 64 KiB`, a task under `TASK_BYTES = MAX_RPC_BYTES − 16`, so the snapshot and the task reply always fit their frames. Every task mutation (`mutate`) checks both, a project mutation, a first `JoinRoom` and a non-empty `PublishSessions` check the room, inside the transaction, so a refusal rolls back. The 64 KiB headroom covers name changes, which are not checked. Refusals: `the room is full: its tasks, notes, members and sessions must stay under 4 MiB`, `the task is full: with its notes it must stay under 1 MiB`. The server has no delete; a full room still takes edits that shorten bodies or plans.
 - Rooms per member (`rpc.rs`): `MAX_ROOMS_PER_MEMBER = 50` memberships; `CreateRoom` and a first `JoinRoom` above it are refused with `you are in 50 rooms already; leave one to create or join another`. Leaving frees a slot; the left room stays on disk.
 
-**Store** (`store.rs`): SQLite in WAL mode with `synchronous=NORMAL`, one connection behind a mutex, used from `spawn_blocking`. `SCHEMA_VERSION = 4` sits in `PRAGMA user_version`: 0 creates the schema, 1 to 3 migrate in one transaction (`MIGRATE_1` for 1, `MIGRATE_2` for 1 and 2, then `MIGRATE_3`, which makes every task's current text its version 1), any other version is refused.
+**Store** (`store.rs`): SQLite in WAL mode with `synchronous=NORMAL`, one connection behind a mutex, used from `spawn_blocking`. `SCHEMA_VERSION = 5` sits in `PRAGMA user_version`: 0 creates the schema, 1 to 4 migrate in one transaction (`MIGRATE_1` for 1, `MIGRATE_2` for 1 and 2, `MIGRATE_3` for 1 to 3, which makes every task's current text its version 1, then `MIGRATE_4`), any other version is refused.
 
 |Table|Holds|
 |---|---|
@@ -242,8 +243,11 @@ sequenceDiagram
 |`waits`|room, task number, the number of a task it waits for|
 |`versions`|per task and part (`0` details, `1` plan): version number, time, author (`NULL` for the version the migration took over), agent, title, text; `record_version` adds one when `Propose`, `AddIdea`, `ProposeIdea`, `EditTask`, `SubmitPlan` or an applied suggestion changes the text, and keeps the newest 50|
 |`suggestions`|pending agent suggestions: part, the version they were written on, author, agent, note (at most 2 KiB), title, text; at most `caps::SUGGESTIONS = 5` per task|
+|`annotations`|comments on single blocks: part, the version they were written on, the quoted block (its Markdown source, at most 4 KiB), author, time, text (at most 16 KiB), resolved; at most `caps::ANNOTATIONS = 50` open ones per task|
 
 A `Task` carries `details_version`, `plan_version` and its pending `suggestions` without their text; `History` answers the stored versions of one part, newest first, as many as fit one reply, and `GetSuggestion` one suggestion's text. `ApplySuggestion` makes the suggestion the text of its part (not once the task is Done or Rejected; the stage stays; an outdated one too, the app warns), `DiscardSuggestion` drops it in every stage.
+
+A `Task` also carries its `annotations`, resolved ones included. The quote anchors a comment: the app splits the text into blocks with iced's own Markdown parser (`logic::md_blocks`: top-level blocks and the items of top-level lists) and shows a comment under the first block whose source matches its quote, or under "Outdated comments" when none does. The server does not check the quote. `get_task` lists the open ones with an `outdated` flag.
 
 Enums are stored as explicit integers (`stage_to_int`: `Proposed 0`, `Accepted 1`, `Planned 2`, `Ready 3`, `Done 4`, `Rejected 5`, `Idea 6`), never as their postcard encoding.
 
@@ -292,6 +296,7 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |`tasks.rs`|no view: the task actions (`impl App`: propose, note an idea, pick, edit, plan, note, move, priority, waits, decide, unclaim) and what each reply does to the forms and drafts|
 |`revisions_view.rs`|the History page of the open task's details or plan (versions with the diff to the one before, Restore) and the review page of an agent's suggestion (diff against the current text, Apply, Discard)|
 |`revisions.rs`|no view: loading the history and a suggestion, selecting and restoring a version, applying or discarding (`impl App`), and `settle_revisions`, which closes the page when its task or suggestion goes, reloads a history a new version made stale and recomputes a suggestion's diff|
+|`annotations.rs`|no view: comments on blocks of the open task (`impl App`: open the editor under a block, save, resolve, reopen); `reading.rs` draws the blocks with their comments|
 |`projects.rs`|no view: creating and joining a room, creating, renaming and deleting a project, the projects folders and the repos linked to a project (`impl App`)|
 |`widgets.rs`|lamps, pills, buttons and other shared widgets|
 |`sticky.rs`|`Sticky`: the open task's head, pinned to the list's top while its slab is scrolled past|

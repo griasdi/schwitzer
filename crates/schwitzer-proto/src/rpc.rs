@@ -191,6 +191,23 @@ pub enum Request {
         task: u64,
         suggestion: u64,
     },
+    /// A comment on the block `quote` of `part`, written on `version`; not once the task is
+    /// `Done` or `Rejected`.
+    Annotate {
+        room: RoomId,
+        task: u64,
+        part: Part,
+        version: u64,
+        quote: String,
+        text: String,
+    },
+    /// Marks a comment resolved, or open again; in every stage.
+    ResolveAnnotation {
+        room: RoomId,
+        task: u64,
+        annotation: u64,
+        resolved: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,6 +276,8 @@ pub enum ApiError {
     LogBudget(u64),
     #[error("no such suggestion; it was applied or discarded")]
     NoSuchSuggestion,
+    #[error("no such comment")]
+    NoSuchAnnotation,
 }
 
 pub type Reply = Result<Response, ApiError>;

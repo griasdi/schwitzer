@@ -59,6 +59,8 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 resvg = { version = "0.45", default-features = false }
 notify-rust = "4.18"
 similar = "2"
+# The Markdown parser of iced's `markdown` widget, which splits task text into blocks.
+pulldown-cmark = { version = "0.12", default-features = false }
 ico = "0.5"
 icns = "0.5"
 winresource = "0.1"

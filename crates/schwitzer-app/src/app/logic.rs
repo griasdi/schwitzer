@@ -575,6 +575,133 @@ pub fn outdated(task: &Task, s: &Suggestion) -> bool {
     s.version != task.version(s.part)
 }
 
+/// The name of `part` in messages, widget ids and tool rows.
+pub fn part_name(part: Part) -> &'static str {
+    match part {
+        Part::Details => "details",
+        Part::Plan => "plan",
+    }
+}
+
+/// The pulldown-cmark options of iced's Markdown parser (`iced_widget::markdown::parse_with`).
+const MARKDOWN_OPTIONS: pulldown_cmark::Options =
+    pulldown_cmark::Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
+        .union(pulldown_cmark::Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS)
+        .union(pulldown_cmark::Options::ENABLE_TABLES)
+        .union(pulldown_cmark::Options::ENABLE_STRIKETHROUGH)
+        .union(pulldown_cmark::Options::ENABLE_TASKLISTS);
+
+/// Where a block sits in a top-level list.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ListPlace {
+    /// Which top-level list, counted from 0 in the text.
+    pub list: usize,
+    /// The number an ordered list shows for this item: the list's start plus the item's index.
+    pub number: Option<u64>,
+    /// Width of the list's number column in digits, as iced's ordered list computes it.
+    pub digits: f32,
+}
+
+/// A block of Markdown: a top-level block, or an item of a top-level list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MdBlock {
+    /// Byte range of the block's source in the text.
+    pub range: std::ops::Range<usize>,
+    pub list: Option<ListPlace>,
+}
+
+/// The blocks of a Markdown text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MdBlocks {
+    pub blocks: Vec<MdBlock>,
+    /// The text's link reference definitions, one per line, appended when a block is parsed alone.
+    pub references: String,
+}
+
+/// Splits Markdown into the blocks a comment can sit under: top-level blocks (metadata left
+/// out) and the items of top-level lists, with nested lists inside their item.
+pub fn md_blocks(src: &str) -> MdBlocks {
+    use pulldown_cmark::{Event, Tag};
+
+    let parser = pulldown_cmark::Parser::new_ext(src, MARKDOWN_OPTIONS);
+    let mut definitions: Vec<_> = parser
+        .reference_definitions()
+        .iter()
+        .map(|(_, def)| def.span.clone())
+        .collect();
+    definitions.sort_by_key(|span| span.start);
+    let references = definitions
+        .into_iter()
+        .map(|span| src[span].trim_end())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut blocks = Vec::new();
+    let mut depth = 0usize;
+    let mut lists = 0usize;
+    // The start of the top-level list being read and the index of its first block.
+    let mut list: Option<(Option<u64>, usize)> = None;
+    for (event, range) in parser.into_offset_iter() {
+        match event {
+            Event::Start(tag) => {
+                match (depth, &tag) {
+                    (0, Tag::List(start)) => list = Some((*start, blocks.len())),
+                    (0, Tag::MetadataBlock(_)) => {}
+                    (0, _) => blocks.push(MdBlock { range, list: None }),
+                    (1, Tag::Item) if list.is_some() => blocks.push(MdBlock {
+                        range,
+                        list: Some(ListPlace {
+                            list: lists,
+                            number: None,
+                            digits: 0.0,
+                        }),
+                    }),
+                    _ => {}
+                }
+                depth += 1;
+            }
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+                if depth == 0
+                    && let Some((start, first)) = list.take()
+                {
+                    let items = &mut blocks[first..];
+                    let count = items.len() as u64;
+                    let digits = ((start.unwrap_or(0) + count).max(1) as f32).log10().ceil();
+                    for (k, block) in items.iter_mut().enumerate() {
+                        block.list = Some(ListPlace {
+                            list: lists,
+                            number: start.map(|s| s + k as u64),
+                            digits,
+                        });
+                    }
+                    lists += 1;
+                }
+            }
+            Event::Rule if depth == 0 => blocks.push(MdBlock { range, list: None }),
+            _ => {}
+        }
+    }
+    MdBlocks { blocks, references }
+}
+
+/// The quote that anchors a comment on `block`, a block's Markdown source: trimmed and cut to
+/// [`caps::ANNOTATION_QUOTE`] bytes.
+pub fn annotation_quote(block: &str) -> String {
+    caps::cut(block.trim(), caps::ANNOTATION_QUOTE)
+        .trim_end()
+        .to_owned()
+}
+
+/// The quotes of every block of `src`, in order.
+pub fn block_quotes(src: &str) -> Vec<String> {
+    md_blocks(src)
+        .blocks
+        .iter()
+        .map(|b| annotation_quote(&src[b.range.clone()]))
+        .collect()
+}
+
 /// A line of a diff: kept, added, removed, or a gap of unchanged lines left out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffLine {
@@ -888,6 +1015,49 @@ mod tests {
 
     use super::*;
 
+    const BLOCKS_SRC: &str = "# H\n\npara\n\n- a\n  - nested\n- b\n\n1. x\n1. y\n\n```\ncode\n```\n\n[r]: http://e.org\n";
+
+    #[test]
+    fn markdown_splits_into_top_level_blocks_and_list_items() {
+        assert_eq!(
+            block_quotes(BLOCKS_SRC),
+            [
+                "# H",
+                "para",
+                "- a\n  - nested",
+                "- b",
+                "1. x",
+                "1. y",
+                "```\ncode\n```"
+            ]
+        );
+        let blocks = md_blocks(BLOCKS_SRC);
+        let places: Vec<_> = blocks.blocks.iter().map(|b| b.list).collect();
+        assert_eq!(places[..2], [None, None]);
+        for place in &places[2..4] {
+            let place = place.unwrap();
+            assert_eq!((place.list, place.number), (0, None));
+        }
+        for (place, number) in places[4..6].iter().zip([1, 2]) {
+            assert_eq!(
+                *place,
+                Some(ListPlace {
+                    list: 1,
+                    number: Some(number),
+                    digits: 1.0
+                })
+            );
+        }
+        assert_eq!(places[6], None);
+        assert_eq!(blocks.references, "[r]: http://e.org");
+    }
+
+    #[test]
+    fn a_long_block_is_quoted_up_to_the_cap() {
+        let block = "x".repeat(5 * 1024);
+        assert!(annotation_quote(&block).len() <= caps::ANNOTATION_QUOTE);
+    }
+
     #[test]
     fn split_idea_takes_the_first_line_as_title() {
         assert_eq!(split_idea("  \n "), None);
@@ -1071,6 +1241,7 @@ mod tests {
             details_version: 1,
             plan_version: 0,
             suggestions: Vec::new(),
+            annotations: Vec::new(),
         }
     }
 

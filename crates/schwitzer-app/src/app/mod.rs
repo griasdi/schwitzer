@@ -1,5 +1,6 @@
 //! The application: state, messages and `update`. The views live in the submodules.
 
+mod annotations;
 mod chrome;
 mod debug_session;
 mod debug_view;
@@ -246,6 +247,16 @@ pub enum Message {
     DiscardSuggestion(u64),
     SuggestionApplied(Result<Response, String>),
     SuggestionDiscarded(Result<Response, String>),
+    /// Opens the comment editor under block `usize` of the part.
+    Annotate(Part, usize),
+    AnnotationAction(text_editor::Action),
+    CancelAnnotation,
+    SaveAnnotation,
+    AnnotationSaved(Result<Response, String>),
+    /// Marks a comment resolved (`true`) or open again.
+    ResolveAnnotation(u64, bool),
+    AnnotationResolved(Result<Response, String>),
+    ToggleResolved,
     SetPriority(Priority),
     AddWait(u64),
     RemoveWait(u64),
@@ -441,11 +452,55 @@ impl ParsedMarkdown {
     }
 }
 
+/// Markdown split into blocks (`logic::md_blocks`), each parsed on its own so a comment can
+/// sit under it; parsed again only when the text changes.
+#[derive(Debug, Default)]
+struct BlockMarkdown {
+    src: String,
+    blocks: Vec<ParsedBlock>,
+}
+
+/// One block of a [`BlockMarkdown`]: the quote a comment on it carries, its place in a
+/// top-level list and its items.
+#[derive(Debug)]
+struct ParsedBlock {
+    quote: String,
+    list: Option<logic::ListPlace>,
+    content: markdown::Content,
+}
+
+impl BlockMarkdown {
+    fn sync(&mut self, src: &str) {
+        if src == self.src {
+            return;
+        }
+        self.src = src.to_owned();
+        let split = logic::md_blocks(src);
+        self.blocks = split
+            .blocks
+            .iter()
+            .map(|b| {
+                let block = &src[b.range.clone()];
+                let content = if split.references.is_empty() {
+                    markdown::Content::parse(block)
+                } else {
+                    markdown::Content::parse(&format!("{block}\n\n{}", split.references))
+                };
+                ParsedBlock {
+                    quote: logic::annotation_quote(block),
+                    list: b.list,
+                    content,
+                }
+            })
+            .collect();
+    }
+}
+
 /// The open task's details, plan and notes (in note order) as Markdown.
 #[derive(Debug, Default)]
 struct OpenMarkdown {
-    body: ParsedMarkdown,
-    plan: ParsedMarkdown,
+    body: BlockMarkdown,
+    plan: BlockMarkdown,
     notes: Vec<ParsedMarkdown>,
 }
 
@@ -461,6 +516,14 @@ impl OpenMarkdown {
         self.notes.resize_with(notes.len(), ParsedMarkdown::default);
         for (md, note) in self.notes.iter_mut().zip(notes) {
             md.sync(&note.text);
+        }
+    }
+
+    /// The blocks of `part`.
+    fn part(&self, part: Part) -> &BlockMarkdown {
+        match part {
+            Part::Details => &self.body,
+            Part::Plan => &self.plan,
         }
     }
 }
@@ -534,6 +597,10 @@ pub struct App {
     plan_draft: Option<text_editor::Content>,
     /// Details, plan and notes of the open task, parsed as Markdown.
     open_md: OpenMarkdown,
+    /// The comment being written on a block of the open task.
+    annotating: Option<annotations::AnnotationDraft>,
+    /// Whether the open task shows resolved comments.
+    show_resolved: bool,
     banner: Option<String>,
     notice: Option<Notice>,
     local_sessions: Vec<LocalSession>,
@@ -671,6 +738,8 @@ impl App {
             task_draft: None,
             plan_draft: None,
             open_md: OpenMarkdown::default(),
+            annotating: None,
+            show_resolved: false,
             banner: (!notices.is_empty()).then(|| notices.join("\n")),
             notice: None,
             local_sessions: Vec::new(),
@@ -1074,6 +1143,9 @@ impl App {
                 if self.confirm.take().is_some() {
                     return Task::none();
                 }
+                if self.annotating.take().is_some() {
+                    return Task::none();
+                }
                 if self.revisions.take().is_some() {
                     return reveal("open-task");
                 }
@@ -1454,6 +1526,25 @@ impl App {
             }
             Message::SuggestionDiscarded(result) => {
                 self.suggestion_settled(result, "Suggestion discarded")
+            }
+            Message::Annotate(part, index) => self.annotate(part, index),
+            Message::AnnotationAction(action) => self.annotation_action(action),
+            Message::CancelAnnotation => {
+                self.annotating = None;
+                Task::none()
+            }
+            Message::SaveAnnotation => self.save_annotation(),
+            Message::AnnotationSaved(result) => self.annotation_saved(result),
+            Message::ResolveAnnotation(id, resolved) => self.resolve_annotation(id, resolved),
+            Message::AnnotationResolved(result) => {
+                if let Err(e) = result {
+                    self.banner = Some(e);
+                }
+                Task::none()
+            }
+            Message::ToggleResolved => {
+                self.show_resolved = !self.show_resolved;
+                Task::none()
             }
             Message::SetPriority(priority) => self.set_priority(priority),
             Message::AddWait(n) => self.set_waits(|w| w.push(n)),
@@ -1863,6 +1954,8 @@ impl App {
         self.plan_folded = false;
         self.forms.note.clear();
         self.revisions = None;
+        self.annotating = None;
+        self.show_resolved = false;
     }
 
     /// Writes what the window shows for the new process, starts it and exits (for an installed

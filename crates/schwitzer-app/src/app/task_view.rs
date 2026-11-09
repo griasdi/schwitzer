@@ -102,7 +102,7 @@ pub fn view<'a>(
     );
 
     let mut body = column![].spacing(SP_3);
-    if let Some(details) = details(app, task, list_height) {
+    if let Some(details) = details(app, state, task, list_height) {
         body = body.push(details);
     }
     if let Some(s) = suggestions(app, state, task, Part::Details) {
@@ -114,7 +114,7 @@ pub fn view<'a>(
     }
     body = body
         .push(hrule())
-        .push(plan(app, task, editable, list_height));
+        .push(plan(app, state, task, editable, list_height));
     if let Some(s) = suggestions(app, state, task, Part::Plan) {
         body = body.push(s);
     }
@@ -250,7 +250,12 @@ fn fold_head<'a>(
 }
 
 /// The task's proposal under a fold head, or the form that edits its title and details.
-fn details<'a>(app: &'a App, task: &'a Task, list_height: f32) -> Option<Element<'a, Message>> {
+fn details<'a>(
+    app: &'a App,
+    state: &'a RoomState,
+    task: &'a Task,
+    list_height: f32,
+) -> Option<Element<'a, Message>> {
     let line = || {
         row![
             heading(if task.stage == Stage::Idea {
@@ -318,7 +323,7 @@ fn details<'a>(app: &'a App, task: &'a Task, list_height: f32) -> Option<Element
             .into(),
         );
     }
-    if task.body.is_empty() {
+    if task.body.is_empty() && !task.annotations.iter().any(|a| a.part == Part::Details) {
         return None;
     }
     let open = !app.proposal_folded;
@@ -337,7 +342,7 @@ fn details<'a>(app: &'a App, task: &'a Task, list_height: f32) -> Option<Element
     )]
     .spacing(SP_2);
     if open {
-        col = col.push(reading::markdown(app, &app.open_md.body));
+        col = col.push(reading::annotated(app, state, task, Part::Details));
     }
     Some(col.into())
 }
@@ -471,6 +476,7 @@ fn actions<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Option<Ele
 
 fn plan<'a>(
     app: &'a App,
+    state: &'a RoomState,
     task: &'a Task,
     editable: bool,
     list_height: f32,
@@ -538,11 +544,16 @@ fn plan<'a>(
             return col.into();
         }
         return if ready {
-            col.push(reading::markdown(app, &app.open_md.plan))
+            col.push(reading::annotated(app, state, task, Part::Plan))
         } else {
-            col.push(muted(
+            let col = col.push(muted(
                 "No plan yet. Once the task is accepted, an agent claims it and writes one.",
-            ))
+            ));
+            if task.annotations.iter().any(|a| a.part == Part::Plan) {
+                col.push(reading::annotated(app, state, task, Part::Plan))
+            } else {
+                col
+            }
         }
         .into();
     };

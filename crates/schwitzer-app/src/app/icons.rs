@@ -56,6 +56,7 @@ icons! {
     Bug => "bug",
     Terminal => "square-terminal",
     History => "history",
+    CommentAdd => "message-square-plus",
 }
 
 /// How an icon is coloured; resolved against the theme when drawn.

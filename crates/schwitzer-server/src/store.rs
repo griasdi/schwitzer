@@ -12,12 +12,12 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use schwitzer_proto::{
-    ApiError, Claim, ClaimToken, Decision, Member, MemberId, Note, Part, Priority, Project,
-    Revision, RoomId, RoomState, Stage, Suggestion, Task, Work, caps,
+    Annotation, ApiError, Claim, ClaimToken, Decision, Member, MemberId, Note, Part, Priority,
+    Project, Revision, RoomId, RoomState, Stage, Suggestion, Task, Work, caps,
 };
 
 /// Version stored in `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA: &str = "
 CREATE TABLE people(member BLOB PRIMARY KEY, name TEXT NOT NULL);
@@ -46,6 +46,11 @@ CREATE TABLE suggestions(id INTEGER PRIMARY KEY AUTOINCREMENT, room BLOB NOT NUL
     at_ms INTEGER NOT NULL, author BLOB NOT NULL, agent TEXT, note TEXT NOT NULL,
     title TEXT NOT NULL, text TEXT NOT NULL);
 CREATE INDEX suggestions_by_task ON suggestions(room, number);
+CREATE TABLE annotations(id INTEGER PRIMARY KEY AUTOINCREMENT, room BLOB NOT NULL,
+    number INTEGER NOT NULL, part INTEGER NOT NULL, version INTEGER NOT NULL,
+    quote TEXT NOT NULL, at_ms INTEGER NOT NULL, author BLOB NOT NULL, text TEXT NOT NULL,
+    resolved INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX annotations_by_task ON annotations(room, number);
 ";
 
 /// From schema 1 (before projects): every room gets project 1, named like the room, holding
@@ -79,6 +84,15 @@ INSERT INTO versions(room, number, part, version, at_ms, author, agent, title, t
     SELECT room, number, 0, 1, created_ms, NULL, NULL, title, body FROM tasks;
 INSERT INTO versions(room, number, part, version, at_ms, author, agent, title, text)
     SELECT room, number, 1, 1, updated_ms, NULL, NULL, '', plan FROM tasks WHERE plan <> '';
+";
+
+/// From schema 4: comments on single blocks.
+const MIGRATE_4: &str = "
+CREATE TABLE annotations(id INTEGER PRIMARY KEY AUTOINCREMENT, room BLOB NOT NULL,
+    number INTEGER NOT NULL, part INTEGER NOT NULL, version INTEGER NOT NULL,
+    quote TEXT NOT NULL, at_ms INTEGER NOT NULL, author BLOB NOT NULL, text TEXT NOT NULL,
+    resolved INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX annotations_by_task ON annotations(room, number);
 ";
 
 /// Why a store closure failed.
@@ -141,7 +155,7 @@ impl Store {
                 conn.execute_batch(SCHEMA).context("applying schema")?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            1..=3 => {
+            1..=4 => {
                 let tx = conn.transaction()?;
                 if version == 1 {
                     tx.execute_batch(MIGRATE_1)
@@ -151,8 +165,12 @@ impl Store {
                     tx.execute_batch(MIGRATE_2)
                         .context("migrating from schema version 2")?;
                 }
-                tx.execute_batch(MIGRATE_3)
-                    .context("migrating from schema version 3")?;
+                if version <= 3 {
+                    tx.execute_batch(MIGRATE_3)
+                        .context("migrating from schema version 3")?;
+                }
+                tx.execute_batch(MIGRATE_4)
+                    .context("migrating from schema version 4")?;
                 tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
                 tx.commit()?;
                 tracing::info!(
@@ -633,6 +651,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         details_version: 0,
         plan_version: 0,
         suggestions: Vec::new(),
+        annotations: Vec::new(),
     })
 }
 
@@ -658,8 +677,22 @@ fn suggestion_from_row(row: &Row<'_>) -> rusqlite::Result<Suggestion> {
     })
 }
 
-/// Fills in the newest versions and the pending suggestions of `tasks`, all of the room, or
-/// only task `number` when given.
+/// Decodes an annotation row of `id, part, version, quote, at_ms, author, text, resolved`.
+fn annotation_from_row(row: &Row<'_>) -> rusqlite::Result<Annotation> {
+    Ok(Annotation {
+        id: uns(row.get(0)?),
+        part: mapped(1, "part", row.get(1)?, part_from_int)?,
+        version: uns(row.get(2)?),
+        quote: row.get(3)?,
+        at_ms: uns(row.get(4)?),
+        author: blob(row, 5)?,
+        text: row.get(6)?,
+        resolved: row.get(7)?,
+    })
+}
+
+/// Fills in the newest versions, the pending suggestions and the comments of `tasks`, all of
+/// the room, or only task `number` when given.
 fn fill_revisions(
     conn: &Connection,
     room: &RoomId,
@@ -693,11 +726,23 @@ fn fill_revisions(
         let (n, s) = row?;
         suggestions.entry(n).or_default().push(s);
     }
+    let mut stmt = conn.prepare(
+        "SELECT id, part, version, quote, at_ms, author, text, resolved, number FROM annotations
+         WHERE room = ?1 AND (?2 IS NULL OR number = ?2) ORDER BY id",
+    )?;
+    let mut annotations: HashMap<u64, Vec<Annotation>> = HashMap::new();
+    for row in stmt.query_map(params![room.as_bytes().as_slice(), only], |r| {
+        Ok((uns(r.get(8)?), annotation_from_row(r)?))
+    })? {
+        let (n, a) = row?;
+        annotations.entry(n).or_default().push(a);
+    }
     for task in tasks {
         let n = task.number;
         task.details_version = versions.get(&(n, Part::Details)).copied().unwrap_or(0);
         task.plan_version = versions.get(&(n, Part::Plan)).copied().unwrap_or(0);
         task.suggestions = suggestions.remove(&n).unwrap_or_default();
+        task.annotations = annotations.remove(&n).unwrap_or_default();
     }
     Ok(())
 }
@@ -1573,6 +1618,76 @@ pub fn discard_suggestion(
     require_task(conn, room, number)
 }
 
+/// Stores a member's comment on the block `quote` of `part` of an open task, written on
+/// `version`. The quote is not checked against the text: a quote that matches no block shows
+/// as outdated.
+#[allow(clippy::too_many_arguments)]
+pub fn annotate(
+    conn: &Connection,
+    room: &RoomId,
+    author: &MemberId,
+    number: u64,
+    part: Part,
+    version: u64,
+    quote: &str,
+    text: &str,
+    now: u64,
+) -> R<Task> {
+    let task = require_task(conn, room, number)?;
+    require_open(&task)?;
+    if version > task.version(part) {
+        return Err(ApiError::Invalid(format!(
+            "version {version} of the {} does not exist",
+            part_name(part)
+        ))
+        .into());
+    }
+    if task.annotations.iter().filter(|a| !a.resolved).count() >= caps::ANNOTATIONS {
+        return Err(ApiError::Invalid(format!(
+            "the task already has {} open comments; resolve one first",
+            caps::ANNOTATIONS
+        ))
+        .into());
+    }
+    conn.execute(
+        "INSERT INTO annotations(room, number, part, version, quote, at_ms, author, text)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            room.as_bytes().as_slice(),
+            int(number),
+            part_to_int(part),
+            int(version),
+            quote,
+            int(now),
+            author.as_bytes().as_slice(),
+            text
+        ],
+    )?;
+    touch(conn, room, number, now)?;
+    require_task(conn, room, number)
+}
+
+/// Marks a comment resolved, or open again; allowed in every stage.
+pub fn resolve_annotation(
+    conn: &Connection,
+    room: &RoomId,
+    number: u64,
+    id: u64,
+    resolved: bool,
+    now: u64,
+) -> R<Task> {
+    require_task(conn, room, number)?;
+    let changed = conn.execute(
+        "UPDATE annotations SET resolved = ?4 WHERE id = ?1 AND room = ?2 AND number = ?3",
+        params![int(id), room.as_bytes().as_slice(), int(number), resolved],
+    )?;
+    if changed == 0 {
+        return Err(ApiError::NoSuchAnnotation.into());
+    }
+    touch(conn, room, number, now)?;
+    require_task(conn, room, number)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1871,7 +1986,7 @@ mod tests {
 
     #[test]
     fn newer_schema_versions_are_refused() {
-        for version in [5, 99, -1] {
+        for version in [6, 99, -1] {
             let conn = Connection::open_in_memory().unwrap();
             conn.pragma_update(None, "user_version", version).unwrap();
             let err = Store::init(conn).err().expect("refused");
@@ -1950,7 +2065,7 @@ CREATE INDEX notes_by_task ON notes(room, number);
     fn schema_2_gains_the_waits_table() {
         let conn = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
         conn.execute_batch(
-            "DROP TABLE waits; DROP TABLE versions; DROP TABLE suggestions;
+            "DROP TABLE waits; DROP TABLE versions; DROP TABLE suggestions; DROP TABLE annotations;
              PRAGMA user_version = 2;",
         )
         .unwrap();
@@ -2275,8 +2390,11 @@ CREATE INDEX notes_by_task ON notes(room, number);
         let (conn, room, me) = setup();
         let n = task_in(&conn, &room, &me, Stage::Proposed);
         edit_task(&conn, &room, &me, n, "t", "b", "p", NOW).unwrap();
-        conn.execute_batch("DROP TABLE versions; DROP TABLE suggestions; PRAGMA user_version = 3;")
-            .unwrap();
+        conn.execute_batch(
+            "DROP TABLE versions; DROP TABLE suggestions; DROP TABLE annotations;
+             PRAGMA user_version = 3;",
+        )
+        .unwrap();
         let conn = into_conn(Store::init(conn).unwrap());
         let details = history(&conn, &room, n, Part::Details).unwrap();
         assert_eq!(details.len(), 1);
@@ -2295,5 +2413,76 @@ CREATE INDEX notes_by_task ON notes(room, number);
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn annotations_are_added_resolved_and_reopened() {
+        let (conn, room, me) = setup();
+        let n = task_in(&conn, &room, &me, Stage::Proposed);
+        let task = annotate(&conn, &room, &me, n, Part::Details, 1, "b", "why?", NOW).unwrap();
+        assert_eq!(task.annotations.len(), 1);
+        let a = &task.annotations[0];
+        assert_eq!(
+            (a.part, a.version, a.quote.as_str(), a.text.as_str()),
+            (Part::Details, 1, "b", "why?")
+        );
+        assert_eq!((a.author, a.resolved), (me, false));
+        let id = a.id;
+        let task = resolve_annotation(&conn, &room, n, id, true, NOW).unwrap();
+        assert!(task.annotations[0].resolved);
+        let task = resolve_annotation(&conn, &room, n, id, false, NOW).unwrap();
+        assert!(!task.annotations[0].resolved);
+        assert!(matches!(
+            resolve_annotation(&conn, &room, n, id + 99, true, NOW),
+            Err(Fail::Api(ApiError::NoSuchAnnotation))
+        ));
+    }
+
+    #[test]
+    fn annotations_are_checked() {
+        let (conn, room, me) = setup();
+        let n = task_in(&conn, &room, &me, Stage::Proposed);
+        let try_annotate =
+            |version| annotate(&conn, &room, &me, n, Part::Details, version, "b", "c", NOW);
+        assert!(matches!(
+            try_annotate(2),
+            Err(Fail::Api(ApiError::Invalid(_)))
+        ));
+        for _ in 0..caps::ANNOTATIONS {
+            try_annotate(1).unwrap();
+        }
+        assert!(matches!(
+            try_annotate(1),
+            Err(Fail::Api(ApiError::Invalid(_)))
+        ));
+        let id = read_task(&conn, &room, n).unwrap().unwrap().annotations[0].id;
+        resolve_annotation(&conn, &room, n, id, true, NOW).unwrap();
+        try_annotate(1).unwrap();
+
+        decide(&conn, &room, n, Decision::Reject, NOW).unwrap();
+        assert!(matches!(
+            try_annotate(1),
+            Err(Fail::Api(ApiError::WrongStage(Stage::Rejected)))
+        ));
+        // Comments of a closed task can still be resolved and reopened.
+        resolve_annotation(&conn, &room, n, id, false, NOW).unwrap();
+    }
+
+    #[test]
+    fn schema_4_gains_the_annotations_table() {
+        let conn = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
+        conn.execute_batch("DROP TABLE annotations; PRAGMA user_version = 4;")
+            .unwrap();
+        let conn = into_conn(Store::init(conn).unwrap());
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let room = RoomId([7; 32]);
+        let me = member(1);
+        create_room(&conn, &room, "room", &me, NOW).unwrap();
+        create_project(&conn, &room, "app", NOW).unwrap();
+        let n = task_in(&conn, &room, &me, Stage::Proposed);
+        annotate(&conn, &room, &me, n, Part::Details, 1, "b", "c", NOW).unwrap();
     }
 }

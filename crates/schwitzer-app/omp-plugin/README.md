@@ -141,6 +141,7 @@ Starts or joins the debug session of a room: members test a networked app togeth
 - Without arguments, the editor gets `/schwitzer revise ` and the plugin says "Type the task number after /schwitzer revise, optionally details or plan and what to change, then press Enter."
 - The plugin looks the number up like `/schwitzer plan #n`, among the tasks that are not done or rejected; with several, the picker "Revise which task?" shows `#<n> <title> · <project> · <room>`. No task of that number: "No task #<n> in this repo's Schwitzer projects."; one closed task: "Task #<n> is <stage>; only a task that is not done or rejected can be revised."; several, all closed: "Task #<n> is done or rejected in every one of this repo's Schwitzer projects."
 - It sends a user message that asks the agent to read the task with `schwitzer_get_task`, revise the plan (`plan`), the title and details (`details`) or, without either, the plan when there is one, else the title and details; to follow `What to change: <text>` or, without it, to make the text clearer and more concrete from the conversation and the repository; to change nothing in the repository; to show the whole new text and what changed in the chat and ask with the ask tool; and only after agreement to call `schwitzer_suggest_revision` with the version `get_task` showed.
+- The message also says that the task's open annotations (in `get_task`) are comments of room members on single blocks of the details or plan, each quoting its block, `outdated` ones no longer matching the text; the agent addresses those on the part it revises and names in the note which ones the suggestion takes up.
 - The suggestion changes nothing until a room member applies it in the app; they may also discard it.
 
 ## Other projects
@@ -166,7 +167,7 @@ A member can switch on "Task number in commits" per project in the app (Settings
 |---|---|
 |`schwitzer_list_rooms`|The joined rooms with members, projects and task counts|
 |`schwitzer_list_tasks`|The tasks of a room or of one of its projects, optionally of one stage|
-|`schwitzer_get_task`|One task in full: body, plan, claim, notes|
+|`schwitzer_get_task`|One task in full: body, plan, claim, notes and the open annotations (comments of room members on single blocks, each with the quoted block)|
 |`schwitzer_propose`|Propose a task, or write up an idea into a proposal; `waits_for` names tasks that must be done before it is built, `blocks` a task that then waits for it|
 |`schwitzer_add_idea`|Note an idea|
 |`schwitzer_claim`|Claim a task for planning or building|

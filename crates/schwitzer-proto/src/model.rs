@@ -96,6 +96,21 @@ pub struct Suggestion {
     pub at_ms: u64,
 }
 
+/// A room member's comment on one block of a task's details or plan. `quote` is the block's
+/// Markdown source (trimmed, cut to [`caps::ANNOTATION_QUOTE`] bytes), which anchors it;
+/// `version` is the version of `part` it was written on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Annotation {
+    pub id: u64,
+    pub part: Part,
+    pub version: u64,
+    pub quote: String,
+    pub author: MemberId,
+    pub text: String,
+    pub at_ms: u64,
+    pub resolved: bool,
+}
+
 /// A part of a room, for example one product or repository; every task belongs to one.
 /// Ids are per-room numbers starting at 1, like task numbers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,6 +142,8 @@ pub struct Task {
     pub plan_version: u64,
     /// Pending suggestions of agents, oldest first.
     pub suggestions: Vec<Suggestion>,
+    /// Comments on single blocks of the details and plan, oldest first, resolved ones included.
+    pub annotations: Vec<Annotation>,
 }
 
 impl Task {

@@ -450,6 +450,34 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
                 text,
             })
         }
+        Request::Annotate {
+            room,
+            task,
+            part,
+            version,
+            quote,
+            text: comment,
+        } => {
+            let quote = text("quote", &quote, caps::ANNOTATION_QUOTE, true)?;
+            let comment = text("text", &comment, caps::NOTE, true)?;
+            mutate(state, caller, room, move |conn, now| {
+                store::annotate(
+                    conn, &room, &caller, task, part, version, &quote, &comment, now,
+                )
+            })
+            .await
+        }
+        Request::ResolveAnnotation {
+            room,
+            task,
+            annotation,
+            resolved,
+        } => {
+            mutate(state, caller, room, move |conn, now| {
+                store::resolve_annotation(conn, &room, task, annotation, resolved, now)
+            })
+            .await
+        }
     }
 }
 

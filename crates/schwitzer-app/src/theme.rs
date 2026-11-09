@@ -429,6 +429,20 @@ pub fn code_block(theme: &Theme) -> container::Style {
     }
 }
 
+/// A comment under a block of task Markdown: the well's tone, no border.
+pub fn comment(theme: &Theme) -> container::Style {
+    let t = tokens(theme);
+    container::Style {
+        text_color: Some(t.text),
+        background: Some(t.ground.into()),
+        border: Border {
+            radius: RADIUS.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
 /// An added line of a diff: the selection's Leaf tint.
 pub fn diff_added(theme: &Theme) -> container::Style {
     let t = tokens(theme);

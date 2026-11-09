@@ -4142,6 +4142,7 @@ dependencies = [
  "ico",
  "notify-rust",
  "open",
+ "pulldown-cmark",
  "rand 0.9.5",
  "resvg",
  "rfd",
