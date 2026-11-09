@@ -58,7 +58,12 @@ pub fn page<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
     };
     let lane = app.settings.fast_lane_task(&state.id, task.number);
     let body = pages::section(
-        column![list::summary(state, task, None, lane), hrule(), content].spacing(SP_3),
+        column![
+            list::summary(state, task, app.client.member(), None, lane),
+            hrule(),
+            content
+        ]
+        .spacing(SP_3),
     );
     pages::reading_frame(id, title, body)
 }

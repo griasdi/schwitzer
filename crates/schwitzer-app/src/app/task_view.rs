@@ -13,7 +13,7 @@ use super::list;
 use super::logic::{self, OmpStart};
 use super::widgets::{
     self, LAMP, chevron, fold_button, heading, hrule, icon_button, icon_text_button, id_button,
-    lamp, member_tag_of, muted, segment, text_button,
+    lamp, member_tag_of, muted, segment, text_button, with_tip,
 };
 use super::{App, Message, Reading, TaskText, reading, sticky};
 use crate::theme::{
@@ -110,7 +110,13 @@ pub fn view<'a>(
         container(
             // The head's icons leave no room for the session hint: `people` explains it instead.
             row![
-                list::summary(state, task, None, app.settings.fast_lane_task(&state.id, n)),
+                list::summary(
+                    state,
+                    task,
+                    app.client.member(),
+                    None,
+                    app.settings.fast_lane_task(&state.id, n)
+                ),
                 icons
             ]
             .spacing(SP_3)
@@ -428,6 +434,25 @@ fn actions<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Option<Ele
     }
     let mut any = false;
     let pickable = logic::pickable(task);
+    if task.stage == Stage::Idea {
+        any = true;
+        let voted = task.votes.contains(&app.client.member());
+        row = row.push(with_tip(
+            icon_text_button(
+                "vote",
+                Icon::ThumbsUp,
+                if voted { Tone::Ink } else { Tone::Text },
+                if voted { "Upvoted" } else { "Upvote" },
+                Some(Message::Vote(task.number, !voted)),
+                theme::button_secondary,
+            ),
+            if voted {
+                "Take your vote back"
+            } else {
+                "Upvote: ideas with more votes come first"
+            },
+        ));
+    }
     if task.stage == Stage::Idea && app.task_draft.is_none() {
         any = true;
         row = row.push(text_button(

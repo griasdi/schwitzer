@@ -200,14 +200,19 @@ pub fn missing_session(
     })
 }
 
-/// The tasks of `project` in `group`, high priority first, then by number.
+/// The tasks of `project` in `group`: Ideas by votes (most first), then high priority first,
+/// then by number; every other group by priority, then number.
 pub fn tasks_in(state: &RoomState, project: u64, group: Group) -> Vec<&Task> {
     let mut tasks: Vec<&Task> = state
         .tasks
         .iter()
         .filter(|t| t.project == project && Group::of(t) == group)
         .collect();
-    tasks.sort_by_key(|t| (t.priority, t.number));
+    if group == Group::Ideas {
+        tasks.sort_by_key(|t| (std::cmp::Reverse(t.votes.len()), t.priority, t.number));
+    } else {
+        tasks.sort_by_key(|t| (t.priority, t.number));
+    }
     tasks
 }
 
@@ -338,6 +343,16 @@ pub fn member_name(members: &[Member], id: &MemberId) -> String {
         .map(|m| m.name.as_str())
         .filter(|name| !name.is_empty())
         .map_or_else(|| id.short(), str::to_owned)
+}
+
+/// The tooltip of an idea's vote count: "No votes yet", or "Upvoted by alice, bob" in the
+/// order of `votes`.
+pub fn voters_label(members: &[Member], votes: &[MemberId]) -> String {
+    if votes.is_empty() {
+        return "No votes yet".to_owned();
+    }
+    let names: Vec<String> = votes.iter().map(|id| member_name(members, id)).collect();
+    format!("Upvoted by {}", names.join(", "))
 }
 
 /// The room's name, or `Room <short id>` before its server sent it.
@@ -1242,6 +1257,7 @@ mod tests {
             plan_version: 0,
             suggestions: Vec::new(),
             annotations: Vec::new(),
+            votes: Vec::new(),
         }
     }
 
@@ -1462,6 +1478,25 @@ mod tests {
             .map(|t| t.number)
             .collect();
         assert_eq!(numbers, [3, 2, 1]);
+    }
+
+    #[test]
+    fn ideas_sort_by_votes_then_priority_then_number() {
+        let mut none = task(1, Stage::Idea, None);
+        none.priority = Priority::High;
+        let mut two = task(2, Stage::Idea, None);
+        two.votes = vec![member(1), member(2)];
+        let mut one = task(3, Stage::Idea, None);
+        one.votes = vec![member(1)];
+        let mut one_high = task(4, Stage::Idea, None);
+        one_high.votes = vec![member(2)];
+        one_high.priority = Priority::High;
+        let state = room(vec![none, two, one, one_high]);
+        let numbers: Vec<u64> = tasks_in(&state, 1, Group::Ideas)
+            .iter()
+            .map(|t| t.number)
+            .collect();
+        assert_eq!(numbers, [2, 4, 3, 1]);
     }
 
     #[test]

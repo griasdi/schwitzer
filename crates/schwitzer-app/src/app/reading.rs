@@ -261,6 +261,7 @@ pub fn page<'a>(
             list::summary(
                 state,
                 task,
+                app.client.member(),
                 None,
                 app.settings.fast_lane_task(&state.id, task.number)
             ),

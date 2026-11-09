@@ -208,6 +208,13 @@ pub enum Request {
         annotation: u64,
         resolved: bool,
     },
+    /// Upvotes the idea (`up`) or takes the caller's vote back; a repeat changes nothing.
+    /// Only while the task is an `Idea`.
+    Vote {
+        room: RoomId,
+        task: u64,
+        up: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

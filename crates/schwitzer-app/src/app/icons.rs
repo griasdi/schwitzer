@@ -58,6 +58,7 @@ icons! {
     History => "history",
     CommentAdd => "message-square-plus",
     Zap => "zap",
+    ThumbsUp => "thumbs-up",
 }
 
 /// How an icon is coloured; resolved against the theme when drawn.

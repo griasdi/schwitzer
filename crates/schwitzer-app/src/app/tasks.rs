@@ -344,6 +344,13 @@ impl App {
         }
     }
 
+    pub(super) fn vote(&self, number: u64, up: bool) -> Task<Message> {
+        match self.task_ids(number) {
+            Some((room, task)) => fire(self.request(room, Request::Vote { room, task, up })),
+            None => Task::none(),
+        }
+    }
+
     /// Accept on the open proposal: closes it, measures where its slab stands, then sends the
     /// decision; once the task has moved, `return_after_accept` puts the list back.
     pub(super) fn accept_open(&mut self, number: u64) -> Task<Message> {

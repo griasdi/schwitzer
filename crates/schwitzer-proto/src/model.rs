@@ -144,6 +144,9 @@ pub struct Task {
     pub suggestions: Vec<Suggestion>,
     /// Comments on single blocks of the details and plan, oldest first, resolved ones included.
     pub annotations: Vec<Annotation>,
+    /// Members who upvoted the task while it was an idea, ordered by member id; kept, but
+    /// frozen, once it is written up.
+    pub votes: Vec<MemberId>,
 }
 
 impl Task {

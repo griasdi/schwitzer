@@ -265,6 +265,8 @@ pub enum Message {
     AddWait(u64),
     RemoveWait(u64),
     Decide(u64, Decision),
+    /// Upvotes idea n (`true`) or takes the vote back.
+    Vote(u64, bool),
     /// Accept on the open proposal after its slab was laid out closed: the slab's distance from
     /// the top of the list, `None` when not found. Sends the decision.
     AcceptPlaced(u64, Option<f32>),
@@ -1599,6 +1601,7 @@ impl App {
                 self.accept_open(number)
             }
             Message::Decide(number, decision) => self.decide(number, decision),
+            Message::Vote(number, up) => self.vote(number, up),
             Message::AcceptPlaced(number, dy) => {
                 if let Some(r) = &mut self.accept_return
                     && r.task == number

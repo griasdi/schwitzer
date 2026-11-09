@@ -17,7 +17,7 @@ use schwitzer_proto::{
 };
 
 /// Version stored in `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 const SCHEMA: &str = "
 CREATE TABLE people(member BLOB PRIMARY KEY, name TEXT NOT NULL);
@@ -51,6 +51,8 @@ CREATE TABLE annotations(id INTEGER PRIMARY KEY AUTOINCREMENT, room BLOB NOT NUL
     quote TEXT NOT NULL, at_ms INTEGER NOT NULL, author BLOB NOT NULL, text TEXT NOT NULL,
     resolved INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX annotations_by_task ON annotations(room, number);
+CREATE TABLE votes(room BLOB NOT NULL, number INTEGER NOT NULL, member BLOB NOT NULL,
+    PRIMARY KEY(room, number, member));
 ";
 
 /// From schema 1 (before projects): every room gets project 1, named like the room, holding
@@ -93,6 +95,12 @@ CREATE TABLE annotations(id INTEGER PRIMARY KEY AUTOINCREMENT, room BLOB NOT NUL
     quote TEXT NOT NULL, at_ms INTEGER NOT NULL, author BLOB NOT NULL, text TEXT NOT NULL,
     resolved INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX annotations_by_task ON annotations(room, number);
+";
+
+/// From schema 5: votes on ideas.
+const MIGRATE_5: &str = "
+CREATE TABLE votes(room BLOB NOT NULL, number INTEGER NOT NULL, member BLOB NOT NULL,
+    PRIMARY KEY(room, number, member));
 ";
 
 /// Why a store closure failed.
@@ -155,7 +163,7 @@ impl Store {
                 conn.execute_batch(SCHEMA).context("applying schema")?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            1..=4 => {
+            1..=5 => {
                 let tx = conn.transaction()?;
                 if version == 1 {
                     tx.execute_batch(MIGRATE_1)
@@ -169,8 +177,12 @@ impl Store {
                     tx.execute_batch(MIGRATE_3)
                         .context("migrating from schema version 3")?;
                 }
-                tx.execute_batch(MIGRATE_4)
-                    .context("migrating from schema version 4")?;
+                if version <= 4 {
+                    tx.execute_batch(MIGRATE_4)
+                        .context("migrating from schema version 4")?;
+                }
+                tx.execute_batch(MIGRATE_5)
+                    .context("migrating from schema version 5")?;
                 tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
                 tx.commit()?;
                 tracing::info!(
@@ -652,6 +664,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         plan_version: 0,
         suggestions: Vec::new(),
         annotations: Vec::new(),
+        votes: Vec::new(),
     })
 }
 
@@ -691,8 +704,8 @@ fn annotation_from_row(row: &Row<'_>) -> rusqlite::Result<Annotation> {
     })
 }
 
-/// Fills in the newest versions, the pending suggestions and the comments of `tasks`, all of
-/// the room, or only task `number` when given.
+/// Fills in the newest versions, the pending suggestions, the comments and the votes of
+/// `tasks`, all of the room, or only task `number` when given.
 fn fill_revisions(
     conn: &Connection,
     room: &RoomId,
@@ -737,12 +750,24 @@ fn fill_revisions(
         let (n, a) = row?;
         annotations.entry(n).or_default().push(a);
     }
+    let mut stmt = conn.prepare(
+        "SELECT number, member FROM votes
+         WHERE room = ?1 AND (?2 IS NULL OR number = ?2) ORDER BY number, member",
+    )?;
+    let mut votes: HashMap<u64, Vec<MemberId>> = HashMap::new();
+    for row in stmt.query_map(params![room.as_bytes().as_slice(), only], |r| {
+        Ok((uns(r.get(0)?), blob(r, 1)?))
+    })? {
+        let (n, m) = row?;
+        votes.entry(n).or_default().push(m);
+    }
     for task in tasks {
         let n = task.number;
         task.details_version = versions.get(&(n, Part::Details)).copied().unwrap_or(0);
         task.plan_version = versions.get(&(n, Part::Plan)).copied().unwrap_or(0);
         task.suggestions = suggestions.remove(&n).unwrap_or_default();
         task.annotations = annotations.remove(&n).unwrap_or_default();
+        task.votes = votes.remove(&n).unwrap_or_default();
     }
     Ok(())
 }
@@ -780,7 +805,8 @@ pub fn read_task(conn: &Connection, room: &RoomId, number: u64) -> R<Option<Task
     Ok(Some(task))
 }
 
-/// Every task of a room by number, notes, waits, versions and suggestions included.
+/// Every task of a room by number, notes, waits, versions, suggestions, comments and votes
+/// included.
 pub fn read_tasks(conn: &Connection, room: &RoomId) -> R<Vec<Task>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {TASK_COLUMNS} FROM tasks WHERE room = ?1 ORDER BY number"
@@ -1688,6 +1714,38 @@ pub fn resolve_annotation(
     require_task(conn, room, number)
 }
 
+/// Adds `member`'s vote on idea `number` (`up`) or takes it back; a repeat changes nothing.
+pub fn vote(
+    conn: &Connection,
+    room: &RoomId,
+    member: &MemberId,
+    number: u64,
+    up: bool,
+    now: u64,
+) -> R<Task> {
+    let task = require_task(conn, room, number)?;
+    if task.stage != Stage::Idea {
+        return Err(ApiError::WrongStage(task.stage).into());
+    }
+    let sql = if up {
+        "INSERT OR IGNORE INTO votes(room, number, member) VALUES (?1, ?2, ?3)"
+    } else {
+        "DELETE FROM votes WHERE room = ?1 AND number = ?2 AND member = ?3"
+    };
+    let changed = conn.execute(
+        sql,
+        params![
+            room.as_bytes().as_slice(),
+            int(number),
+            member.as_bytes().as_slice()
+        ],
+    )?;
+    if changed > 0 {
+        touch(conn, room, number, now)?;
+    }
+    require_task(conn, room, number)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1986,7 +2044,7 @@ mod tests {
 
     #[test]
     fn newer_schema_versions_are_refused() {
-        for version in [6, 99, -1] {
+        for version in [SCHEMA_VERSION + 1, 99, -1] {
             let conn = Connection::open_in_memory().unwrap();
             conn.pragma_update(None, "user_version", version).unwrap();
             let err = Store::init(conn).err().expect("refused");
@@ -2066,6 +2124,7 @@ CREATE INDEX notes_by_task ON notes(room, number);
         let conn = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
         conn.execute_batch(
             "DROP TABLE waits; DROP TABLE versions; DROP TABLE suggestions; DROP TABLE annotations;
+             DROP TABLE votes;
              PRAGMA user_version = 2;",
         )
         .unwrap();
@@ -2391,7 +2450,7 @@ CREATE INDEX notes_by_task ON notes(room, number);
         let n = task_in(&conn, &room, &me, Stage::Proposed);
         edit_task(&conn, &room, &me, n, "t", "b", "p", NOW).unwrap();
         conn.execute_batch(
-            "DROP TABLE versions; DROP TABLE suggestions; DROP TABLE annotations;
+            "DROP TABLE versions; DROP TABLE suggestions; DROP TABLE annotations; DROP TABLE votes;
              PRAGMA user_version = 3;",
         )
         .unwrap();
@@ -2471,7 +2530,7 @@ CREATE INDEX notes_by_task ON notes(room, number);
     #[test]
     fn schema_4_gains_the_annotations_table() {
         let conn = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
-        conn.execute_batch("DROP TABLE annotations; PRAGMA user_version = 4;")
+        conn.execute_batch("DROP TABLE annotations; DROP TABLE votes; PRAGMA user_version = 4;")
             .unwrap();
         let conn = into_conn(Store::init(conn).unwrap());
         let version: i64 = conn
@@ -2484,5 +2543,59 @@ CREATE INDEX notes_by_task ON notes(room, number);
         create_project(&conn, &room, "app", NOW).unwrap();
         let n = task_in(&conn, &room, &me, Stage::Proposed);
         annotate(&conn, &room, &me, n, Part::Details, 1, "b", "c", NOW).unwrap();
+    }
+
+    #[test]
+    fn schema_5_gains_the_votes_table() {
+        let conn = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
+        conn.execute_batch("DROP TABLE votes; PRAGMA user_version = 5;")
+            .unwrap();
+        let conn = into_conn(Store::init(conn).unwrap());
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let room = RoomId([7; 32]);
+        let me = member(1);
+        create_room(&conn, &room, "room", &me, NOW).unwrap();
+        create_project(&conn, &room, "app", NOW).unwrap();
+        let n = task_in(&conn, &room, &me, Stage::Idea);
+        assert_eq!(
+            vote(&conn, &room, &me, n, true, NOW).unwrap().votes,
+            vec![me]
+        );
+    }
+
+    #[test]
+    fn votes_count_once_per_member_and_only_on_ideas() {
+        let (conn, room, me) = setup();
+        let n = task_in(&conn, &room, &me, Stage::Idea);
+        let other = member(2);
+        add_member(&conn, &room, &other, NOW).unwrap();
+        vote(&conn, &room, &me, n, true, NOW).unwrap();
+        assert_eq!(
+            vote(&conn, &room, &me, n, true, NOW).unwrap().votes,
+            vec![me]
+        );
+        assert_eq!(
+            vote(&conn, &room, &other, n, true, NOW).unwrap().votes,
+            vec![me, other]
+        );
+        vote(&conn, &room, &me, n, false, NOW).unwrap();
+        assert_eq!(
+            vote(&conn, &room, &me, n, false, NOW).unwrap().votes,
+            vec![other]
+        );
+        let proposed = task_in(&conn, &room, &me, Stage::Proposed);
+        assert!(matches!(
+            vote(&conn, &room, &me, proposed, true, NOW),
+            Err(Fail::Api(ApiError::WrongStage(Stage::Proposed)))
+        ));
+        let task = propose_idea(&conn, &room, &me, n, "T", "", &[], NOW).unwrap();
+        assert_eq!(task.votes, vec![other]);
+        assert!(matches!(
+            vote(&conn, &room, &other, n, false, NOW),
+            Err(Fail::Api(ApiError::WrongStage(Stage::Proposed)))
+        ));
     }
 }

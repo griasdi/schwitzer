@@ -4,7 +4,7 @@
 use iced::keyboard::{Key, key::Named};
 use iced::widget::{Space, column, container, responsive, row, scrollable, text, text_editor};
 use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{Decision, Project, RoomState, Stage, Task};
+use schwitzer_proto::{Decision, MemberId, Project, RoomState, Stage, Task};
 
 use super::icons::{Icon, Tone, icon};
 use super::logic::{self, Group, MissingSession};
@@ -157,12 +157,14 @@ fn group_header<'a>(group: Group, count: usize, open: bool) -> Element<'a, Messa
     )
 }
 
-/// The two lines of a slab: lamp and title, then number, stage, priority, the tasks it still
-/// waits for, its suggestions, a zap while it is in this member's fast lane (`fast_lane`),
-/// `hint` (see [`session_hint`]) and the worker's tag.
+/// The two lines of a slab: lamp and title, then number, stage, priority, an idea's votes
+/// (in ink when `me` voted), the tasks it still waits for, its suggestions, a zap while it is
+/// in this member's fast lane (`fast_lane`), `hint` (see [`session_hint`]) and the worker's
+/// tag.
 pub fn summary<'a>(
     state: &'a RoomState,
     task: &'a Task,
+    me: MemberId,
     hint: Option<(&'static str, String)>,
     fast_lane: bool,
 ) -> Element<'a, Message> {
@@ -177,6 +179,30 @@ pub fn summary<'a>(
     .align_y(Alignment::Center);
     if let Some(priority) = priority_pill(task.priority) {
         meta = meta.push(priority);
+    }
+    if task.stage == Stage::Idea {
+        let voted = task.votes.contains(&me);
+        let count = row![
+            icon(
+                Icon::ThumbsUp,
+                12.0,
+                if voted { Tone::Ink } else { Tone::Muted }
+            ),
+            text(task.votes.len().to_string())
+                .size(TS_12)
+                .font(MEDIUM)
+                .style(if voted {
+                    theme::text_ink
+                } else {
+                    theme::text_muted
+                }),
+        ]
+        .spacing(SP_1)
+        .align_y(Alignment::Center);
+        meta = meta.push(with_tip(
+            count,
+            logic::voters_label(&state.members, &task.votes),
+        ));
     }
     let open = task.open_waits(&state.tasks);
     if logic::editable(task) && !open.is_empty() {
@@ -260,6 +286,7 @@ fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
     let mut line = row![summary(
         state,
         task,
+        app.client.member(),
         session_hint(app, state, task),
         app.settings.fast_lane_task(&state.id, n)
     )]

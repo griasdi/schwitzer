@@ -919,6 +919,93 @@ async fn comments_reach_every_member_and_are_resolved() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn votes_reach_every_member() {
+    let data = TempDir::new().unwrap();
+    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
+    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
+    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
+    let mut rx_a = a.subscribe();
+
+    let key = a
+        .create_room(server.addr.clone(), "crew".into())
+        .await
+        .unwrap();
+    let room = RoomId::of(&key.token);
+    assert_eq!(b.join_room(key).await.unwrap(), room);
+    let app = project(
+        a.request(
+            room,
+            Request::CreateProject {
+                room,
+                name: "app".into(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let idea = |title: &str| Request::AddIdea {
+        room,
+        project: app.id,
+        title: title.into(),
+        body: String::new(),
+    };
+    let first = task(a.request(room, idea("A")).await.unwrap()).number;
+    let second = task(a.request(room, idea("B")).await.unwrap()).number;
+    let vote = |up| Request::Vote {
+        room,
+        task: second,
+        up,
+    };
+    a.request(room, vote(true)).await.unwrap();
+    b.request(room, vote(true)).await.unwrap();
+    let votes = |s: &RoomState, n: u64| {
+        s.tasks
+            .iter()
+            .find(|t| t.number == n)
+            .map(|t| t.votes.len())
+    };
+    let state = room_where(&mut rx_a, |s| votes(s, second) == Some(2)).await;
+    assert_eq!(votes(&state, first), Some(0));
+
+    b.request(room, vote(false)).await.unwrap();
+    room_where(&mut rx_a, |s| votes(s, second) == Some(1)).await;
+
+    let proposal = task(
+        a.request(
+            room,
+            Request::Propose {
+                room,
+                project: app.id,
+                title: "p".into(),
+                body: String::new(),
+                waits_for: vec![],
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(
+        api_error(
+            a.request(
+                room,
+                Request::Vote {
+                    room,
+                    task: proposal.number,
+                    up: true,
+                },
+            )
+            .await
+        ),
+        ApiError::WrongStage(Stage::Proposed)
+    );
+
+    a.shutdown();
+    b.shutdown();
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_debug_session_relays_logs_and_instructions_while_it_runs() {
     let data = TempDir::new().unwrap();
     let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;

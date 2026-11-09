@@ -675,6 +675,7 @@ fn task_row(task: &Task, members: &[Member], projects: &[Project], tasks: &[Task
         "project": project_name(projects, task.project),
         "stage": stage_of(task).name(),
         "priority": priority_name(task.priority),
+        "votes": task.votes.len(),
         "claim": task.claim.as_ref().map(|c| claim_json(c, members)),
         "waits_for": task.open_waits(tasks),
     })
@@ -1056,7 +1057,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "List the tasks of a room, or of one of its projects: number, title, project, stage, priority, who claims it and the tasks it still waits for (`waits_for`: not done yet, so it cannot be built before). Stages: idea (a rough sketch, not proposed yet), proposed, accepted, planned, ready (approved, nobody builds it yet), in_progress, done, rejected."
+        description = "List the tasks of a room, or of one of its projects: number, title, project, stage, priority, votes (how many members upvoted it as an idea; ideas with more votes are wanted more), who claims it and the tasks it still waits for (`waits_for`: not done yet, so it cannot be built before). Stages: idea (a rough sketch, not proposed yet), proposed, accepted, planned, ready (approved, nobody builds it yet), in_progress, done, rejected."
     )]
     async fn list_tasks(&self, Parameters(args): Parameters<ListTasksArgs>) -> CallToolResult {
         Self::bounded(async {
@@ -1623,6 +1624,7 @@ mod tests {
             plan_version: 0,
             suggestions: Vec::new(),
             annotations: Vec::new(),
+            votes: Vec::new(),
         }
     }
 

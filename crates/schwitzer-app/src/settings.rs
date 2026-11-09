@@ -834,6 +834,7 @@ mod tests {
             plan_version: 0,
             suggestions: Vec::new(),
             annotations: Vec::new(),
+            votes: Vec::new(),
         };
         let mut settings = Settings {
             fast_lane_tasks: BTreeSet::from([(a, 1), (a, 2), (a, 3), (a, 9), (b, 1)]),

@@ -478,6 +478,12 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             })
             .await
         }
+        Request::Vote { room, task, up } => {
+            mutate(state, caller, room, move |conn, now| {
+                store::vote(conn, &room, &caller, task, up, now)
+            })
+            .await
+        }
     }
 }
 
