@@ -49,7 +49,7 @@ An agent claims one task at a time. Claims never expire; anyone in the room can 
 
 omp agents work through the omp plugin the app installs into linked repositories:
 
-- `/schwitzer plan [#n [now]]`: pick an accepted, unclaimed task (or take task `#n`), claim it for planning, start plan mode; `now` starts it without Enter.
+- `/schwitzer plan [#n… [now]]`: pick an accepted, unclaimed task (or take task `#n`), claim it for planning, start plan mode; `now` starts it without Enter. Several numbers (`/sw plan #1 #2 #4`), or several tasks checked in the picker, open one omp session per task in a new tab of herdr, tmux, zellij or Orca, each planning its task.
 - `/schwitzer build [#n [now]]`: pick an approved (`ready`), unclaimed task (or take task `#n`), claim it for building; `now` starts it without Enter.
 - `/schwitzer build new`: open a fresh session with `/schwitzer build` in its editor.
 - `/schwitzer propose [#n | text]`: the agent drafts a proposal (or writes up an open idea, or idea `#n`), asks, then sends it.

@@ -7,7 +7,7 @@ The Schwitzer app writes an omp extension into every repository linked to a proj
 |Command|Does|
 |---|---|
 |`/schwitzer`|Menu of the five subcommands|
-|`/schwitzer plan [#n [now]]`|Pick an accepted, unclaimed task (or take task `#n`), claim it for planning, start plan mode; with `now` the planning starts without Enter|
+|`/schwitzer plan [#n… [now]]`|Pick accepted, unclaimed tasks (or take task `#n`), claim one for planning, start plan mode; with `now` the planning starts without Enter; several tasks each get their own omp session in a new tab|
 |`/schwitzer build [#n [now]]`|Pick an approved (`ready`), unclaimed task (or take task `#n`), claim it for building; with `now` the build starts without Enter|
 |`/schwitzer build new`|Open a new omp session with `/schwitzer build` in its editor|
 |`/schwitzer propose [#n \| text]`|The agent drafts a proposal (or writes up an open idea, or idea `#n`), asks, then sends it|
@@ -21,7 +21,7 @@ The menu of a bare `/schwitzer` shows "plan · plan a task that waits for a plan
 
 For all of them:
 
-- An unknown subcommand is refused with `Schwitzer: unknown subcommand "<sub>". Usage: /schwitzer plan [#n [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what to change]`. An argument to `plan` or `build` that is no task number, optionally followed by `now` (and not `new` for `build`), to `debug` other than `stop`, or to `revise` that does not start with a task number, is refused with `Schwitzer: unknown argument "<arg>".` and the same usage line.
+- An unknown subcommand is refused with `Schwitzer: unknown subcommand "<sub>". Usage: /schwitzer plan [#n… [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what to change]`. An argument to `plan` that is not one or more task numbers, or to `build` that is not one task number, each optionally followed by `now` (and not `new` for `build`), to `debug` other than `stop`, or to `revise` that does not start with a task number, is refused with `Schwitzer: unknown argument "<arg>".` and the same usage line.
 - When `schwitzer.json` lists no project, the plugin says "This repo is not linked to a Schwitzer project."
 - Every subcommand except `idea` needs the agent idle, otherwise: "Wait until the agent is idle, then run /schwitzer again." `idea` works while the agent is busy.
 - Only projects that are in `schwitzer.json` and exist in a room joined by the app (`list_rooms`) count. A configured project of a room the app has left is skipped.
@@ -45,6 +45,14 @@ With a task number (`/schwitzer plan #12`) there is no picker. The plugin looks 
 With tasks of that number in several projects, each reason is prefixed by `<project>: `.
 
 `/schwitzer plan <n> now` claims the task like `/schwitzer plan <n>`, then switches omp into plan mode and sends the prompt of step 5 as a user message right away, saying "Task #<n> is claimed for planning." This is the command the app copies from an accepted task ("Copy omp command") or with "Accept & copy omp command" on a proposal, as `omp --cwd <repo> '/schwitzer plan <n> now'`: omp runs the command at startup. When omp cannot enter plan mode (no TUI, mode control off in its settings, or busy), the plugin falls back to the editor as in step 5.
+
+#### Several tasks at once
+
+`/schwitzer plan #1 #2 #4` (duplicates dropped) plans every task in its own omp session: the plugin opens a new tab per task through omp's `openTerminal` (a herdr or zellij tab named `plan #<n>`, a tmux window, an Orca tab) in this repo, running `omp '/schwitzer plan <n> now'`, so each session claims its task, plans it, waits for the room's decision and builds after approval. The current session claims nothing. Before that it looks every number up as above; a number with no task, or with none that waits for a plan, is skipped with its reason in one `Schwitzer: …` notice, and a number free in several rooms is left to the new session's picker. Then it says "Planning #<a>, #<b> in new <tabs|windows>: each session claims its task and plans it. Approve the plans in Schwitzer." A tab that could not be opened is reported as "Schwitzer: could not open a session for #<n>: <reason>".
+
+Without a number and with at least two free tasks, the picker is a checkbox list ("Plan which tasks? Check several to plan each in its own omp session."): one checked task is claimed in this session as in steps 3 to 6, several each get their own session as above. That list needs omp's ask dialog and a multiplexer; otherwise the single-choice picker of step 2 stays.
+
+Opening sessions needs an omp TUI inside herdr, tmux, zellij or Orca (detected from `HERDR_*`, `TMUX`, `ZELLIJ`, `ORCA_PANE_KEY` with `ORCA_WORKTREE_ID`) and `omp` on `PATH`. Elsewhere `/schwitzer plan #1 #2` says "Schwitzer: planning several tasks at once opens an omp session per task in a new tab and needs omp inside herdr, tmux, zellij or Orca. Run /schwitzer plan #<n> in separate sessions instead." and claims nothing. Once approved, the sessions build in the same checkout at the same time.
 
 The review stays open. Refining the plan sends it again, which the server accepts while the task is `planned`: it takes a plan for an `accepted` task only from the member holding the planning claim, for a `planned` task from anyone, and leaves the task `planned` and unclaimed. A human then approves the plan in the app ("Approve" on the task's slab, "Approve & build" in the open task) or asks for a new one ("Replan").
 

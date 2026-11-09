@@ -100,11 +100,34 @@ interface SessionEntry {
   data?: unknown;
   content?: unknown;
 }
+interface AskQuestion {
+  id: string;
+  question: string;
+  options: { label: string }[];
+  multi?: boolean;
+}
+type AskResult = { kind: "submit"; results: { id: string; selectedOptions: string[] }[] } | { kind: "chat" };
+type Multiplexer = "herdr" | "tmux" | "zellij" | "orca";
+/** omp's terminal launch request for a new tab or window (`subprocess/terminal-launch`); each
+ *  multiplexer rejects a field its `capabilities` do not list. */
+interface TerminalRequest {
+  multiplexer: Multiplexer;
+  placement: "window";
+  command: string[];
+  cwd: string;
+  label?: string;
+  name?: string;
+  shellGrammar?: "posix";
+}
 interface Ctx {
   ui: {
     select(title: string, options: string[]): Promise<string | number | undefined>;
     notify(text: string, level: "info" | "error"): void;
     setEditorText(text: string): void;
+    /** Absent in older omp and outside the TUI. */
+    askDialog?(questions: AskQuestion[]): Promise<AskResult | undefined>;
+    /** Absent in older omp and outside the TUI. */
+    openTerminal?(request: TerminalRequest): Promise<{ warning?: string }>;
   };
   isIdle(): boolean;
   sessionModes?: { set(request: { mode: "plan"; action: "enter" }): Promise<{ ok: boolean }> };
@@ -219,7 +242,7 @@ const SUBCOMMANDS = [
   { name: "revise", label: "revise · let the agent suggest a better version of a task" },
 ] as const;
 const COMMAND_ARGS =
-  "plan [#n [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what to change]";
+  "plan [#n… [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what to change]";
 const USAGE = `Usage: /schwitzer ${COMMAND_ARGS}`;
 const LEAVE_PLAN_MODE = "Leave plan mode, then run /schwitzer build again.";
 const NOT_JOINED = "The Schwitzer app has not joined a room with a project this repo is linked to.";
@@ -893,16 +916,19 @@ function planMode(ctx: Ctx): boolean {
   return lastEntry(ctx, (e) => e.type === "mode_change")?.mode === "plan";
 }
 
-/** Claims task `number` for `work`, or lets the user pick a free task when there is none; puts
- *  the prompt in the editor, or with `now` starts the work at once. */
-async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, number: number | undefined, now: boolean): Promise<void> {
+/** Claims the task numbered in `numbers` for `work`, or lets the user pick free tasks when there
+ *  is none; puts the prompt in the editor, or with `now` starts the work at once. Several tasks to
+ *  plan each get their own omp session in a new tab (`openPlanSessions`). */
+async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, numbers: number[], now: boolean): Promise<void> {
   const planning = planMode(ctx);
   if (work === "build" && planning) {
     ctx.ui.notify(LEAVE_PLAN_MODE, "info");
     return;
   }
   const title = work === "plan" ? "Plan a Schwitzer task" : "Build a Schwitzer task";
-  if (number !== undefined) {
+  if (numbers.length >= 2) return planNumbered(ctx, config, numbers);
+  if (numbers.length === 1) {
+    const number = numbers[0];
     const found = await tasksNumbered(config, number);
     if (found.length === 0) {
       ctx.ui.notify(noTaskNumbered(number), "info");
@@ -910,8 +936,7 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, number: n
     }
     const free = found.filter((c) => notClaimable(c.task, work) === undefined);
     if (free.length === 0) {
-      const why = found.map((c) => (found.length > 1 ? `${c.projectName}: ` : "") + notClaimable(c.task, work));
-      ctx.ui.notify(`Schwitzer: ${why.join(" ")}`, "info");
+      ctx.ui.notify(`Schwitzer: ${whyNotFree(found, work)}`, "info");
       return;
     }
     const numbered = await pickNumbered(ctx, free, title);
@@ -930,9 +955,49 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, number: n
       (task.priority === "normal" ? "" : ` · ${task.priority}`) +
       (several ? ` · ${projectName}` : ""),
   );
+  if (work === "plan" && open.length >= 2 && ctx.ui.askDialog && canOpenSessions(ctx)) {
+    const answer = await ctx.ui.askDialog([
+      {
+        id: "tasks",
+        question: "Plan which tasks? Check several to plan each in its own omp session.",
+        options: labels.map((label) => ({ label })),
+        multi: true,
+      },
+    ]);
+    if (answer?.kind !== "submit") return;
+    // A free-text answer matches no label and is dropped.
+    const picked = (answer.results[0]?.selectedOptions ?? [])
+      .map((label) => labels.indexOf(label))
+      .filter((i) => i >= 0)
+      .map((i) => open[i]);
+    if (picked.length === 1) await claimPicked(pi, ctx, config, picked[0], "plan", planning, now);
+    else if (picked.length >= 2) await openPlanSessions(ctx, picked.map((c) => c.task.number));
+    return;
+  }
   const picked = await choose(ctx, title, labels, open);
   if (!picked) return;
   await claimPicked(pi, ctx, config, picked, work, planning, now);
+}
+
+/** Why none of `found` (the tasks of one number) can be claimed for `work`. */
+function whyNotFree(found: Candidate[], work: Work): string {
+  return found.map((c) => (found.length > 1 ? `${c.projectName}: ` : "") + notClaimable(c.task, work)).join(" ");
+}
+
+/** `/schwitzer plan #a #b …`: opens a planning session for every number with a task that waits
+ *  for a plan and says why the others cannot be planned. A number free in several rooms is
+ *  resolved by the new session's own picker. */
+async function planNumbered(ctx: Ctx, config: Config, numbers: number[]): Promise<void> {
+  const reasons: string[] = [];
+  const launch: number[] = [];
+  for (const n of numbers) {
+    const found = await tasksNumbered(config, n);
+    if (found.length === 0) reasons.push(noTaskNumbered(n));
+    else if (found.every((c) => notClaimable(c.task, "plan") !== undefined)) reasons.push(whyNotFree(found, "plan"));
+    else launch.push(n);
+  }
+  if (reasons.length > 0) ctx.ui.notify(`Schwitzer: ${reasons.join(" ")}`, "info");
+  if (launch.length > 0) await openPlanSessions(ctx, launch);
 }
 
 /** Claims `picked` for `work`, sends the task as the next turn's message and puts the prompt in
@@ -988,6 +1053,68 @@ async function startNow(pi: Pi, ctx: Ctx, work: Work, planning: boolean, prompt:
   pi.sendUserMessage(prompt);
   ctx.ui.notify(`Task #${task} is claimed for ${work === "plan" ? "planning" : "building"}.`, "info");
   return true;
+}
+
+/** The terminal multiplexer omp runs in, detected the way omp does (`pi-tui`'s
+ *  `terminal-multiplexer`); undefined outside one that omp can open a tab in. */
+function multiplexer(): Multiplexer | undefined {
+  const env = process.env;
+  if (env.HERDR_ENV === "1" || env.HERDR_PANE_ID || env.HERDR_TAB_ID || env.HERDR_WORKSPACE_ID) return "herdr";
+  if (env.TMUX) return "tmux";
+  if (env.ZELLIJ) return "zellij";
+  if (env.ORCA_PANE_KEY?.trim() && env.ORCA_WORKTREE_ID?.trim()) return "orca";
+  return undefined;
+}
+
+const TAB_WORD: Record<Multiplexer, string> = { herdr: "tabs", tmux: "windows", zellij: "tabs", orca: "tabs" };
+
+/** The request for a new tab that runs `/schwitzer plan <task> now` in a new omp session. Only
+ *  the fields the multiplexer's window placement accepts; the rest are omp's defaults. */
+function planRequest(mux: Multiplexer, omp: string, cwd: string, task: number): TerminalRequest {
+  const request: TerminalRequest = { multiplexer: mux, placement: "window", command: [omp, `/schwitzer plan ${task} now`], cwd };
+  const name = `plan #${task}`;
+  if (mux === "herdr") request.label = name;
+  else if (mux === "zellij") request.name = name;
+  else if (mux === "orca") Object.assign(request, { name, shellGrammar: "posix" });
+  return request;
+}
+
+/** Whether omp can open a new tab here: a TUI with `openTerminal` inside a known multiplexer. */
+function canOpenSessions(ctx: Ctx): boolean {
+  return ctx.hasUI && ctx.ui.openTerminal !== undefined && multiplexer() !== undefined;
+}
+
+/** Opens one omp session per task in a new tab, each running `/schwitzer plan <n> now`: it claims
+ *  its task, plans it and waits for the room's decision. This session claims nothing. */
+async function openPlanSessions(ctx: Ctx, numbers: number[]): Promise<void> {
+  const mux = multiplexer();
+  if (!canOpenSessions(ctx) || mux === undefined) {
+    ctx.ui.notify(
+      "Schwitzer: planning several tasks at once opens an omp session per task in a new tab and needs omp inside herdr, tmux, zellij or Orca. Run /schwitzer plan #<n> in separate sessions instead.",
+      "info",
+    );
+    return;
+  }
+  const omp = Bun.which("omp");
+  if (omp === null) {
+    ctx.ui.notify("Schwitzer: omp is not on PATH, so no session can be opened for the tasks.", "error");
+    return;
+  }
+  const opened: number[] = [];
+  for (const n of numbers) {
+    try {
+      const result = await ctx.ui.openTerminal!(planRequest(mux, omp, ctx.cwd, n));
+      if (result.warning) ctx.ui.notify(`Schwitzer: the session for #${n} opened, but ${result.warning}`, "info");
+      opened.push(n);
+    } catch (e) {
+      ctx.ui.notify(`Schwitzer: could not open a session for #${n}: ${e instanceof Error ? e.message : String(e)}`, "error");
+    }
+  }
+  if (opened.length === 0) return;
+  ctx.ui.notify(
+    `Planning ${opened.map((n) => `#${n}`).join(", ")} in new ${TAB_WORD[mux]}: each session claims its task and plans it. Approve the plans in Schwitzer.`,
+    "info",
+  );
 }
 
 const NEXT_CHOICES = ["In a fresh session (recommended)", "In this session", "Not now"] as const;
@@ -1238,7 +1365,7 @@ function revisePrompt(c: Candidate, part: "details" | "plan" | undefined, wish: 
     .join("\n");
 }
 
-/** `/schwitzer [plan [#n [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what]]`. */
+/** `/schwitzer [plan [#n… [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what]]`. */
 async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
   const trimmed = args.trim();
   const cut = trimmed.search(/\s/);
@@ -1249,12 +1376,16 @@ async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
     return;
   }
   const words = rest === "" ? [] : rest.split(/\s+/);
-  const numbered = words.length >= 1 && words.length <= 2 && taskNumber(words[0]) !== undefined && (words.length === 1 || words[1] === "now");
+  const now = words.length > 0 && words[words.length - 1] === "now";
+  const numberWords = now ? words.slice(0, -1) : words;
+  const parsed = numberWords.map(taskNumber);
+  const numbered =
+    numberWords.length >= 1 && parsed.every((n) => n !== undefined) && (sub === "plan" || numberWords.length === 1);
   if ((sub === "plan" || sub === "build") && words.length > 0 && !numbered && !(sub === "build" && rest === "new")) {
     ctx.ui.notify(`Schwitzer: unknown argument "${rest}". ${USAGE}`, "error");
     return;
   }
-  const now = words.length === 2;
+  const numbers = numbered ? [...new Set(parsed as number[])] : [];
   if (sub === "debug" && rest !== "" && rest !== "stop") {
     ctx.ui.notify(`Schwitzer: unknown argument "${rest}". ${USAGE}`, "error");
     return;
@@ -1277,7 +1408,7 @@ async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
     sub = picked.name;
   }
   if (sub === "build" && rest === "new") await buildInNewSession(ctx);
-  else if (sub === "plan" || sub === "build") await claimTask(pi, ctx, config, sub, taskNumber(words[0] ?? ""), now);
+  else if (sub === "plan" || sub === "build") await claimTask(pi, ctx, config, sub, numbers, now);
   else if (sub === "idea") await addIdea(ctx, config, rest);
   else if (sub === "debug") await debugCommand(pi, ctx, config, rest === "stop");
   else if (sub === "revise") await reviseTask(pi, ctx, config, rest);
