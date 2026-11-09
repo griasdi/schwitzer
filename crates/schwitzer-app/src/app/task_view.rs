@@ -20,9 +20,9 @@ use crate::theme::{
     self, Lamp, MEDIUM, READ_LINE_HEIGHT, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, TS_16,
 };
 
-/// Task `task` open in place: the slab's two lines as a head that closes it again, then
-/// the proposal, people, decisions, plan, priority, project, waits and notes; proposal and
-/// plan fold.
+/// Task `task` open in place: the slab's two lines and the decisions the task allows now as a
+/// head that pins while scrolled past (a press on the lines closes it again), then the
+/// proposal, people, plan, priority, project, waits and notes; proposal and plan fold.
 pub fn view<'a>(
     app: &'a App,
     state: &'a RoomState,
@@ -128,20 +128,24 @@ pub fn view<'a>(
         Length::Fill,
     );
 
+    let actions = actions(app, state, task);
+    // The pinned head grows by the action row: the editors leave room for it.
+    let room = if actions.is_some() {
+        list_height - ACTIONS_HEIGHT
+    } else {
+        list_height
+    };
     let mut body = column![].spacing(SP_3);
-    if let Some(details) = details(app, state, task, list_height) {
+    if let Some(details) = details(app, state, task, room) {
         body = body.push(details);
     }
     if let Some(s) = suggestions(app, state, task, Part::Details) {
         body = body.push(s);
     }
-    body = body.push(people(app, state, task));
-    if let Some(actions) = actions(app, state, task) {
-        body = body.push(actions);
-    }
     body = body
+        .push(people(app, state, task))
         .push(hrule())
-        .push(plan(app, state, task, editable, list_height));
+        .push(plan(app, state, task, editable, room));
     if let Some(s) = suggestions(app, state, task, Part::Plan) {
         body = body.push(s);
     }
@@ -153,8 +157,19 @@ pub fn view<'a>(
         body = body.push(waits(state, task)).push(hrule());
     }
     body = body.push(notes(app, state, task));
+    // The action row sits outside the head button, so a press between its buttons does not
+    // close the task; it lines up with the summary's title past the lamp.
+    let mut top = column![head];
+    if let Some(actions) = actions {
+        top = top.push(container(actions).padding(Padding {
+            top: 0.0,
+            right: SP_3,
+            bottom: SP_2,
+            left: SP_3 + LAMP + SP_2,
+        }));
+    }
     container(sticky::sticky(
-        column![head, hrule()],
+        top.push(hrule()),
         container(body).padding(SP_3),
         theme::pinned_head,
     ))
@@ -180,6 +195,8 @@ const DETAILS_RESERVE: f32 = 200.0;
 const DRAFT_RESERVE: f32 = 170.0;
 /// What the pinned head, the Plan heading, buttons and paddings take beside the plan editor.
 const PLAN_RESERVE: f32 = 200.0;
+/// What the action row adds to the open task's head: a 32 px button row and its bottom padding.
+const ACTIONS_HEIGHT: f32 = 32.0 + SP_2;
 
 /// The tallest an editor may grow in a list `list_height` tall: what `reserve` leaves, never
 /// below `min`.
