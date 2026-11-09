@@ -56,8 +56,10 @@ pub fn page<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
         }
         None => ("history-page", "History", Space::new().into()),
     };
-    let body =
-        pages::section(column![list::summary(state, task, None), hrule(), content].spacing(SP_3));
+    let lane = app.settings.fast_lane_task(&state.id, task.number);
+    let body = pages::section(
+        column![list::summary(state, task, None, lane), hrule(), content].spacing(SP_3),
+    );
     pages::reading_frame(id, title, body)
 }
 

@@ -58,6 +58,24 @@ pub fn view<'a>(
                 theme::button_ghost,
             ));
         }
+        if editable {
+            let on = app.settings.fast_lane_task(&state.id, n);
+            let tip = if on {
+                "In the fast lane: omp accepts, plans and builds it; only the plan waits for \
+                 your approval. Press to take it out"
+            } else {
+                "Put into the fast lane: omp accepts, plans and builds it; only the plan waits \
+                 for your approval"
+            };
+            icons = icons.push(icon_button(
+                "fast-lane-task",
+                Icon::Zap,
+                if on { Tone::Ink } else { Tone::Muted },
+                tip,
+                Some(Message::FastLaneTask(n)),
+                theme::button_ghost_open(on),
+            ));
+        }
     }
     if editable && app.task_draft.is_none() {
         icons = icons.push(icon_button(
@@ -91,9 +109,12 @@ pub fn view<'a>(
         format!("task-{n}"),
         container(
             // The head's icons leave no room for the session hint: `people` explains it instead.
-            row![list::summary(state, task, None), icons]
-                .spacing(SP_3)
-                .align_y(Alignment::Center),
+            row![
+                list::summary(state, task, None, app.settings.fast_lane_task(&state.id, n)),
+                icons
+            ]
+            .spacing(SP_3)
+            .align_y(Alignment::Center),
         )
         .padding([SP_2, SP_3]),
         Some(Message::ToggleTask(n)),

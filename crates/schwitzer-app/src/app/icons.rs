@@ -57,6 +57,7 @@ icons! {
     Terminal => "square-terminal",
     History => "history",
     CommentAdd => "message-square-plus",
+    Zap => "zap",
 }
 
 /// How an icon is coloured; resolved against the theme when drawn.

@@ -258,7 +258,12 @@ pub fn page<'a>(
     };
     let body = pages::section(
         column![
-            list::summary(state, task, None),
+            list::summary(
+                state,
+                task,
+                None,
+                app.settings.fast_lane_task(&state.id, task.number)
+            ),
             hrule(),
             annotated(app, state, task, part)
         ]

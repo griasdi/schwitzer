@@ -58,6 +58,8 @@ omp agents work through the omp plugin the app installs into linked repositories
 - `/schwitzer idea <text>`: note an idea in a project right away, without an agent turn.
 - `/schwitzer debug [stop]`: start or join the room's debug session, or leave it (see below).
 - `/schwitzer revise #n [details|plan] [what to change]`: the agent rewrites the details or the plan of task `#n`, asks, then sends it as a suggestion that a human applies or discards.
+- `/schwitzer decide [#n]`: accept, approve, apply a suggestion or make another decision on a task in the fast lane, without an agent turn.
+- `/schwitzer fast [#n | text]`: put a task into the fast lane, or let the agent propose one that goes there: it is accepted and planned at once, and only the plan's approval waits for you.
 
 `/sw` is short for `/schwitzer` and takes the same subcommands.
 
@@ -70,6 +72,8 @@ Linking a repo does not install the plugin: press "Install" on the project page.
 The plugin talks to the running app at `http://127.0.0.1:<mcp_port>/mcp` (default port 13339) and authenticates with the token in `<data dir>/mcp-token`. That endpoint accepts loopback connections only and refuses browser requests. When the app is not running, tool calls fail with "not reachable at <url>; is the app running?".
 
 "Task number in commits" (project page, "Your agents") makes omp hold back a `git commit` during a build claim until the message carries `Schwitzer-Task: #<number>`.
+
+Approving a plan in omp's own plan review approves it in Schwitzer too, and that session builds it. The **fast lane** lets you make the other decisions from omp as well: turn it on for a project with the zap button in the header (or "Fast lane" on the project page), or for one task with the zap in the open task or `/schwitzer fast`. A task in the fast lane shows a small zap on its slab; it is accepted and planned without a stop, and only its plan waits for your approval. The fast lane is yours alone and lives in `settings.toml`.
 
 Details in [the plugin's README](crates/schwitzer-app/omp-plugin/README.md).
 
@@ -174,6 +178,8 @@ The data directory is:
 |`repos`|table of path lists|empty|linked repos per project, keyed `"<room id hex>/<project id>"`|
 |`chosen_projects`|table|empty|the project last picked per room|
 |`commit_trailers`|list|empty|projects (keyed like `repos`) with "Task number in commits" on|
+|`fast_lane`|list|empty|projects (keyed like `repos`) whose fast lane is on|
+|`fast_lane_tasks`|list|empty|tasks (`<room id hex>/<task number>`) in the fast lane; dropped once done or rejected|
 |`projects_dirs`|list of paths|filled on first start|folders searched for repos to suggest|
 |`wsl_distros`|list|empty|WSL distros whose folders were added to `projects_dirs` once|
 |`auto_update_plugins`|bool|`true`|rewrite out-of-date omp plugins automatically|

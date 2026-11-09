@@ -1,24 +1,31 @@
 //! The MCP tools and what they answer: the arguments, the JSON rows, how a call finds its room,
 //! and the bound that keeps a stuck server from hanging the agent.
 //!
-//! There is deliberately no tool to accept, reject, approve, replan or reopen a task, nor to
-//! apply or discard a suggestion: those decisions stay with humans in the UI.
+//! Agents get no tool to accept, reject, approve, replan or reopen a task, nor to apply or
+//! discard a suggestion. Those decisions are human actions: the tools `decisions`, `decide`,
+//! `get_suggestion`, `settle_suggestion` and `set_fast_lane` start "For the omp plugin, not for
+//! agents." and serve only the plugin's dialogs (plan review approval, `/schwitzer decide`,
+//! the fast lane); the plugin never hands them to its agent. Approving a plan is always
+//! allowed there; every other decision needs the fast lane of the task or of its project.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use futures::SinkExt;
+use futures::channel::mpsc;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
 use rmcp::{ServerHandler, schemars, tool, tool_handler, tool_router};
 use schwitzer_client::Client;
 use schwitzer_proto::{
-    ApiError, Claim, DebugSession, Member, MemberId, Part, Priority, Project, Request, Response,
-    RoomId, RoomState, Stage, Task, Work,
+    ApiError, Claim, DebugSession, Decision, Member, MemberId, Part, Priority, Project, Request,
+    Response, RoomId, RoomState, Stage, Task, Work,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use super::{FastLane, McpEvent};
 use crate::app::logic;
 use crate::debug;
 use crate::sessions;
@@ -42,6 +49,33 @@ impl From<WorkArg> for Work {
         match work {
             WorkArg::Plan => Work::Plan,
             WorkArg::Build => Work::Build,
+        }
+    }
+}
+
+/// A decision a human makes from omp.
+#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum DecisionArg {
+    Accept,
+    Reject,
+    Approve,
+    Replan,
+    Reopen,
+    MarkPlanned,
+    MarkDone,
+}
+
+impl From<DecisionArg> for Decision {
+    fn from(decision: DecisionArg) -> Self {
+        match decision {
+            DecisionArg::Accept => Decision::Accept,
+            DecisionArg::Reject => Decision::Reject,
+            DecisionArg::Approve => Decision::Approve,
+            DecisionArg::Replan => Decision::Replan,
+            DecisionArg::Reopen => Decision::Reopen,
+            DecisionArg::MarkPlanned => Decision::MarkPlanned,
+            DecisionArg::MarkDone => Decision::MarkDone,
         }
     }
 }
@@ -267,6 +301,68 @@ struct DebugInstructArgs {
     to: Option<Vec<String>>,
 }
 
+/// Arguments of `decisions`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct DecisionsArgs {
+    /// Room name or id prefix; omitted, every joined room (unlike the other tools, which need
+    /// it when several rooms are joined).
+    #[serde(default)]
+    room: Option<String>,
+    /// Only this task number, whatever waits for a decision on it.
+    #[serde(default)]
+    task: Option<u64>,
+}
+
+/// Arguments of `decide`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct DecideArgs {
+    /// Room name or id prefix; may be omitted when exactly one room is joined.
+    #[serde(default)]
+    room: Option<String>,
+    /// Task number.
+    task: u64,
+    /// The decision.
+    decision: DecisionArg,
+}
+
+/// Arguments of `get_suggestion`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SuggestionArgs {
+    /// Room name or id prefix; may be omitted when exactly one room is joined.
+    #[serde(default)]
+    room: Option<String>,
+    /// Task number.
+    task: u64,
+    /// The suggestion's id, as get_task lists it.
+    suggestion: u64,
+}
+
+/// Arguments of `settle_suggestion`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SettleSuggestionArgs {
+    /// Room name or id prefix; may be omitted when exactly one room is joined.
+    #[serde(default)]
+    room: Option<String>,
+    /// Task number.
+    task: u64,
+    /// The suggestion's id, as get_task lists it.
+    suggestion: u64,
+    /// `true` applies the suggestion, `false` discards it.
+    apply: bool,
+}
+
+/// Arguments of `set_fast_lane`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SetFastLaneArgs {
+    /// Room name or id prefix; may be omitted when exactly one room is joined.
+    #[serde(default)]
+    room: Option<String>,
+    /// Task number.
+    task: u64,
+    /// `true` puts the task into the fast lane, `false` takes it out.
+    on: bool,
+}
+
 /// A joined room as far as the client knows it.
 #[derive(Debug, Clone)]
 struct RoomRef {
@@ -464,6 +560,103 @@ fn work_name(work: Work) -> &'static str {
     }
 }
 
+/// The name of `decision` in tool rows and arguments.
+fn decision_name(decision: Decision) -> &'static str {
+    match decision {
+        Decision::Accept => "accept",
+        Decision::Reject => "reject",
+        Decision::Approve => "approve",
+        Decision::Replan => "replan",
+        Decision::Reopen => "reopen",
+        Decision::MarkPlanned => "mark_planned",
+        Decision::MarkDone => "mark_done",
+    }
+}
+
+/// Whether `task` of `room` is in the fast lane, by itself or through its project.
+fn in_fast_lane(lanes: &FastLane, room: &RoomId, task: &Task) -> bool {
+    lanes.task(room, task.number) || lanes.project(room, task.project)
+}
+
+/// Whether omp may make `decision` on task `number` of `room` (`task` when the client knows
+/// it): approving a plan always, everything else only in the fast lane.
+fn decision_allowed(
+    lanes: &FastLane,
+    room: &RoomId,
+    number: u64,
+    task: Option<&Task>,
+    decision: Decision,
+) -> bool {
+    decision == Decision::Approve
+        || lanes.task(room, number)
+        || task.is_some_and(|t| lanes.project(room, t.project))
+}
+
+/// The refusal of a decision outside the fast lane.
+fn lane_closed(number: u64, room: &RoomRef, task: Option<&Task>) -> String {
+    let project = task.map_or_else(
+        || "unknown".to_owned(),
+        |t| project_name(room.projects(), t.project),
+    );
+    format!(
+        "The fast lane is off for task #{number} and its project \"{project}\". Turn it on in \
+         Schwitzer (the zap button in the header, or the open task), or decide there."
+    )
+}
+
+/// The rows of `decisions` for `room`: its tasks in the fast lane, ordered by number. With
+/// `task`, only that one whatever its stage; without, only those that wait for a human: a
+/// proposal, a plan to approve, or a suggestion to apply.
+fn decision_rows(room: &RoomRef, lanes: &FastLane, task: Option<u64>) -> Vec<Value> {
+    let Some(state) = &room.state else {
+        return Vec::new();
+    };
+    let mut tasks: Vec<&Task> = state
+        .tasks
+        .iter()
+        .filter(|t| in_fast_lane(lanes, &room.id, t))
+        .filter(|t| match task {
+            Some(n) => t.number == n,
+            None => {
+                t.stage == Stage::Proposed
+                    || logic::approvable(t)
+                    || (logic::editable(t) && !t.suggestions.is_empty())
+            }
+        })
+        .collect();
+    tasks.sort_by_key(|t| t.number);
+    tasks
+        .into_iter()
+        .map(|t| {
+            json!({
+                "room": room.id.short(),
+                "room_name": state.name,
+                "project": project_name(&state.projects, t.project),
+                "number": t.number,
+                "title": t.title,
+                "stage": stage_of(t).name(),
+                "has_plan": t.has_plan(),
+                "fast_lane_task": lanes.task(&room.id, t.number),
+                "decisions": logic::legal_decisions(t)
+                    .into_iter()
+                    .map(decision_name)
+                    .collect::<Vec<_>>(),
+                "suggestions": t
+                    .suggestions
+                    .iter()
+                    .map(|s| json!({
+                        "id": s.id,
+                        "part": logic::part_name(s.part),
+                        "author": logic::member_name(&state.members, &s.author),
+                        "agent": s.agent,
+                        "note": s.note,
+                    }))
+                    .collect::<Vec<_>>(),
+            })
+        })
+        .collect()
+}
+
 /// A claim without its token: the token belongs to the claiming agent alone.
 fn claim_json(claim: &Claim, members: &[Member]) -> Value {
     json!({
@@ -549,8 +742,8 @@ fn task_json(task: &Task, members: &[Member], projects: &[Project], tasks: &[Tas
     full
 }
 
-/// A room as one row of `list_rooms`.
-fn room_row(room: &RoomRef, me: MemberId) -> Value {
+/// A room as one row of `list_rooms`; each project says whether this member's fast lane is on.
+fn room_row(room: &RoomRef, me: MemberId, lanes: &FastLane) -> Value {
     let Some(state) = &room.state else {
         return json!({
             "room": room.id.short(),
@@ -570,7 +763,7 @@ fn room_row(room: &RoomRef, me: MemberId) -> Value {
         "projects": state
             .projects
             .iter()
-            .map(|p| json!({"id": p.id, "name": p.name}))
+            .map(|p| json!({"id": p.id, "name": p.name, "fast_lane": lanes.project(&room.id, p.id)}))
             .collect::<Vec<_>>(),
         "counts": {
             "ideas": count(StageArg::Idea),
@@ -750,14 +943,25 @@ pub struct Tools {
     client: Client,
     /// Where the debug folders live.
     data_dir: PathBuf,
+    /// This member's fast lanes, shared with the app.
+    fast_lane: FastLane,
+    /// Tells the app of a task the plugin put into the fast lane.
+    events: mpsc::Sender<McpEvent>,
     tool_router: ToolRouter<Tools>,
 }
 
 impl Tools {
-    pub fn new(client: Client, data_dir: PathBuf) -> Self {
+    pub fn new(
+        client: Client,
+        data_dir: PathBuf,
+        fast_lane: FastLane,
+        events: mpsc::Sender<McpEvent>,
+    ) -> Self {
         Self {
             client,
             data_dir,
+            fast_lane,
+            events,
             tool_router: Self::tool_router(),
         }
     }
@@ -836,12 +1040,16 @@ impl Tools {
 #[tool_router]
 impl Tools {
     #[tool(
-        description = "List the rooms of this user: id, name, whether connected, member names, its projects (id and name) and how many tasks are ideas, proposed, in planning (accepted or planned), ready to build and in progress."
+        description = "List the rooms of this user: id, name, whether connected, member names, its projects (id, name and whether this member's fast lane is on) and how many tasks are ideas, proposed, in planning (accepted or planned), ready to build and in progress."
     )]
     async fn list_rooms(&self) -> CallToolResult {
         Self::bounded(async {
             let me = self.client.member();
-            let rows: Vec<Value> = self.joined().iter().map(|r| room_row(r, me)).collect();
+            let rows: Vec<Value> = self
+                .joined()
+                .iter()
+                .map(|r| room_row(r, me, &self.fast_lane))
+                .collect();
             pretty(&Value::Array(rows))
         })
         .await
@@ -1194,6 +1402,154 @@ impl Tools {
         })
         .await
     }
+
+    #[tool(
+        description = "For the omp plugin, not for agents. The tasks this member can decide on from omp: those in the fast lane, by themselves or through their project. Without `task`, only those that wait for a human (a proposal, a plan to approve, a suggestion); each row lists the legal decisions and the pending suggestions."
+    )]
+    async fn decisions(&self, Parameters(args): Parameters<DecisionsArgs>) -> CallToolResult {
+        Self::bounded(async {
+            let rooms = match named(args.room.as_deref()) {
+                Some(_) => vec![self.room(args.room.as_deref())?],
+                None => self.joined(),
+            };
+            let rows: Vec<Value> = rooms
+                .iter()
+                .flat_map(|room| decision_rows(room, &self.fast_lane, args.task))
+                .collect();
+            pretty(&Value::Array(rows))
+        })
+        .await
+    }
+
+    #[tool(
+        description = "For the omp plugin, not for agents. Make a decision the human picked in omp: approve always; accept, reject, replan, reopen, mark_planned and mark_done only in the fast lane. Answers like get_task."
+    )]
+    async fn decide(&self, Parameters(args): Parameters<DecideArgs>) -> CallToolResult {
+        Self::bounded(async {
+            let room = self.room(args.room.as_deref())?;
+            let decision = Decision::from(args.decision);
+            let task = room.tasks().iter().find(|t| t.number == args.task);
+            if !decision_allowed(&self.fast_lane, &room.id, args.task, task, decision) {
+                return Err(lane_closed(args.task, &room, task));
+            }
+            let task = self
+                .task_request(
+                    &room,
+                    Request::Decide {
+                        room: room.id,
+                        task: args.task,
+                        decision,
+                    },
+                )
+                .await?;
+            pretty(&task_json(
+                &task,
+                room.members(),
+                room.projects(),
+                room.tasks(),
+            ))
+        })
+        .await
+    }
+
+    #[tool(
+        description = "For the omp plugin, not for agents. The whole text of a pending suggestion, for the human to read."
+    )]
+    async fn get_suggestion(&self, Parameters(args): Parameters<SuggestionArgs>) -> CallToolResult {
+        Self::bounded(async {
+            let room = self.room(args.room.as_deref())?;
+            let response = self
+                .client
+                .request(
+                    room.id,
+                    Request::GetSuggestion {
+                        room: room.id,
+                        task: args.task,
+                        suggestion: args.suggestion,
+                    },
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            match response {
+                Response::Suggestion {
+                    suggestion,
+                    title,
+                    text,
+                } => pretty(&json!({
+                    "id": suggestion.id,
+                    "part": logic::part_name(suggestion.part),
+                    "title": title,
+                    "text": text,
+                })),
+                _ => Err(unexpected()),
+            }
+        })
+        .await
+    }
+
+    #[tool(
+        description = "For the omp plugin, not for agents. Apply or discard a pending suggestion the human picked in omp; only in the fast lane. Answers like get_task."
+    )]
+    async fn settle_suggestion(
+        &self,
+        Parameters(args): Parameters<SettleSuggestionArgs>,
+    ) -> CallToolResult {
+        Self::bounded(async {
+            let room = self.room(args.room.as_deref())?;
+            let task = room.tasks().iter().find(|t| t.number == args.task);
+            // Applying or discarding is no approval: it needs the fast lane.
+            if !decision_allowed(&self.fast_lane, &room.id, args.task, task, Decision::Accept) {
+                return Err(lane_closed(args.task, &room, task));
+            }
+            let request = if args.apply {
+                Request::ApplySuggestion {
+                    room: room.id,
+                    task: args.task,
+                    suggestion: args.suggestion,
+                }
+            } else {
+                Request::DiscardSuggestion {
+                    room: room.id,
+                    task: args.task,
+                    suggestion: args.suggestion,
+                }
+            };
+            let task = self.task_request(&room, request).await?;
+            pretty(&task_json(
+                &task,
+                room.members(),
+                room.projects(),
+                room.tasks(),
+            ))
+        })
+        .await
+    }
+
+    #[tool(
+        description = "For the omp plugin, not for agents. Put a task into this member's fast lane or take it out: omp then accepts, plans and builds it without a stop; only the plan's approval waits for a human."
+    )]
+    async fn set_fast_lane(&self, Parameters(args): Parameters<SetFastLaneArgs>) -> CallToolResult {
+        Self::bounded(async {
+            // The task need not be in the client's state yet: it may be proposed a moment ago.
+            let room = self.room(args.room.as_deref())?;
+            self.fast_lane.set_task(room.id, args.task, args.on);
+            self.events
+                .clone()
+                .send(McpEvent::FastLaneTask {
+                    room: room.id,
+                    task: args.task,
+                    on: args.on,
+                })
+                .await
+                .map_err(|_| "The Schwitzer app is closing.".to_owned())?;
+            Ok(if args.on {
+                format!("Task #{} is in the fast lane.", args.task)
+            } else {
+                format!("Task #{} left the fast lane.", args.task)
+            })
+        })
+        .await
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -1388,18 +1744,83 @@ mod tests {
             task(7, Stage::Planned, None),
             task(8, Stage::Idea, None),
         ];
-        let row = room_row(&room(0x11, "Smoke", tasks), MemberId([1; 32]));
+        let lanes = FastLane::default();
+        lanes.set(&[(RoomId([0x11; 32]), 2)].into(), &Default::default());
+        let row = room_row(&room(0x11, "Smoke", tasks), MemberId([1; 32]), &lanes);
         assert_eq!(row["room"], "11111111");
         assert_eq!(row["online"], true);
         assert_eq!(row["members"], json!(["alice", "bob"]));
         assert_eq!(
             row["projects"],
-            json!([{"id": 1, "name": "app"}, {"id": 2, "name": "site"}])
+            json!([
+                {"id": 1, "name": "app", "fast_lane": false},
+                {"id": 2, "name": "site", "fast_lane": true}
+            ])
         );
         assert_eq!(
             row["counts"],
             json!({"ideas": 1, "proposed": 1, "planning": 3, "ready": 1, "in_progress": 1})
         );
+    }
+
+    #[test]
+    fn decision_rows_list_the_fast_lane_tasks_that_wait() {
+        let in_site = |number, stage| {
+            let mut t = task(number, stage, None);
+            t.project = 2;
+            t
+        };
+        let room = room(
+            3,
+            "r",
+            vec![
+                task(4, Stage::Ready, None),
+                task(1, Stage::Proposed, None),
+                in_site(2, Stage::Proposed),
+                in_site(3, Stage::Proposed),
+            ],
+        );
+        let lanes = FastLane::default();
+        lanes.set(&[(room.id, 1)].into(), &[(room.id, 2)].into());
+        let rows = decision_rows(&room, &lanes, None);
+        let numbers: Vec<&Value> = rows.iter().map(|r| &r["number"]).collect();
+        assert_eq!(numbers, [1, 2]);
+        assert_eq!(rows[0]["decisions"], json!(["accept", "reject"]));
+        assert_eq!(rows[0]["fast_lane_task"], false);
+        assert_eq!(rows[1]["fast_lane_task"], true);
+        assert_eq!(rows[1]["project"], "site");
+        let ready = decision_rows(&room, &lanes, Some(4));
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0]["stage"], "ready");
+        assert_eq!(ready[0]["decisions"], json!(["replan", "mark_done"]));
+        assert!(decision_rows(&room, &lanes, Some(3)).is_empty());
+        assert!(
+            decision_rows(
+                &RoomRef {
+                    id: room.id,
+                    state: None
+                },
+                &lanes,
+                None
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn only_approval_passes_outside_the_fast_lane() {
+        let room = RoomId([5; 32]);
+        let proposal = task(7, Stage::Proposed, None);
+        let lanes = FastLane::default();
+        let allowed =
+            |task: Option<&Task>, decision| decision_allowed(&lanes, &room, 7, task, decision);
+        assert!(allowed(None, Decision::Approve));
+        assert!(!allowed(Some(&proposal), Decision::Accept));
+        lanes.set(&[(room, 1)].into(), &Default::default());
+        assert!(allowed(Some(&proposal), Decision::Accept));
+        assert!(!allowed(None, Decision::Accept));
+        lanes.set(&Default::default(), &[(room, 7)].into());
+        assert!(allowed(None, Decision::Accept));
     }
 
     #[test]

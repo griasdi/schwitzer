@@ -14,7 +14,7 @@ This skill is in English; messages to the user are in the language the user writ
 `AGENTS.md` applies in full: the gate, "Finishing a change", "Running headless" and the invariants. The consequences that matter most here:
 
 - A security problem found during the review is reported to the user (step 8), never fixed on the side. Schwitzer is public: the repository, its releases and its run logs.
-- Agents never decide. No consolidation turns a UI-only decision (accept, reject, approve, replan, reopen, mark planned, mark done) into an MCP or plugin tool, and the run never claims, finishes or decides a task of the room.
+- Agents never decide. No consolidation turns a human decision (accept, reject, approve, replan, reopen, mark planned, mark done, applying or discarding a suggestion) into an agent tool: the plugin-only MCP tools ("For the omp plugin, not for agents.") stay out of the plugin's `TOOLS` and keep their fast lane gate, and the run never claims, finishes or decides a task of the room.
 - stkn.org is never deployed, restarted or replaced, and `deploy/deploy.sh` is never run.
 - weida, iced_impeccable and omp are not changed from here, and their pins in the root `Cargo.toml` do not move in a consolidation (step 5).
 - `SCHWITZER_PLAN.md`, `.omp/mcp.json` and other local untracked files are never edited, deleted, moved or added to git.

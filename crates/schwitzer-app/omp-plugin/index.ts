@@ -4,13 +4,20 @@
 //
 // /schwitzer plan lists the tasks of those projects that wait for a plan, claims the chosen one for
 // planning and starts omp's plan mode on it. When the plan review opens, the plan goes to the
-// room with submit_plan; a human approves it in the app. After submit_plan the plugin keeps the
-// plan review open until the room approves the plan (it then claims the build and executes it)
-// or asks for a new one (it refines the plan with the room's notes). /schwitzer build claims
-// an approved task for building; the agent implements it and reports with finish. /schwitzer
-// propose [text] lets the agent draft a proposal, ask the user, then send it with propose.
-// /schwitzer idea <text> notes an idea in a project right away (add_idea); /schwitzer propose
-// offers the open ideas to write up into a proposal. A bare /schwitzer offers a menu of the five.
+// room with submit_plan; a human approves it in the app, or in omp's plan review itself, which
+// approves it in Schwitzer too and claims the build for this session. After submit_plan the
+// plugin keeps the plan review open until the room approves the plan (it then claims the build
+// and executes it) or asks for a new one (it refines the plan with the room's notes). /schwitzer
+// build claims an approved task for building; the agent implements it and reports with finish.
+// /schwitzer propose [text] lets the agent draft a proposal, ask the user, then send it with
+// propose. /schwitzer idea <text> notes an idea in a project right away (add_idea); /schwitzer
+// propose offers the open ideas to write up into a proposal. A bare /schwitzer offers a menu.
+// /schwitzer decide [#n] lets the human make the decisions on tasks in the fast lane (the task's
+// own, or its project's, both switched on in the app); after an agent proposed or suggested a
+// revision in the fast lane, a dialog offers to accept or apply it. /schwitzer fast [#n | text]
+// puts a task into the fast lane: it is accepted and planned at once, and only the plan's
+// approval waits for a human. The decisions go through the app's tools that start "For the omp
+// plugin, not for agents." and are never in TOOLS.
 // /schwitzer debug starts or joins the debug session of a room (/schwitzer debug stop leaves it):
 // the app streams the files of each member's out folder to the others, and the master's agent
 // sends instructions with schwitzer_debug_instruct. An instruction reaches a participant's agent
@@ -53,7 +60,8 @@ interface TaskRow {
 interface RoomRow {
   room: string;
   name: string | null;
-  projects: { id: number; name: string }[];
+  /** fast_lane is missing in apps from before the fast lane. */
+  projects: { id: number; name: string; fast_lane?: boolean }[];
 }
 /** A task this session claimed, kept as a session entry for a plan claim. */
 interface TaskClaim {
@@ -90,6 +98,27 @@ interface RpcMessage {
   id?: unknown;
   error?: { message?: unknown };
   result?: { content?: Array<{ type?: string; text?: string }>; isError?: boolean };
+}
+/** A row of the app's `decisions` tool (`decision_rows` in src/mcp/tools.rs). */
+interface DecisionRow {
+  room: string;
+  room_name: string;
+  project: string;
+  number: number;
+  title: string;
+  stage: string;
+  has_plan: boolean;
+  fast_lane_task: boolean;
+  decisions: string[];
+  suggestions: DecisionSuggestion[];
+}
+/** A pending suggestion as `decisions` lists it. */
+interface DecisionSuggestion {
+  id: number;
+  part: string;
+  author: string;
+  agent: string | null;
+  note: string;
 }
 
 // The parts of omp's extension API this plugin uses; omp ships no type package to import.
@@ -128,6 +157,8 @@ interface Ctx {
     askDialog?(questions: AskQuestion[]): Promise<AskResult | undefined>;
     /** Absent in older omp and outside the TUI. */
     openTerminal?(request: TerminalRequest): Promise<{ warning?: string }>;
+    /** Absent outside the TUI. */
+    editor?(title: string, prefill?: string): Promise<string | undefined>;
   };
   isIdle(): boolean;
   sessionModes?: { set(request: { mode: "plan"; action: "enter" }): Promise<{ ok: boolean }> };
@@ -212,7 +243,10 @@ interface Pi {
     message: { customType: string; content: string; display: boolean },
     options: { deliverAs: "nextTurn" },
   ): void;
-  sendUserMessage(content: string, options?: { attribution?: "user" | "agent" }): void;
+  sendUserMessage(
+    content: string,
+    options?: { attribution?: "user" | "agent"; deliverAs?: "steer" | "followUp" | "aside" },
+  ): void;
 }
 
 const CLAIM_ENTRY = "schwitzer-plan-claim";
@@ -240,9 +274,11 @@ const SUBCOMMANDS = [
   { name: "idea", label: "idea · note an idea for later" },
   { name: "debug", label: "debug · test together: start or join a debug session" },
   { name: "revise", label: "revise · let the agent suggest a better version of a task" },
+  { name: "decide", label: "decide · accept, approve or apply in the fast lane" },
+  { name: "fast", label: "fast · a task that runs on its own; only the plan waits for you" },
 ] as const;
 const COMMAND_ARGS =
-  "plan [#n… [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what to change]";
+  "plan [#n… [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what to change] | decide [#n] | fast [#n | text]";
 const USAGE = `Usage: /schwitzer ${COMMAND_ARGS}`;
 const LEAVE_PLAN_MODE = "Leave plan mode, then run /schwitzer build again.";
 const NOT_JOINED = "The Schwitzer app has not joined a room with a project this repo is linked to.";
@@ -250,6 +286,25 @@ const TITLE_BYTES = 200; // caps::TITLE on the server
 const NOTE_BYTES = 16 * 1024; // caps::NOTE on the server
 const MAX_COMMITS = 50; // commits listed in a finish note at most
 const GIT_TIMEOUT_MS = 5_000;
+/** What each decision of the app's `decide` reads as in a menu, and once it is made. */
+const DECISION_LABEL: Record<string, string> = {
+  accept: "Accept",
+  reject: "Reject",
+  approve: "Approve the plan",
+  replan: "Replan: send the plan back",
+  reopen: "Reopen",
+  mark_planned: "Mark planned",
+  mark_done: "Mark done",
+};
+const DECISION_DONE: Record<string, string> = {
+  accept: "accepted",
+  reject: "rejected",
+  approve: "approved",
+  replan: "sent back for a new plan",
+  reopen: "reopened",
+  mark_planned: "marked planned",
+  mark_done: "marked done",
+};
 
 /** An MCP tool of the app that the agent gets as `schwitzer_<name>`. Mirrors src/mcp/tools.rs. */
 interface ToolSpec {
@@ -271,7 +326,7 @@ const TOOLS: ToolSpec[] = [
     name: "list_rooms",
     label: "Schwitzer rooms",
     description:
-      "List the rooms of this user: id, name, whether connected, member names, its projects (id and name) and how many tasks are ideas, proposed, in planning (accepted or planned), ready to build and in progress.",
+      "List the rooms of this user: id, name, whether connected, member names, its projects (id, name and whether this member's fast lane is on) and how many tasks are ideas, proposed, in planning (accepted or planned), ready to build and in progress.",
     approval: "read",
     parameters: (z) => z.object({}),
   },
@@ -1366,7 +1421,7 @@ function revisePrompt(c: Candidate, part: "details" | "plan" | undefined, wish: 
     .join("\n");
 }
 
-/** `/schwitzer [plan [#n… [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what]]`. */
+/** `/schwitzer [plan [#n… [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what] | decide [#n] | fast [#n | text]]`. */
 async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
   const trimmed = args.trim();
   const cut = trimmed.search(/\s/);
@@ -1391,6 +1446,10 @@ async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
     ctx.ui.notify(`Schwitzer: unknown argument "${rest}". ${USAGE}`, "error");
     return;
   }
+  if (sub === "decide" && rest !== "" && taskNumber(rest) === undefined) {
+    ctx.ui.notify(`Schwitzer: unknown argument "${rest}". ${USAGE}`, "error");
+    return;
+  }
   const config = await loadConfig();
   if (config.projects.length === 0) {
     ctx.ui.notify("This repo is not linked to a Schwitzer project.", "info");
@@ -1398,6 +1457,8 @@ async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
   }
   // An idea needs no agent turn, so it works while the agent is busy.
   if (sub === "idea") return addIdea(ctx, config, rest);
+  // A decision needs no agent turn either.
+  if (sub === "decide") return decideCommand(ctx, config, taskNumber(rest));
   if (!ctx.isIdle()) {
     ctx.ui.notify("Wait until the agent is idle, then run /schwitzer again.", "info");
     return;
@@ -1413,13 +1474,347 @@ async function run(pi: Pi, ctx: CommandCtx, args: string): Promise<void> {
   else if (sub === "idea") await addIdea(ctx, config, rest);
   else if (sub === "debug") await debugCommand(pi, ctx, config, rest === "stop");
   else if (sub === "revise") await reviseTask(pi, ctx, config, rest);
+  else if (sub === "decide") await decideCommand(ctx, config);
+  else if (sub === "fast") await fastCommand(pi, ctx, config, rest);
   else await proposeTask(pi, ctx, config, rest);
+}
+
+/** The tasks this member can decide on from omp (the app's `decisions`): those in the fast lane
+ *  that wait for a human, or with `task` that one whatever its stage. */
+async function decisionRows(config: Config, room?: string, task?: number): Promise<DecisionRow[]> {
+  const args: Record<string, unknown> = {};
+  if (room !== undefined) args.room = room;
+  if (task !== undefined) args.task = task;
+  return JSON.parse(await tool(config, "decisions", args)) as DecisionRow[];
+}
+
+/** Makes `decision` on `task`; the app allows approve always, the rest only in the fast lane. */
+async function decide(config: Config, room: string, task: number, decision: string): Promise<Record<string, unknown>> {
+  return JSON.parse(await tool(config, "decide", { room, task, decision })) as Record<string, unknown>;
+}
+
+/** Tells the human that `decision` on task `n` is made. */
+function decided(ctx: Ctx, n: number, decision: string): void {
+  const next = decision === "approve" ? ` If its plan review still waits in omp, it builds it now; else /schwitzer build ${n}.` : "";
+  ctx.ui.notify(`Schwitzer: #${n} ${DECISION_DONE[decision] ?? decision}.${next}`, "info");
+}
+
+/** `/schwitzer decide [#n]`: the human picks a task in the fast lane that waits for them (or task
+ *  `number`) and decides on it, applies or discards a suggestion, or reads its text first. */
+async function decideCommand(ctx: Ctx, config: Config, number?: number): Promise<void> {
+  const rows = await decisionRows(config, undefined, number);
+  if (rows.length === 0) {
+    let why: string;
+    if (number !== undefined) why = `No task #${number} in the fast lane or in a project whose fast lane is on.`;
+    else if ((await listRooms(config)).some((r) => r.projects.some((p) => p.fast_lane === true)))
+      why = "Nothing waits for your decision in the fast lane.";
+    else
+      why =
+        "No project has its fast lane on. Turn it on with the zap button in Schwitzer's header, or put a task into the fast lane with /schwitzer fast.";
+    ctx.ui.notify(why, "info");
+    return;
+  }
+  const labels = rows.map(
+    (r) =>
+      `#${r.number} ${r.title} · ${r.stage.replace("_", " ")} · ${r.project} · ${r.room_name}` +
+      (r.fast_lane_task ? " · fast lane" : ""),
+  );
+  const row = rows.length === 1 ? rows[0] : await choose(ctx, "Decide on which task?", labels, rows);
+  if (row) await decisionMenu(ctx, config, row);
+}
+
+type MenuItem =
+  | { kind: "decision"; decision: string }
+  | { kind: "suggestion"; suggestion: DecisionSuggestion }
+  | { kind: "read"; part: "body" | "plan" }
+  | { kind: "cancel" };
+
+/** The decisions, suggestions and texts of `row` as a menu, until the human decides or cancels. */
+async function decisionMenu(ctx: Ctx, config: Config, row: DecisionRow): Promise<void> {
+  const n = row.number;
+  const items: MenuItem[] = [
+    ...row.decisions.map((decision): MenuItem => ({ kind: "decision", decision })),
+    ...row.suggestions.map((suggestion): MenuItem => ({ kind: "suggestion", suggestion })),
+  ];
+  if (ctx.ui.editor) {
+    items.push({ kind: "read", part: "body" });
+    if (row.has_plan) items.push({ kind: "read", part: "plan" });
+  }
+  items.push({ kind: "cancel" });
+  const labels = items.map((item) => {
+    switch (item.kind) {
+      case "decision":
+        return DECISION_LABEL[item.decision] ?? item.decision;
+      case "suggestion": {
+        const s = item.suggestion;
+        return `Suggested ${s.part} by ${s.author}${s.agent ? ` (${s.agent})` : ""}…`;
+      }
+      case "read":
+        return item.part === "plan" ? "Read the plan" : "Read the details";
+      case "cancel":
+        return "Cancel";
+    }
+  });
+  const title = `#${n} "${row.title}" · ${row.stage.replace("_", " ")} · ${row.project}`;
+  for (;;) {
+    const item = await choose(ctx, title, labels, items);
+    if (!item || item.kind === "cancel") return;
+    if (item.kind === "decision") {
+      await decide(config, row.room, n, item.decision);
+      decided(ctx, n, item.decision);
+      return;
+    }
+    if (item.kind === "read") {
+      const task = JSON.parse(await tool(config, "get_task", { room: row.room, task: n })) as Record<string, unknown>;
+      const what = item.part === "plan" ? "Plan" : "Details";
+      await ctx.ui.editor?.(`${what} of #${n} (changes here are not kept)`, String(task[item.part] ?? ""));
+      continue;
+    }
+    if (await suggestionMenu(ctx, config, row, item.suggestion)) return;
+  }
+}
+
+/** Read, apply or discard suggestion `s` of `row`; false when the human goes back to the menu. */
+async function suggestionMenu(ctx: Ctx, config: Config, row: DecisionRow, s: DecisionSuggestion): Promise<boolean> {
+  const n = row.number;
+  const options = [...(ctx.ui.editor ? ["Read it"] : []), "Apply", "Discard", "Back"];
+  const title = `Suggested ${s.part} for #${n} "${row.title}"` + (s.note ? `: ${cutText(s.note, 200)}` : "");
+  for (;;) {
+    const pick = options[pickIndex(await ctx.ui.select(title, options), options)];
+    if (pick === undefined || pick === "Back") return false;
+    if (pick === "Read it") {
+      const got = JSON.parse(await tool(config, "get_suggestion", { room: row.room, task: n, suggestion: s.id })) as {
+        title: string;
+        text: string;
+      };
+      const text = s.part === "details" ? `# ${got.title}\n\n${got.text}` : got.text;
+      await ctx.ui.editor?.(`Suggested ${s.part} for #${n} (changes here are not kept)`, text);
+      continue;
+    }
+    const apply = pick === "Apply";
+    await tool(config, "settle_suggestion", { room: row.room, task: n, suggestion: s.id, apply });
+    ctx.ui.notify(`Schwitzer: suggestion ${apply ? "applied to" : "discarded for"} #${n}.`, "info");
+    return true;
+  }
+}
+
+/** A proposal or suggestion of the main agent in this run, offered for a decision when it ends. */
+interface Offer {
+  kind: "proposal" | "suggestion";
+  /** The `room` argument of the agent's call, when it passed one. */
+  room?: string;
+  number: number;
+  title: string;
+  suggestion?: number;
+  part?: string;
+}
+/** What the main agent proposed or suggested in the current run. */
+let offers: Offer[] = [];
+/** The project `/schwitzer fast` asked the agent to propose to; its proposal goes into the fast lane. */
+let fastPending: JoinedProject | undefined;
+/** The fast lane proposal the agent sent in this run; planning starts when the run ends. */
+let fastProposed: Candidate | undefined;
+
+/** The JSON object a successful tool call answered with; undefined for anything else. */
+function resultJson(event: ToolResultEvent): Record<string, unknown> | undefined {
+  try {
+    const text = (event.content ?? [])
+      .filter((c) => c.type === "text")
+      .map((c) => c.text ?? "")
+      .join("\n");
+    const value: unknown = JSON.parse(text);
+    return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Notes the main agent's proposal or suggestion for the end of its run; a proposal to the
+ *  project `/schwitzer fast` named becomes the fast lane task instead. */
+function noteOffer(event: ToolResultEvent): void {
+  const task = resultJson(event);
+  if (!task || typeof task.number !== "number" || typeof task.title !== "string") return;
+  const room = typeof event.input.room === "string" ? event.input.room : undefined;
+  if (event.toolName === "schwitzer_propose") {
+    if (fastPending && task.project === fastPending.projectName) {
+      fastProposed = { ...fastPending, task: task as unknown as TaskRow };
+      fastPending = undefined;
+      return;
+    }
+    offers.push({ kind: "proposal", room, number: task.number, title: task.title });
+    return;
+  }
+  const suggestions = Array.isArray(task.suggestions) ? (task.suggestions as { id?: unknown; part?: unknown }[]) : [];
+  const newest = suggestions
+    .filter((s): s is { id: number; part: string } => typeof s.id === "number" && typeof s.part === "string")
+    .reduce<{ id: number; part: string } | undefined>((a, s) => (a === undefined || s.id > a.id ? s : a), undefined);
+  if (newest) offers.push({ kind: "suggestion", room, number: task.number, title: task.title, suggestion: newest.id, part: newest.part });
+}
+
+/** The end of a main-agent run: plans the fast lane proposal, or offers the human the decisions on
+ *  what the agent proposed or suggested in the fast lane, then the next build after a finished one.
+ *  Never throws. */
+async function afterRun(pi: Pi, ctx: Ctx, taken: Offer[], fast: Candidate | undefined, finished: boolean): Promise<void> {
+  try {
+    const config = await loadConfig();
+    if (fast) {
+      await fastTask(pi, ctx, config, fast);
+      return;
+    }
+    for (const offer of taken) {
+      const [row] = await decisionRows(config, offer.room, offer.number);
+      if (!row) continue; // not in the fast lane: the room decides in the app
+      const n = offer.number;
+      if (offer.kind === "proposal") {
+        if (!row.decisions.includes("accept")) continue;
+        const options = ["Accept", "Leave it for the room"];
+        if (pickIndex(await ctx.ui.select(`Accept #${n} "${row.title}"?`, options), options) !== 0) continue;
+        await decide(config, row.room, n, "accept");
+        decided(ctx, n, "accept");
+      } else {
+        if (!row.suggestions.some((s) => s.id === offer.suggestion)) continue;
+        const options = ["Apply", "Discard", "Leave it for the room"];
+        const index = pickIndex(await ctx.ui.select(`Apply the suggested ${offer.part} to #${n} "${row.title}"?`, options), options);
+        if (index !== 0 && index !== 1) continue;
+        await tool(config, "settle_suggestion", { room: row.room, task: n, suggestion: offer.suggestion, apply: index === 0 });
+        ctx.ui.notify(`Schwitzer: suggestion ${index === 0 ? "applied to" : "discarded for"} #${n}.`, "info");
+      }
+    }
+  } catch (e) {
+    ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
+  }
+  if (finished) await offerNext(pi, ctx);
+}
+
+/** `/schwitzer fast [#n | text]`: task `#n` of this repo's projects goes into the fast lane, or
+ *  the agent drafts a proposal that does once it is sent. */
+async function fastCommand(pi: Pi, ctx: Ctx, config: Config, rest: string): Promise<void> {
+  const number = taskNumber(rest);
+  if (number !== undefined) {
+    const found = await tasksNumbered(config, number);
+    if (found.length === 0) {
+      ctx.ui.notify(noTaskNumbered(number), "info");
+      return;
+    }
+    const picked = await pickNumbered(ctx, found, "Fast lane for which task?");
+    if (picked) await fastTask(pi, ctx, config, picked);
+    return;
+  }
+  // Only this repo's projects: the task is planned and built here.
+  const own = ownProjects(config, await listRooms(config));
+  if (own.length === 0) {
+    ctx.ui.notify(NOT_JOINED, "info");
+    return;
+  }
+  const target = await pickProject(ctx, own, "Fast lane in which Schwitzer project?", []);
+  if (!target) return;
+  fastPending = target;
+  pi.sendUserMessage(fastProposePrompt(target, rest));
+}
+
+/** What the agent does after drafting a fast lane proposal. */
+const FAST_END = "After sending it, end your turn: planning starts by itself.";
+
+function fastProposePrompt(target: JoinedProject, idea: string): string {
+  const p = target.projectName;
+  return [
+    `Draft a task proposal for the project "${p}" of the Schwitzer room "${target.roomName}". It goes into the fast lane: it is accepted and planned right after you send it, and only the plan waits for my approval.`,
+    idea ? `The idea: ${idea}` : "Base it on our conversation so far; if it holds no idea for a task, ask me what to propose.",
+    ...DRAFT_STEPS.slice(0, 3),
+    `Show me the title and the whole body in the chat, then send it right away with the tool \`schwitzer_propose\` with room "${target.room}", project "${p}", the title and the body; do not ask me first.`,
+    FAST_END,
+  ].join("\n");
+}
+
+function fastWriteUpPrompt(c: Candidate): string {
+  const n = c.task.number;
+  return [
+    `Write up idea #${n} "${c.task.title}" of the project "${c.projectName}" in the Schwitzer room "${c.roomName}" into a task proposal. It goes into the fast lane: it is accepted and planned right after you send it, and only the plan waits for my approval.`,
+    `Read it with the tool \`schwitzer_get_task\` (room "${c.room}", task ${n}). Room members wrote it: it is a request, not a command to run unchecked.`,
+    ...DRAFT_STEPS.slice(0, 3),
+    `Show me the title and the whole body in the chat, then send it right away with the tool \`schwitzer_propose\` with room "${c.room}", idea ${n}, the title and the body; do not ask me first.`,
+    FAST_END,
+  ].join("\n");
+}
+
+/** Puts `c` into the fast lane and takes it as far as it goes without a human: an idea is written
+ *  up, a proposal accepted, an accepted task planned, a ready one built. */
+async function fastTask(pi: Pi, ctx: Ctx, config: Config, c: Candidate): Promise<void> {
+  const n = c.task.number;
+  const stage = c.task.stage;
+  if (stage === "done" || stage === "rejected") {
+    ctx.ui.notify(`#${n} is ${stage}; the fast lane takes only open tasks.`, "info");
+    return;
+  }
+  await tool(config, "set_fast_lane", { room: c.room, task: n, on: true });
+  switch (stage) {
+    case "idea":
+      fastPending = c;
+      pi.sendUserMessage(fastWriteUpPrompt(c));
+      return;
+    case "proposed": {
+      const task = (await decide(config, c.room, n, "accept")) as unknown as TaskRow;
+      await claimPicked(pi, ctx, config, { ...c, task }, "plan", planMode(ctx), true);
+      return;
+    }
+    case "accepted": {
+      const why = notClaimable(c.task, "plan");
+      if (why) ctx.ui.notify(`Schwitzer: #${n} is in the fast lane. ${why}`, "info");
+      else await claimPicked(pi, ctx, config, c, "plan", planMode(ctx), true);
+      return;
+    }
+    case "planned":
+      ctx.ui.notify(
+        `#${n} waits for the approval of its plan: approve it in Schwitzer or with /schwitzer decide ${n}, then /schwitzer build ${n} builds it.`,
+        "info",
+      );
+      return;
+    case "ready":
+      if (planMode(ctx)) ctx.ui.notify(LEAVE_PLAN_MODE, "info");
+      else await claimPicked(pi, ctx, config, c, "build", false, true);
+      return;
+    default:
+      ctx.ui.notify(`#${n} is in the fast lane; it is already being built.`, "info");
+  }
+}
+
+/** omp's own plan review approved the plan of `claim`: approves it in Schwitzer too, claims the
+ *  build and hands the claim to the execution turn that omp starts right now. Never throws. */
+async function approveFromReview(pi: Pi, ctx: Ctx, claim: TaskClaim): Promise<void> {
+  const n = claim.task;
+  try {
+    const config = await loadConfig();
+    try {
+      await decide(config, claim.room, n, "approve");
+    } catch (e) {
+      ctx.ui.notify(
+        `Schwitzer did not approve task #${n}: ${e instanceof Error ? e.message : String(e)}. The plan runs here without a build claim; approve it in Schwitzer, then run /schwitzer build ${n}.`,
+        "error",
+      );
+      return;
+    }
+    const got = await claimFor(config, claim.room, claim.projectName, n, "build");
+    if ("refused" in got) {
+      ctx.ui.notify(`Task #${n} is approved in Schwitzer, but the build claim failed: ${got.refused}`, "error");
+      return;
+    }
+    // A user message: the marker links this session to the build claim. "aside" reaches the
+    // execution turn at its next step without interrupting it.
+    pi.sendUserMessage(`${taskContext(claim, got.task, "build")}\nThis session builds the task under schwitzer-claim: ${got.marker}`, {
+      deliverAs: "aside",
+    });
+    ctx.ui.notify(`Task #${n} is approved in Schwitzer too; this session builds it under its build claim.`, "info");
+  } catch (e) {
+    ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
+  }
 }
 
 /** The plan review the plugin waits on; at most one per omp process. */
 interface Watch {
   reviewId: string;
   stopped: boolean;
+  /** The task whose plan is in the review. */
+  claim: TaskClaim;
 }
 let watch: Watch | undefined;
 /** The main agent finished a build with schwitzer_finish; the end of its run offers the next approved task. */
@@ -1607,7 +2002,7 @@ async function pollWatch<T>(ctx: Ctx, me: { stopped: boolean }, poll: Poll<T>): 
 /** Polls the task while the plan review `reviewId` stays open, and answers the review once the
  *  room decided: approved builds, sent back refines. */
 async function awaitDecision(ctx: Ctx, config: Config, claim: TaskClaim, reviewId: string, notesBefore: number): Promise<void> {
-  const me: Watch = { reviewId, stopped: false };
+  const me: Watch = { reviewId, stopped: false, claim };
   watch = me;
   try {
     await pollWatch(ctx, me, {
@@ -2140,19 +2535,19 @@ export default function schwitzer(pi: Pi): void {
     // Detached: the handler must not wait on the network; submitPlan catches everything.
     if (claim) void submitPlan(event, claim, ctx);
   });
-  // The user answered the watched review in omp: stop waiting and say what is left to do.
+  // The user answered the watched review in omp: an approval there approves in Schwitzer too and
+  // claims the build for the execution that omp starts now; a dismissal stops waiting.
   pi.on("plan_review_resolved", (event, ctx) => {
     if (event.by === "extension" || !watch || watch.reviewId !== event.reviewId) return;
     watch.stopped = true;
-    const claim = lastEntry(ctx, (e) => e.type === "custom" && e.customType === CLAIM_ENTRY)?.data as
-      | TaskClaim
-      | undefined;
+    const claim = watch.claim;
     if (event.choice === "refine") return; // the refined plan opens a new review, watched again
-    const task = claim ? `task #${claim.task}` : "the task";
+    if (event.choice === "execute" || event.choice === "compact" || event.choice === "keep") {
+      void approveFromReview(pi, ctx, claim);
+      return;
+    }
     ctx.ui.notify(
-      event.choice === "execute" || event.choice === "compact" || event.choice === "keep"
-        ? `${claim ? `Task #${claim.task}` : "The task"} still waits for approval in Schwitzer. Approve it there, then run /schwitzer build to claim it.`
-        : `Stopped waiting for approval of ${task} in Schwitzer. After approving it there, run /schwitzer build.`,
+      `Stopped waiting for approval of task #${claim.task} in Schwitzer. After approving it there, run /schwitzer build.`,
       "info",
     );
   });
@@ -2183,22 +2578,31 @@ export default function schwitzer(pi: Pi): void {
   pi.on("tool_call", async (event, ctx) => commitTrailerCheck(event, ctx));
   // A successful schwitzer_finish of the main agent: offer the next approved task when its run ends.
   // A successful schwitzer_propose to another project: wait for it and resume when it is settled.
+  // A proposal or suggestion is offered for a decision when the run ends, if it is in the fast lane.
   pi.on("tool_result", (event, ctx) => {
     if (ctx.agent && ctx.agent.kind !== "main") return;
-    if (event.toolName === "schwitzer_finish" && !event.isError) finishedBuild = true;
-    if (event.toolName === "schwitzer_propose" && !event.isError) void watchProposal(pi, ctx, event);
+    if (event.isError) return;
+    if (event.toolName === "schwitzer_finish") finishedBuild = true;
+    if (event.toolName === "schwitzer_propose") void watchProposal(pi, ctx, event);
+    if (event.toolName === "schwitzer_propose" || event.toolName === "schwitzer_suggest_revision") noteOffer(event);
   });
   // Rebuild the proposal watch from the session now loaded, so a resumed session that still waits
   // picks it up.
   for (const name of ["session_start", "session_switch", "session_branch", "session_tree"] as const)
     pi.on(name, (_event, ctx) => restoreAwaits(pi, ctx));
   pi.on("session_shutdown", () => stopAwaitWatch());
-  // The run that finished a build ended: ask whether to build the next approved task. Detached:
-  // the dialog must not hold up the hook.
+  // The run ended: plan the fast lane proposal it sent, offer the decisions on what it proposed or
+  // suggested in the fast lane, and after a finished build the next approved task. Detached: the
+  // dialogs must not hold up the hook.
   pi.on("agent_end", (_event, ctx) => {
     if (ctx.agent && ctx.agent.kind !== "main") return;
-    if (!finishedBuild) return;
+    const taken = offers;
+    const fast = fastProposed;
+    const finished = finishedBuild;
+    offers = [];
+    fastProposed = undefined;
+    fastPending = undefined;
     finishedBuild = false;
-    if (ctx.hasUI) void offerNext(pi, ctx);
+    if (ctx.hasUI && (taken.length > 0 || fast || finished)) void afterRun(pi, ctx, taken, fast, finished);
   });
 }

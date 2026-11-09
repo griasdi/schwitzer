@@ -150,6 +150,16 @@ pub fn project_page(app: &App) -> Element<'_, Message> {
                 .is_some_and(|room| app.settings.commit_trailer(&room, project.id)),
             Message::CommitTrailers,
         ),
+        switch_row(
+            "fast-lane-toggle",
+            Switch::Flat,
+            "Fast lane",
+            "Accept, approve, apply and the other decisions on this project from omp too: \
+             /schwitzer decide. Any program of yours that can call omp's tools can make them.",
+            app.selected
+                .is_some_and(|room| app.settings.fast_lane(&room, project.id)),
+            Message::FastLane,
+        ),
     ]
     .spacing(SP_2);
 

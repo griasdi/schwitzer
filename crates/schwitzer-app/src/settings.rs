@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use schwitzer_proto::{Project, RoomId};
+use schwitzer_proto::{Project, RoomId, Stage, Task};
 use serde::{Deserialize, Serialize};
 
 /// The port of the MCP server unless `settings.toml` says otherwise.
@@ -100,6 +100,16 @@ pub struct Settings {
     /// parse is dropped on load.
     #[serde(with = "project_set", skip_serializing_if = "BTreeSet::is_empty")]
     pub commit_trailers: BTreeSet<ProjectKey>,
+    /// The projects (keys like `repos`) whose fast lane is on: this member makes every decision
+    /// on their tasks from omp too (`/schwitzer decide`, the dialogs after an agent's proposal or
+    /// suggestion). A key that does not parse is dropped on load.
+    #[serde(with = "project_set", skip_serializing_if = "BTreeSet::is_empty")]
+    pub fast_lane: BTreeSet<ProjectKey>,
+    /// The tasks (key `<room id hex>/<task number>`) in the fast lane: accepted, planned and built
+    /// from omp without a stop; only the plan's approval waits for a human. Dropped once the task
+    /// is done or rejected. A key that does not parse is dropped on load.
+    #[serde(with = "project_set", skip_serializing_if = "BTreeSet::is_empty")]
+    pub fast_lane_tasks: BTreeSet<TaskKey>,
     /// Per room, the project last picked in it; the app shows it again after a restart.
     /// Keys are room ids in hex; a key that is no room id is dropped on load.
     #[serde(with = "room_map", skip_serializing_if = "BTreeMap::is_empty")]
@@ -132,6 +142,8 @@ impl Default for Settings {
             text_size: TextSize::Normal,
             repos: BTreeMap::new(),
             commit_trailers: BTreeSet::new(),
+            fast_lane: BTreeSet::new(),
+            fast_lane_tasks: BTreeSet::new(),
             chosen_projects: BTreeMap::new(),
             projects_dirs: None,
             wsl_distros: Vec::new(),
@@ -165,6 +177,9 @@ mod room_map {
 
 /// A project: its room and its id in the room.
 pub type ProjectKey = (RoomId, u64);
+
+/// A task: its room and its number in the room; as text `<room id hex>/<task number>`.
+pub type TaskKey = (RoomId, u64);
 
 /// A [`ProjectKey`] as `<room id hex>/<project id>`.
 fn project_key_text((room, project): &ProjectKey) -> String {
@@ -372,14 +387,62 @@ impl Settings {
         }
     }
 
+    /// Whether this member's fast lane is on for `project` of `room`.
+    pub fn fast_lane(&self, room: &RoomId, project: u64) -> bool {
+        self.fast_lane.contains(&(*room, project))
+    }
+
+    /// Turns the fast lane of `project` in `room` on or off.
+    pub fn set_fast_lane(&mut self, room: &RoomId, project: u64, on: bool) {
+        let key = (*room, project);
+        if on {
+            self.fast_lane.insert(key);
+        } else {
+            self.fast_lane.remove(&key);
+        }
+    }
+
+    /// Whether task `task` of `room` is in the fast lane.
+    pub fn fast_lane_task(&self, room: &RoomId, task: u64) -> bool {
+        self.fast_lane_tasks.contains(&(*room, task))
+    }
+
+    /// Puts task `task` of `room` into the fast lane or takes it out.
+    pub fn set_fast_lane_task(&mut self, room: &RoomId, task: u64, on: bool) {
+        let key = (*room, task);
+        if on {
+            self.fast_lane_tasks.insert(key);
+        } else {
+            self.fast_lane_tasks.remove(&key);
+        }
+    }
+
+    /// Takes the tasks of `room` that `tasks` (the room's current list) holds as done or
+    /// rejected out of the fast lane; `true` when anything changed. A task missing from `tasks`
+    /// keeps its flag: it may be proposed a moment ago and not in the room state yet.
+    pub fn forget_settled_tasks(&mut self, room: &RoomId, tasks: &[Task]) -> bool {
+        let settled = |number: u64| {
+            tasks
+                .iter()
+                .any(|t| t.number == number && matches!(t.stage, Stage::Done | Stage::Rejected))
+        };
+        let before = self.fast_lane_tasks.len();
+        self.fast_lane_tasks
+            .retain(|(r, number)| r != room || !settled(*number));
+        before != self.fast_lane_tasks.len()
+    }
+
     /// Sets the room keys, in the order given, to those of `rooms` (id and key) and forgets
-    /// the repos linked to, the commit trailer switch of, and the project choice of, every room
-    /// not in `rooms`.
+    /// the repos linked to, the commit trailer switch of, the fast lanes of, and the project
+    /// choice of, every room not in `rooms`.
     pub fn retain_rooms(&mut self, rooms: impl IntoIterator<Item = (RoomId, String)>) {
         let (joined, keys): (Vec<RoomId>, Vec<String>) = rooms.into_iter().unzip();
         self.rooms = keys;
         self.repos.retain(|(room, _), _| joined.contains(room));
         self.commit_trailers
+            .retain(|(room, _)| joined.contains(room));
+        self.fast_lane.retain(|(room, _)| joined.contains(room));
+        self.fast_lane_tasks
             .retain(|(room, _)| joined.contains(room));
         self.chosen_projects.retain(|room, _| joined.contains(room));
     }
@@ -392,15 +455,16 @@ impl Settings {
             .collect()
     }
 
-    /// Forgets the repos linked to, the commit trailer switch of, and the choice of, projects
-    /// of `room` that are not in `projects` (the room's current list) any more; `true` when
-    /// anything changed.
+    /// Forgets the repos linked to, the commit trailer switch of, the fast lane of, and the
+    /// choice of, projects of `room` that are not in `projects` (the room's current list) any
+    /// more; `true` when anything changed.
     pub fn forget_deleted_projects(&mut self, room: &RoomId, projects: &[Project]) -> bool {
         let exists = |id: u64| projects.iter().any(|p| p.id == id);
         let counts = |s: &Self| {
             (
                 s.repos.len(),
                 s.commit_trailers.len(),
+                s.fast_lane.len(),
                 s.chosen_projects.len(),
             )
         };
@@ -408,6 +472,7 @@ impl Settings {
         self.repos.retain(|(r, id), _| r != room || exists(*id));
         self.commit_trailers
             .retain(|(r, id)| r != room || exists(*id));
+        self.fast_lane.retain(|(r, id)| r != room || exists(*id));
         if self
             .chosen_projects
             .get(room)
@@ -573,6 +638,8 @@ mod tests {
             text_size: TextSize::Larger,
             repos: BTreeMap::from([((RoomId([0xab; 32]), 1), vec![PathBuf::from("/code/x")])]),
             commit_trailers: BTreeSet::from([(RoomId([0xab; 32]), 1)]),
+            fast_lane: BTreeSet::from([(RoomId([0xab; 32]), 2)]),
+            fast_lane_tasks: BTreeSet::from([(RoomId([0xab; 32]), 12)]),
             chosen_projects: BTreeMap::from([(RoomId([0xab; 32]), 2)]),
             projects_dirs: Some(vec![PathBuf::from("/code"), PathBuf::from("/work")]),
             wsl_distros: vec!["Ubuntu".to_owned()],
@@ -712,6 +779,8 @@ mod tests {
             settings.link_repo(room, 1, PathBuf::from("/app"));
             settings.set_commit_trailer(room, 1, true);
             settings.chosen_projects.insert(*room, 1);
+            settings.set_fast_lane(room, 1, true);
+            settings.set_fast_lane_task(room, 7, true);
         }
         settings.link_repo(&b, 1, PathBuf::from("/app"));
         settings.retain_rooms([(b, "schwitzer://b".to_owned())]);
@@ -720,5 +789,66 @@ mod tests {
         assert_eq!(settings.project_repos(&b, 1), [PathBuf::from("/app")]);
         assert!(settings.commit_trailer(&b, 1) && !settings.commit_trailer(&a, 1));
         assert_eq!(settings.chosen_projects, BTreeMap::from([(b, 1)]));
+        assert_eq!(settings.fast_lane, BTreeSet::from([(b, 1)]));
+        assert_eq!(settings.fast_lane_tasks, BTreeSet::from([(b, 7)]));
+    }
+
+    #[test]
+    fn fast_lanes_keep_their_text_and_drop_bad_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let hex = "ab".repeat(32);
+        let text = format!(
+            "fast_lane = [\"{hex}/3\", \"{hex}/x\"]\nfast_lane_tasks = [\"{hex}/12\", \"ab/1\"]\n"
+        );
+        std::fs::write(dir.path().join(FILE), text).unwrap();
+        let (settings, problem) = Settings::load(dir.path());
+        assert_eq!(problem, None);
+        let room = RoomId([0xab; 32]);
+        assert!(settings.fast_lane(&room, 3) && !settings.fast_lane(&room, 12));
+        assert!(settings.fast_lane_task(&room, 12) && !settings.fast_lane_task(&room, 3));
+        settings.save(dir.path()).unwrap();
+        let (again, _) = Settings::load(dir.path());
+        assert_eq!(again, settings);
+        let saved = std::fs::read_to_string(dir.path().join(FILE)).unwrap();
+        assert!(saved.contains(&format!("\"{hex}/12\"")) && !saved.contains("/x"));
+    }
+
+    #[test]
+    fn settled_tasks_leave_the_fast_lane() {
+        let (a, b) = (RoomId([1; 32]), RoomId([2; 32]));
+        let task = |number, stage| Task {
+            number,
+            project: 1,
+            title: String::new(),
+            body: String::new(),
+            plan: String::new(),
+            stage,
+            priority: schwitzer_proto::Priority::Normal,
+            author: schwitzer_proto::MemberId([1; 32]),
+            created_ms: 0,
+            updated_ms: 0,
+            claim: None,
+            notes: Vec::new(),
+            waits_for: Vec::new(),
+            details_version: 1,
+            plan_version: 0,
+            suggestions: Vec::new(),
+            annotations: Vec::new(),
+        };
+        let mut settings = Settings {
+            fast_lane_tasks: BTreeSet::from([(a, 1), (a, 2), (a, 3), (a, 9), (b, 1)]),
+            ..Settings::default()
+        };
+        let tasks = [
+            task(1, Stage::Done),
+            task(2, Stage::Rejected),
+            task(3, Stage::Proposed),
+        ];
+        assert!(settings.forget_settled_tasks(&a, &tasks));
+        assert_eq!(
+            settings.fast_lane_tasks,
+            BTreeSet::from([(a, 3), (a, 9), (b, 1)])
+        );
+        assert!(!settings.forget_settled_tasks(&a, &tasks));
     }
 }

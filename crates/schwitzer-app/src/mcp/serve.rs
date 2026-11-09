@@ -18,8 +18,8 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 use schwitzer_client::Client;
 use tokio_util::sync::CancellationToken;
 
-use super::McpStatus;
 use super::tools::Tools;
+use super::{FastLane, McpEvent, McpStatus};
 
 /// Largest accepted POST body.
 const MAX_BODY_BYTES: usize = 256 * 1024;
@@ -28,13 +28,15 @@ const MAX_BODY_BYTES: usize = 256 * 1024;
 const BIND_RETRY: Duration = Duration::from_secs(10);
 
 /// Identity of the server subscription: a new port, token or data directory restarts it. The
-/// client is not part of the identity (one per process). No `Debug`, so the token never prints.
+/// client is not part of the identity (one per process), and neither are the fast lanes: turning
+/// one on or off must not restart the server. No `Debug`, so the token never prints.
 #[derive(Clone)]
 struct McpKey {
     client: Client,
     port: u16,
     token: String,
     data_dir: PathBuf,
+    fast_lane: FastLane,
 }
 
 impl Hash for McpKey {
@@ -46,20 +48,23 @@ impl Hash for McpKey {
     }
 }
 
-/// The MCP server as an iced subscription; it reports its status and serves until dropped.
-/// `data_dir` is where the debug folders live.
+/// The MCP server as an iced subscription; it reports its status and the fast lane changes of
+/// the omp plugin, and serves until dropped. `data_dir` is where the debug folders live;
+/// `fast_lane` is the app's shared copy of this member's fast lanes.
 pub fn subscription(
     client: Client,
     port: u16,
     token: String,
     data_dir: PathBuf,
-) -> Subscription<McpStatus> {
+    fast_lane: FastLane,
+) -> Subscription<McpEvent> {
     Subscription::run_with(
         McpKey {
             client,
             port,
             token,
             data_dir,
+            fast_lane,
         },
         serve,
     )
@@ -67,7 +72,7 @@ pub fn subscription(
 
 /// Runs the MCP server while the stream lives. Dropping it closes the listener and cancels
 /// every session.
-fn serve(key: &McpKey) -> impl Stream<Item = McpStatus> + use<> {
+fn serve(key: &McpKey) -> impl Stream<Item = McpEvent> + use<> {
     let key = key.clone();
     iced::stream::channel(8, async move |mut out| {
         let addr = SocketAddr::from(([127, 0, 0, 1], key.port));
@@ -80,7 +85,7 @@ fn serve(key: &McpKey) -> impl Stream<Item = McpStatus> + use<> {
                 Err(e) => {
                     let status = bind_failure(&e, key.port);
                     if reported.as_ref() != Some(&status) {
-                        let _ = out.send(status.clone()).await;
+                        let _ = out.send(McpEvent::Status(status.clone())).await;
                         reported = Some(status);
                     }
                     tokio::time::sleep(BIND_RETRY).await;
@@ -89,7 +94,12 @@ fn serve(key: &McpKey) -> impl Stream<Item = McpStatus> + use<> {
         };
         let ct = CancellationToken::new();
         let _stop = ct.clone().drop_guard();
-        let tools = Tools::new(key.client.clone(), key.data_dir.clone());
+        let tools = Tools::new(
+            key.client.clone(),
+            key.data_dir.clone(),
+            key.fast_lane.clone(),
+            out.clone(),
+        );
         // The default config keeps rmcp's loopback Host allowlist.
         let service = StreamableHttpService::new(
             move || Ok(tools.clone()),
@@ -103,13 +113,18 @@ fn serve(key: &McpKey) -> impl Stream<Item = McpStatus> + use<> {
         );
         // The port the listener really has: it differs from `key.port` only for port 0.
         let bound = listener.local_addr().map_or(key.port, |a| a.port());
-        let _ = out.send(McpStatus::Listening { url: url(bound) }).await;
+        let _ = out
+            .send(McpEvent::Status(McpStatus::Listening { url: url(bound) }))
+            .await;
         let served = axum::serve(listener, router)
             .with_graceful_shutdown(ct.clone().cancelled_owned())
             .await;
         if let Err(e) = served {
             let _ = out
-                .send(McpStatus::Failed(format!("port {}: {e}", key.port)))
+                .send(McpEvent::Status(McpStatus::Failed(format!(
+                    "port {}: {e}",
+                    key.port
+                ))))
                 .await;
         }
         std::future::pending::<()>().await

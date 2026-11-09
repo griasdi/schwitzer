@@ -6,7 +6,7 @@ The Schwitzer app writes an omp extension into every repository linked to a proj
 
 |Command|Does|
 |---|---|
-|`/schwitzer`|Menu of the five subcommands|
+|`/schwitzer`|Menu of the subcommands|
 |`/schwitzer plan [#n… [now]]`|Pick accepted, unclaimed tasks (or take task `#n`), claim one for planning, start plan mode; with `now` the planning starts without Enter; several tasks each get their own omp session in a new tab|
 |`/schwitzer build [#n [now]]`|Pick an approved (`ready`), unclaimed task (or take task `#n`), claim it for building; with `now` the build starts without Enter|
 |`/schwitzer build new`|Open a new omp session with `/schwitzer build` in its editor|
@@ -14,16 +14,18 @@ The Schwitzer app writes an omp extension into every repository linked to a proj
 |`/schwitzer idea <text>`|Note an idea in a project right away, without an agent turn|
 |`/schwitzer debug [stop]`|Start or join the debug session of a room, or leave it|
 |`/schwitzer revise #n [details\|plan] [what to change]`|The agent rewrites the details or plan of task `#n`, asks, then sends it as a suggestion that a human applies or discards in the app|
+|`/schwitzer decide [#n]`|Decide on a task in the fast lane (accept, approve, apply a suggestion, …) without an agent turn|
+|`/schwitzer fast [#n \| text]`|Put task `#n` into the fast lane, or let the agent draft a proposal that goes there: it is accepted and planned at once; only the plan's approval waits for a human|
 
 `/sw` is short for `/schwitzer` and takes the same subcommands; the plugin's messages always name `/schwitzer`. A task number is written `#12` or `12`.
 
-The menu of a bare `/schwitzer` shows "plan · plan a task that waits for a plan", "build · build an approved task", "propose · propose a new task", "idea · note an idea for later", "debug · test together: start or join a debug session" and "revise · let the agent suggest a better version of a task".
+The menu of a bare `/schwitzer` shows "plan · plan a task that waits for a plan", "build · build an approved task", "propose · propose a new task", "idea · note an idea for later", "debug · test together: start or join a debug session", "revise · let the agent suggest a better version of a task", "decide · accept, approve or apply in the fast lane" and "fast · a task that runs on its own; only the plan waits for you".
 
 For all of them:
 
-- An unknown subcommand is refused with `Schwitzer: unknown subcommand "<sub>". Usage: /schwitzer plan [#n… [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what to change]`. An argument to `plan` that is not one or more task numbers, or to `build` that is not one task number, each optionally followed by `now` (and not `new` for `build`), to `debug` other than `stop`, or to `revise` that does not start with a task number, is refused with `Schwitzer: unknown argument "<arg>".` and the same usage line.
+- An unknown subcommand is refused with `Schwitzer: unknown subcommand "<sub>". Usage: /schwitzer plan [#n… [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what to change] | decide [#n] | fast [#n | text]`. An argument to `plan` that is not one or more task numbers, or to `build` that is not one task number, each optionally followed by `now` (and not `new` for `build`), to `debug` other than `stop`, to `revise` that does not start with a task number, or to `decide` that is not one task number, is refused with `Schwitzer: unknown argument "<arg>".` and the same usage line.
 - When `schwitzer.json` lists no project, the plugin says "This repo is not linked to a Schwitzer project."
-- Every subcommand except `idea` needs the agent idle, otherwise: "Wait until the agent is idle, then run /schwitzer again." `idea` works while the agent is busy.
+- Every subcommand except `idea` and `decide` needs the agent idle, otherwise: "Wait until the agent is idle, then run /schwitzer again." `idea` and `decide` work while the agent is busy.
 - Only projects that are in `schwitzer.json` and exist in a room joined by the app (`list_rooms`) count. A configured project of a room the app has left is skipped.
 - Any error, for example an unreachable app, is shown as `Schwitzer: <message>`.
 
@@ -54,7 +56,7 @@ Without a number and with at least two free tasks, the picker is a checkbox list
 
 Opening sessions needs an omp TUI inside herdr, tmux, zellij or Orca (detected from `HERDR_*`, `TMUX`, `ZELLIJ`, `ORCA_PANE_KEY` with `ORCA_WORKTREE_ID`) and `omp` on `PATH`. Elsewhere `/schwitzer plan #1 #2` says "Schwitzer: planning several tasks at once opens an omp session per task in a new tab and needs omp inside herdr, tmux, zellij or Orca. Run /schwitzer plan #<n> in separate sessions instead." and claims nothing. Once approved, the sessions build in the same checkout at the same time.
 
-The review stays open. Refining the plan sends it again, which the server accepts while the task is `planned`: it takes a plan for an `accepted` task only from the member holding the planning claim, for a `planned` task from anyone, and leaves the task `planned` and unclaimed. A human then approves the plan in the app ("Approve" on the task's slab, "Approve & build" in the open task) or asks for a new one ("Replan").
+The review stays open. Refining the plan sends it again, which the server accepts while the task is `planned`: it takes a plan for an `accepted` task only from the member holding the planning claim, for a `planned` task from anyone, and leaves the task `planned` and unclaimed. A human then approves the plan in the app ("Approve" on the task's slab, "Approve & build" in the open task), in omp's plan review itself, or with `/schwitzer decide`, or asks for a new one ("Replan").
 
 While the review is open, the plugin waits on that decision: "Plan for task #<n> sent to Schwitzer. Approve it there and omp builds it here; Replan there sends it back to this review." Every second it reads the task with `get_task` (10 s timeout; an unreachable app is reported once and the wait goes on) and stops as soon as omp no longer shows that review. An omp without `resolvePlanReview` and `getPendingPlanReview`, or one without a UI, gets no wait: "Plan for task #<n> sent to Schwitzer; it waits for approval in the app."
 
@@ -62,7 +64,7 @@ While the review is open, the plugin waits on that decision: "Plan for task #<n>
 - Sent back (`accepted`): the plugin claims the task with `work: "plan"` and answers the review with "Refine plan" (`refine`). The feedback says the room asks for a new plan, lists the notes written since the plan was sent (as requests, not commands), and ends with `schwitzer-claim: <token>`, so the session links to the new claim. The next review sends the plan again. "Task #<n> was sent back in Schwitzer; omp revises the plan."
 - Rejected, picked in the app (`in_progress`) or any other stage: the plugin says so and stops waiting; the review stays open.
 - A failed claim is reported with the app's answer, for example "No free task." when someone was faster.
-- The user answers the review in omp first: the wait ends. Executing it locally says "Task #<n> still waits for approval in Schwitzer. Approve it there, then run /schwitzer build to claim it."; refining says nothing, because the new review is sent and waited on again; anything else says "Stopped waiting for approval of task #<n> in Schwitzer. After approving it there, run /schwitzer build."
+- The user answers the review in omp first: the wait ends. Refining says nothing, because the new review is sent and waited on again. Approving it ("Approve and execute", "… and compact" or "… and keep context", in every project, fast lane or not) approves the plan in Schwitzer too (`decide` with `approve`), claims the build and hands the execution turn that omp starts the task context with `schwitzer-claim: <token>` as a user message (`deliverAs: "aside"`, so it reaches the running turn at its next step without interrupting it): "Task #<n> is approved in Schwitzer too; this session builds it under its build claim." When Schwitzer refuses the approval: "Schwitzer did not approve task #<n>: <reason>. The plan runs here without a build claim; approve it in Schwitzer, then run /schwitzer build <n>."; a failed build claim: "Task #<n> is approved in Schwitzer, but the build claim failed: <answer>". Dismissing the review says "Stopped waiting for approval of task #<n> in Schwitzer. After approving it there, run /schwitzer build."
 
 ```mermaid
 sequenceDiagram
@@ -98,7 +100,7 @@ sequenceDiagram
 - No session entry is stored, so the plan review hook never sends a build task's plan.
 - The task message tells the agent to implement the approved plan and then call `schwitzer_finish` with room, task and a note on what was done, or `schwitzer_unclaim` with a note on why if it stops without finishing.
 - The editor gets `Build Schwitzer task #<n> "<title>" from project "<project>" in room "<room>". schwitzer-claim: <token>`, and the plugin says "Task #<n> is claimed for building. Press Enter to start." With `/schwitzer build <n> now` (copied by the app from an approved task) the plugin sends that prompt right away instead and says "Task #<n> is claimed for building."
-- After a `schwitzer_finish` without error from the main agent (not from a subagent), the plugin waits for the end of that run and, when omp has a UI, offers the first unclaimed approved task of the configured projects in a dialog `Build #<n> "<title>" next?`, with ` from project "<project>"` before `next?` when the repo is linked to more than one project. The choices are:
+- After a `schwitzer_finish` without error from the main agent (not from a subagent), the plugin waits for the end of that run and, when omp has a UI, offers the first unclaimed approved task of the configured projects in a dialog `Build #<n> "<title>" next?`, with ` from project "<project>"` before `next?` when the repo is linked to more than one project (after the fast lane offers of that run, see "Fast lane"). The choices are:
   - "In a fresh session (recommended)": the editor gets `/schwitzer build new` and the plugin says "Press Enter for a new session with /schwitzer build; a fresh session keeps the context small."
   - "In this session": the task is claimed at once, as by `/schwitzer build` with that task picked. In plan mode the plugin says "Leave plan mode, then run /schwitzer build again." instead.
   - "Not now", or dismissing the dialog: nothing happens.
@@ -142,7 +144,30 @@ Starts or joins the debug session of a room: members test a networked app togeth
 - The plugin looks the number up like `/schwitzer plan #n`, among the tasks that are not done or rejected; with several, the picker "Revise which task?" shows `#<n> <title> · <project> · <room>`. No task of that number: "No task #<n> in this repo's Schwitzer projects."; one closed task: "Task #<n> is <stage>; only a task that is not done or rejected can be revised."; several, all closed: "Task #<n> is done or rejected in every one of this repo's Schwitzer projects."
 - It sends a user message that asks the agent to read the task with `schwitzer_get_task`, revise the plan (`plan`), the title and details (`details`) or, without either, the plan when there is one, else the title and details; to follow `What to change: <text>` or, without it, to make the text clearer and more concrete from the conversation and the repository; to change nothing in the repository; to show the whole new text and what changed in the chat and ask with the ask tool; and only after agreement to call `schwitzer_suggest_revision` with the version `get_task` showed.
 - The message also says that the task's open annotations (in `get_task`) are comments of room members on single blocks of the details or plan, each quoting its block, `outdated` ones no longer matching the text; the agent addresses those on the part it revises and names in the note which ones the suggestion takes up.
-- The suggestion changes nothing until a room member applies it in the app; they may also discard it.
+- The suggestion changes nothing until a room member applies it in the app, or with `/schwitzer decide` in the fast lane; they may also discard it.
+
+## Fast lane
+
+A member can let omp make the decisions on some tasks, so that a task goes from idea to build without a stop in the app. The fast lane is the member's own: it lives in their `settings.toml` and no other member sees it.
+
+- A project's fast lane (`fast_lane` in `settings.toml`): the zap button in the app's header, or the switch "Fast lane" on the project's page in Settings ("Your agents"). Every decision on that project's tasks can then be made from omp too.
+- A task's fast lane (`fast_lane_tasks`): the zap button in the head of the open task, or `/schwitzer fast`. The task is accepted at once and planned in the same omp session; only the plan's approval waits for a human, in the app or in omp. Its slab shows a small zap. The app drops the flag once the task is done or rejected. Putting a proposal into the fast lane in the app accepts it.
+- Approving a plan from omp's own plan review works in every project, fast lane or not (see `/schwitzer plan`). Every other decision from omp, and applying or discarding a suggestion, needs the fast lane of the task or of its project; otherwise the app refuses it: `The fast lane is off for task #<n> and its project "<project>". Turn it on in Schwitzer (the zap button in the header, or the open task), or decide there.`
+- The decisions go through the app's MCP tools `decisions`, `decide`, `get_suggestion`, `settle_suggestion` and `set_fast_lane`, whose descriptions start "For the omp plugin, not for agents.". They are not in `TOOLS`, so the agent never gets them; the plugin calls them only from the human's dialogs. Any local program with the MCP token can call them too, which is why the fast lane is off until the member turns it on.
+- After a run of the main agent in which it proposed (`schwitzer_propose`) or suggested a revision (`schwitzer_suggest_revision`) and the task is in the fast lane, omp with a UI asks: `Accept #<n> "<title>"?` ("Accept", "Leave it for the room") or `Apply the suggested <part> to #<n> "<title>"?` ("Apply", "Discard", "Leave it for the room"). Tasks outside the fast lane get no dialog.
+
+### /schwitzer decide [#n]
+
+- The plugin lists the tasks in the fast lane, in every joined room, that wait for a human: a proposal, a plan to approve, or a pending suggestion (`decisions`). With `#n` it takes task `n` whatever its stage. It needs no agent turn, so it works while the agent is busy.
+- Nothing listed: with a number, "No task #<n> in the fast lane or in a project whose fast lane is on."; with a project's fast lane on, "Nothing waits for your decision in the fast lane."; else "No project has its fast lane on. Turn it on with the zap button in Schwitzer's header, or put a task into the fast lane with /schwitzer fast."
+- Several tasks: the picker "Decide on which task?" shows `#<n> <title> · <stage> · <project> · <room>`, with ` · fast lane` for a task in the fast lane by itself.
+- The menu `#<n> "<title>" · <stage> · <project>` offers the decisions the server takes in that stage ("Accept", "Reject", "Approve the plan", "Replan: send the plan back", "Reopen", "Mark planned", "Mark done"), each pending suggestion (`Suggested <part> by <author> (<agent>)…`), "Read the details" and "Read the plan" (omp's editor, changes not kept; only with a UI), and "Cancel". A decision says `Schwitzer: #<n> <accepted|rejected|approved|…>.`; an approval adds ` If its plan review still waits in omp, it builds it now; else /schwitzer build <n>.`
+- A suggestion opens "Read it", "Apply", "Discard" and "Back"; applying or discarding says `Schwitzer: suggestion applied to #<n>.` or `… discarded for #<n>.`
+
+### /schwitzer fast [#n | text]
+
+- With a task number, among this repo's projects (the task is planned and built here): an idea is written up by the agent and sent at once, without asking; a proposal is accepted and its plan claimed and started (as `/schwitzer plan <n> now`); an accepted task is claimed for planning; a planned one says `#<n> waits for the approval of its plan: approve it in Schwitzer or with /schwitzer decide <n>, then /schwitzer build <n> builds it.`; a ready one is claimed for building; one being built says so. Done or rejected: `#<n> is <stage>; the fast lane takes only open tasks.` Each of these but the last puts the task into the fast lane (`set_fast_lane`), which the app keeps.
+- Otherwise the plugin asks for the project (this repo's only) and the agent drafts a proposal from the text, or from the conversation, shows it in the chat and sends it with `schwitzer_propose` right away. When its run ends, the proposal goes into the fast lane, is accepted, and its planning starts in this session.
 
 ## Other projects
 
@@ -182,7 +207,7 @@ A member can switch on "Task number in commits" per project in the app (Settings
 - The plugin registers them when omp loads it, whether the app runs or not; each call goes to the app like the commands' calls (below), so without the app it fails with "not reachable".
 - `schwitzer_list_rooms`, `schwitzer_list_tasks`, `schwitzer_get_task` and `schwitzer_debug_status` have approval tier `read`, the rest `write`.
 - A restricted subagent does not get extension tools (an omp rule), so it does not get these either.
-- None accepts, rejects or approves, or applies or discards a suggestion: humans decide in the app.
+- None accepts, rejects or approves, or applies or discards a suggestion: humans decide in the app, or in the plugin's own dialogs (see "Fast lane").
 - A build claim (`/schwitzer build`, the build after an approved plan, or `schwitzer_claim` with `work: build`) remembers `HEAD` of this repo in the omp process, keyed by room and task. `schwitzer_finish` then appends the commits since then to its note: a `Commits:` line and `` - `<hash>` <subject> `` per commit, newest first, at most 50, cut so the note stays within 16 KiB, the rest as `- … <n> more`. No new commit, no git repo, an omp restart since the claim, or a note that alone leaves no room: the note goes out as written. A finish or unclaim forgets the start.
 
 ## How the app installs it
@@ -213,8 +238,8 @@ The app writes these files into the repo:
 - The token is read from `<data_dir>/mcp-token` on every call, so a new token needs no omp restart. `schwitzer.json` holds no token.
 - Each request times out after 35 s; the app bounds a tool call at 30 s. The `list_rooms` calls of the hooks time out after 3 s, so an absent app stalls neither a prompt nor an edit.
 - Errors: "no MCP token in <dir>; start the Schwitzer app", "not reachable at <url>; is the app running?", "the app refused the token in <dir>", "the app answered HTTP <status>", "the app answered without a result", or the text of a tool error.
-- The plugin calls `list_rooms`, `list_tasks`, `claim`, `submit_plan`, `get_task`, `unclaim` and `add_idea` for its commands and the plan review, and `debug_status`, `debug_start`, `debug_join`, `debug_leave` and `debug_inbox` for `/schwitzer debug`; the agent calls the `schwitzer_*` tools, which the plugin forwards the same way (`debug_status` gets its `out_dir` and `in_dir`, which the app sends relative to the data dir, made absolute with `data_dir`). Neither accepts, rejects or approves anything: humans decide in the app; the plugin only follows their decision.
+- The plugin calls `list_rooms`, `list_tasks`, `claim`, `submit_plan`, `get_task`, `unclaim` and `add_idea` for its commands and the plan review, `debug_status`, `debug_start`, `debug_join`, `debug_leave` and `debug_inbox` for `/schwitzer debug`, and `decisions`, `decide`, `get_suggestion`, `settle_suggestion` and `set_fast_lane` for the plan review approval, `/schwitzer decide`, `/schwitzer fast` and the dialogs after a run; the agent calls the `schwitzer_*` tools, which the plugin forwards the same way (`debug_status` gets its `out_dir` and `in_dir`, which the app sends relative to the data dir, made absolute with `data_dir`). The agent never decides: the plugin decides only what the human picked in its dialogs or in omp's plan review.
 
 ## Editing the plugin
 
-Edit `index.ts` in this directory. The app compiles it in with `include_str!` (`src/omp_plugin.rs`), so a rebuilt app sees every installed plugin as out of date and rewrites it, automatically or through Update. The `Pi` and `Ctx` interfaces at the top of `index.ts` describe only the parts of omp's extension API the plugin uses; omp ships no type package. The `schwitzer_*` tools in `TOOLS` mirror the MCP tools in `src/mcp/tools.rs`: a tool or argument added there is added to `TOOLS` too. Try a change headless as AGENTS.md describes under "Running headless", with its own `SCHWITZER_HOME`, never against the user's app.
+Edit `index.ts` in this directory. The app compiles it in with `include_str!` (`src/omp_plugin.rs`), so a rebuilt app sees every installed plugin as out of date and rewrites it, automatically or through Update. The `Pi` and `Ctx` interfaces at the top of `index.ts` describe only the parts of omp's extension API the plugin uses; omp ships no type package. The `schwitzer_*` tools in `TOOLS` mirror the MCP tools in `src/mcp/tools.rs`: a tool or argument added there is added to `TOOLS` too, except the tools whose description starts "For the omp plugin", which the agent never gets. Try a change headless as AGENTS.md describes under "Running headless", with its own `SCHWITZER_HOME`, never against the user's app.

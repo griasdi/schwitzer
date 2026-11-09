@@ -78,7 +78,7 @@ pub enum Message {
     LocalSessions(Vec<LocalSession>),
     /// The running WSL distros changed.
     Wsl(Vec<wsl::Distro>),
-    Mcp(McpStatus),
+    Mcp(mcp::McpEvent),
     Noop,
     /// A link in task text was clicked.
     OpenLink(markdown::Uri),
@@ -209,6 +209,10 @@ pub enum Message {
     /// The member picked a text size in Settings.
     TextSize(settings::TextSize),
     CommitTrailers(bool),
+    /// Turns the fast lane of the selected project on or off.
+    FastLane(bool),
+    /// Puts task `n` of the selected room into the fast lane or takes it out.
+    FastLaneTask(u64),
 
     ProposalTitle(String),
     ProposalBody(text_editor::Action),
@@ -611,6 +615,9 @@ pub struct App {
     published: HashMap<RoomId, Vec<SessionInfo>>,
     mcp: Option<McpStatus>,
     mcp_token: Option<String>,
+    /// This member's fast lanes, shared with the MCP tools; [`App::save_settings`] keeps it in
+    /// step with the settings.
+    fast_lane: mcp::FastLane,
     /// Shared repos with the omp plugin installed, and how it compares with this app's.
     plugins: BTreeMap<PathBuf, PluginState>,
     /// Repos whose automatic update failed; not retried until their plugin changes state or
@@ -650,6 +657,8 @@ impl App {
         let unreadable = matches!(problem, Some(settings::LoadProblem::Unreadable(_)));
         let saved_before = settings.clone();
         let first_start = !unreadable && settings.projects_dirs.is_none();
+        let fast_lane = mcp::FastLane::default();
+        fast_lane.set(&settings.fast_lane, &settings.fast_lane_tasks);
         if settings.projects_dirs.is_none() {
             settings.projects_dirs = Some(
                 settings::home_dir()
@@ -747,6 +756,7 @@ impl App {
             published: HashMap::new(),
             mcp,
             mcp_token,
+            fast_lane,
             plugins: BTreeMap::new(),
             auto_failed: BTreeSet::new(),
             plugins_checked_ms: 0,
@@ -826,6 +836,7 @@ impl App {
                     self.settings.mcp_port,
                     token.clone(),
                     self.data_dir.clone(),
+                    self.fast_lane.clone(),
                 )
                 .map(Message::Mcp),
             );
@@ -977,8 +988,13 @@ impl App {
                 self.read_project_dirs();
                 Task::none()
             }
-            Message::Mcp(status) => {
+            Message::Mcp(mcp::McpEvent::Status(status)) => {
                 self.mcp = Some(status);
+                Task::none()
+            }
+            Message::Mcp(mcp::McpEvent::FastLaneTask { room, task, on }) => {
+                self.settings.set_fast_lane_task(&room, task, on);
+                self.save_settings();
                 Task::none()
             }
             Message::Noop => Task::none(),
@@ -1372,6 +1388,34 @@ impl App {
                     self.write_plugin_configs(&room, project);
                 }
                 Task::none()
+            }
+            Message::FastLane(on) => {
+                if let (Some(room), Some(project)) =
+                    (self.selected, self.selected_project().map(|p| p.id))
+                {
+                    self.settings.set_fast_lane(&room, project, on);
+                    self.save_settings();
+                }
+                Task::none()
+            }
+            Message::FastLaneTask(number) => {
+                let Some(room) = self.selected else {
+                    return Task::none();
+                };
+                let on = !self.settings.fast_lane_task(&room, number);
+                self.settings.set_fast_lane_task(&room, number, on);
+                self.save_settings();
+                let proposed = self.selected_state().is_some_and(|state| {
+                    state
+                        .tasks
+                        .iter()
+                        .any(|t| t.number == number && t.stage == schwitzer_proto::Stage::Proposed)
+                });
+                if on && proposed {
+                    Task::done(Message::Decide(number, Decision::Accept))
+                } else {
+                    Task::none()
+                }
             }
 
             Message::SelectProject(id) => {
@@ -1850,7 +1894,9 @@ impl App {
                 let shown = (self.selected == Some(id))
                     .then(|| self.selected_project().map(|p| p.id))
                     .flatten();
-                if self.settings.forget_deleted_projects(&id, &state.projects) {
+                let projects_gone = self.settings.forget_deleted_projects(&id, &state.projects);
+                let tasks_settled = self.settings.forget_settled_tasks(&id, &state.tasks);
+                if projects_gone || tasks_settled {
                     self.save_settings();
                 }
                 let me = self.client.member();
@@ -2057,6 +2103,9 @@ impl App {
     /// Changed repos or a changed MCP port also rewrite the omp plugins. On the first-start page
     /// the projects folders and the entered WSL distros are held back.
     fn save_settings(&mut self) {
+        // The MCP tools see a change at once, also one that leaves the file as it was.
+        self.fast_lane
+            .set(&self.settings.fast_lane, &self.settings.fast_lane_tasks);
         // On the first-start page the folders wait for the member's confirmation.
         let on_disk = if self.page == Page::FirstStart {
             Cow::Owned(Settings {

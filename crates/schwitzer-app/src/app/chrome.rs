@@ -141,35 +141,56 @@ pub fn header(app: &App) -> Element<'_, Message> {
     } else {
         Tone::Text
     };
+    let mut bar = bar.push(Space::new().width(Length::Fill)).push(members);
+    if let (Some(room), Some(project)) = (app.selected, app.selected_project()) {
+        let on = app.settings.fast_lane(&room, project.id);
+        let tip = if on {
+            format!(
+                "Fast lane on for \"{}\": you decide its tasks from omp too",
+                project.name
+            )
+        } else {
+            format!(
+                "Fast lane off for \"{}\": decisions only here",
+                project.name
+            )
+        };
+        bar = bar.push(bar_icon_button(
+            "fast-lane",
+            Icon::Zap,
+            if on { Tone::Ink } else { Tone::Text },
+            tip,
+            Some(Message::FastLane(!on)),
+            theme::button_ghost_open(on),
+        ));
+    }
     widgets::bar(
-        bar.push(Space::new().width(Length::Fill))
-            .push(members)
-            .push(bar_icon_button(
-                "copy-key",
-                Icon::UserPlus,
-                Tone::Text,
-                "Copy room key to invite someone",
-                in_room.then_some(Message::CopyKey),
-                theme::button_ghost,
-            ))
-            .push(bar_icon_button(
-                "debug",
-                Icon::Bug,
-                debug_tone,
-                debug.unwrap_or_else(|| "Debug session".to_owned()),
-                in_room.then_some(Message::OpenPage(Page::Debug)),
-                theme::button_ghost,
-            ))
-            .push(bar_icon_button(
-                "settings",
-                Icon::Settings,
-                Tone::Text,
-                "Settings  (Ctrl+,)",
-                Some(Message::OpenSettings),
-                theme::button_ghost,
-            ))
-            .spacing(SP_1)
-            .align_y(Alignment::Center),
+        bar.push(bar_icon_button(
+            "copy-key",
+            Icon::UserPlus,
+            Tone::Text,
+            "Copy room key to invite someone",
+            in_room.then_some(Message::CopyKey),
+            theme::button_ghost,
+        ))
+        .push(bar_icon_button(
+            "debug",
+            Icon::Bug,
+            debug_tone,
+            debug.unwrap_or_else(|| "Debug session".to_owned()),
+            in_room.then_some(Message::OpenPage(Page::Debug)),
+            theme::button_ghost,
+        ))
+        .push(bar_icon_button(
+            "settings",
+            Icon::Settings,
+            Tone::Text,
+            "Settings  (Ctrl+,)",
+            Some(Message::OpenSettings),
+            theme::button_ghost,
+        ))
+        .spacing(SP_1)
+        .align_y(Alignment::Center),
         SP_2,
     )
     .into()

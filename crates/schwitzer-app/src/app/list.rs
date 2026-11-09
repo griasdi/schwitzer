@@ -158,11 +158,13 @@ fn group_header<'a>(group: Group, count: usize, open: bool) -> Element<'a, Messa
 }
 
 /// The two lines of a slab: lamp and title, then number, stage, priority, the tasks it still
-/// waits for, `hint` (see [`session_hint`]) and the worker's tag.
+/// waits for, its suggestions, a zap while it is in this member's fast lane (`fast_lane`),
+/// `hint` (see [`session_hint`]) and the worker's tag.
 pub fn summary<'a>(
     state: &'a RoomState,
     task: &'a Task,
     hint: Option<(&'static str, String)>,
+    fast_lane: bool,
 ) -> Element<'a, Message> {
     let mut meta = row![
         text(format!("#{}", task.number))
@@ -193,6 +195,9 @@ pub fn summary<'a>(
             .spacing(SP_1)
             .align_y(Alignment::Center),
         );
+    }
+    if fast_lane {
+        meta = meta.push(with_tip(icon(Icon::Zap, 12.0, Tone::Ink), "Fast lane"));
     }
     meta = meta.push(Space::new().width(Length::Fill));
     if let Some((label, why)) = hint {
@@ -252,9 +257,14 @@ pub fn session_hint(app: &App, state: &RoomState, task: &Task) -> Option<(&'stat
 
 fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     let n = task.number;
-    let mut line = row![summary(state, task, session_hint(app, state, task))]
-        .spacing(SP_3)
-        .align_y(Alignment::Center);
+    let mut line = row![summary(
+        state,
+        task,
+        session_hint(app, state, task),
+        app.settings.fast_lane_task(&state.id, n)
+    )]
+    .spacing(SP_3)
+    .align_y(Alignment::Center);
     if let Some(action) = next_step(app, state, task) {
         line = line.push(action);
     }
