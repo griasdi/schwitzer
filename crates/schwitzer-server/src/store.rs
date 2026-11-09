@@ -12,12 +12,12 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use schwitzer_proto::{
-    ApiError, Claim, ClaimToken, Decision, Member, MemberId, Note, Priority, Project, RoomId,
-    RoomState, Stage, Task, Work,
+    ApiError, Claim, ClaimToken, Decision, Member, MemberId, Note, Part, Priority, Project,
+    Revision, RoomId, RoomState, Stage, Suggestion, Task, Work, caps,
 };
 
 /// Version stored in `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA: &str = "
 CREATE TABLE people(member BLOB PRIMARY KEY, name TEXT NOT NULL);
@@ -38,6 +38,14 @@ CREATE TABLE notes(room BLOB NOT NULL, number INTEGER NOT NULL, at_ms INTEGER NO
 CREATE INDEX notes_by_task ON notes(room, number);
 CREATE TABLE waits(room BLOB NOT NULL, number INTEGER NOT NULL, after INTEGER NOT NULL,
     PRIMARY KEY(room, number, after));
+CREATE TABLE versions(room BLOB NOT NULL, number INTEGER NOT NULL, part INTEGER NOT NULL,
+    version INTEGER NOT NULL, at_ms INTEGER NOT NULL, author BLOB, agent TEXT,
+    title TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY(room, number, part, version));
+CREATE TABLE suggestions(id INTEGER PRIMARY KEY AUTOINCREMENT, room BLOB NOT NULL,
+    number INTEGER NOT NULL, part INTEGER NOT NULL, version INTEGER NOT NULL,
+    at_ms INTEGER NOT NULL, author BLOB NOT NULL, agent TEXT, note TEXT NOT NULL,
+    title TEXT NOT NULL, text TEXT NOT NULL);
+CREATE INDEX suggestions_by_task ON suggestions(room, number);
 ";
 
 /// From schema 1 (before projects): every room gets project 1, named like the room, holding
@@ -55,6 +63,22 @@ ALTER TABLE tasks ADD COLUMN project INTEGER NOT NULL DEFAULT 1;
 const MIGRATE_2: &str = "
 CREATE TABLE waits(room BLOB NOT NULL, number INTEGER NOT NULL, after INTEGER NOT NULL,
     PRIMARY KEY(room, number, after));
+";
+
+/// From schema 3: versions and suggestions; every task's current text becomes its version 1.
+const MIGRATE_3: &str = "
+CREATE TABLE versions(room BLOB NOT NULL, number INTEGER NOT NULL, part INTEGER NOT NULL,
+    version INTEGER NOT NULL, at_ms INTEGER NOT NULL, author BLOB, agent TEXT,
+    title TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY(room, number, part, version));
+CREATE TABLE suggestions(id INTEGER PRIMARY KEY AUTOINCREMENT, room BLOB NOT NULL,
+    number INTEGER NOT NULL, part INTEGER NOT NULL, version INTEGER NOT NULL,
+    at_ms INTEGER NOT NULL, author BLOB NOT NULL, agent TEXT, note TEXT NOT NULL,
+    title TEXT NOT NULL, text TEXT NOT NULL);
+CREATE INDEX suggestions_by_task ON suggestions(room, number);
+INSERT INTO versions(room, number, part, version, at_ms, author, agent, title, text)
+    SELECT room, number, 0, 1, created_ms, NULL, NULL, title, body FROM tasks;
+INSERT INTO versions(room, number, part, version, at_ms, author, agent, title, text)
+    SELECT room, number, 1, 1, updated_ms, NULL, NULL, '', plan FROM tasks WHERE plan <> '';
 ";
 
 /// Why a store closure failed.
@@ -117,14 +141,18 @@ impl Store {
                 conn.execute_batch(SCHEMA).context("applying schema")?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            1 | 2 => {
+            1..=3 => {
                 let tx = conn.transaction()?;
                 if version == 1 {
                     tx.execute_batch(MIGRATE_1)
                         .context("migrating from schema version 1")?;
                 }
-                tx.execute_batch(MIGRATE_2)
-                    .context("migrating from schema version 2")?;
+                if version <= 2 {
+                    tx.execute_batch(MIGRATE_2)
+                        .context("migrating from schema version 2")?;
+                }
+                tx.execute_batch(MIGRATE_3)
+                    .context("migrating from schema version 3")?;
                 tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
                 tx.commit()?;
                 tracing::info!(
@@ -219,6 +247,21 @@ fn work_from_int(v: i64) -> Option<Work> {
     Some(match v {
         0 => Work::Plan,
         1 => Work::Build,
+        _ => return None,
+    })
+}
+
+fn part_to_int(part: Part) -> i64 {
+    match part {
+        Part::Details => 0,
+        Part::Plan => 1,
+    }
+}
+
+fn part_from_int(v: i64) -> Option<Part> {
+    Some(match v {
+        0 => Part::Details,
+        1 => Part::Plan,
         _ => return None,
     })
 }
@@ -587,6 +630,9 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         claim,
         notes: Vec::new(),
         waits_for: Vec::new(),
+        details_version: 0,
+        plan_version: 0,
+        suggestions: Vec::new(),
     })
 }
 
@@ -597,6 +643,63 @@ fn note_from_row(row: &Row<'_>) -> rusqlite::Result<Note> {
         agent: row.get(2)?,
         text: row.get(3)?,
     })
+}
+
+/// Decodes a suggestion row of `id, part, version, at_ms, author, agent, note`.
+fn suggestion_from_row(row: &Row<'_>) -> rusqlite::Result<Suggestion> {
+    Ok(Suggestion {
+        id: uns(row.get(0)?),
+        part: mapped(1, "part", row.get(1)?, part_from_int)?,
+        version: uns(row.get(2)?),
+        at_ms: uns(row.get(3)?),
+        author: blob(row, 4)?,
+        agent: row.get(5)?,
+        note: row.get(6)?,
+    })
+}
+
+/// Fills in the newest versions and the pending suggestions of `tasks`, all of the room, or
+/// only task `number` when given.
+fn fill_revisions(
+    conn: &Connection,
+    room: &RoomId,
+    number: Option<u64>,
+    tasks: &mut [Task],
+) -> R<()> {
+    let only = number.map(int);
+    let mut stmt = conn.prepare(
+        "SELECT number, part, MAX(version) FROM versions
+         WHERE room = ?1 AND (?2 IS NULL OR number = ?2) GROUP BY number, part",
+    )?;
+    let mut versions: HashMap<(u64, Part), u64> = HashMap::new();
+    for row in stmt.query_map(params![room.as_bytes().as_slice(), only], |r| {
+        Ok((
+            uns(r.get(0)?),
+            mapped(1, "part", r.get(1)?, part_from_int)?,
+            uns(r.get(2)?),
+        ))
+    })? {
+        let (n, part, version) = row?;
+        versions.insert((n, part), version);
+    }
+    let mut stmt = conn.prepare(
+        "SELECT id, part, version, at_ms, author, agent, note, number FROM suggestions
+         WHERE room = ?1 AND (?2 IS NULL OR number = ?2) ORDER BY id",
+    )?;
+    let mut suggestions: HashMap<u64, Vec<Suggestion>> = HashMap::new();
+    for row in stmt.query_map(params![room.as_bytes().as_slice(), only], |r| {
+        Ok((uns(r.get(7)?), suggestion_from_row(r)?))
+    })? {
+        let (n, s) = row?;
+        suggestions.entry(n).or_default().push(s);
+    }
+    for task in tasks {
+        let n = task.number;
+        task.details_version = versions.get(&(n, Part::Details)).copied().unwrap_or(0);
+        task.plan_version = versions.get(&(n, Part::Plan)).copied().unwrap_or(0);
+        task.suggestions = suggestions.remove(&n).unwrap_or_default();
+    }
+    Ok(())
 }
 
 /// One task with its notes and waits, `None` if the room has no such number.
@@ -628,10 +731,11 @@ pub fn read_task(conn: &Connection, room: &RoomId, number: u64) -> R<Option<Task
             Ok(uns(r.get(0)?))
         })?
         .collect::<rusqlite::Result<Vec<u64>>>()?;
+    fill_revisions(conn, room, Some(number), std::slice::from_mut(&mut task))?;
     Ok(Some(task))
 }
 
-/// Every task of a room by number, notes and waits included.
+/// Every task of a room by number, notes, waits, versions and suggestions included.
 pub fn read_tasks(conn: &Connection, room: &RoomId) -> R<Vec<Task>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {TASK_COLUMNS} FROM tasks WHERE room = ?1 ORDER BY number"
@@ -662,6 +766,7 @@ pub fn read_tasks(conn: &Connection, room: &RoomId) -> R<Vec<Task>> {
         task.notes = notes.remove(&task.number).unwrap_or_default();
         task.waits_for = waits.remove(&task.number).unwrap_or_default();
     }
+    fill_revisions(conn, room, None, &mut tasks)?;
     Ok(tasks)
 }
 
@@ -731,6 +836,66 @@ fn set_stage(conn: &Connection, room: &RoomId, number: u64, stage: Stage, now: u
     Ok(())
 }
 
+/// Versions kept per task and part; older ones are deleted.
+const KEEP_VERSIONS: i64 = 50;
+
+/// Stores `title` and `text` as the next version of `part`, unless they equal the newest
+/// version or, without any version yet, are both empty (a plan never written has none).
+/// Versions more than [`KEEP_VERSIONS`] behind are deleted.
+#[allow(clippy::too_many_arguments)]
+fn record_version(
+    conn: &Connection,
+    room: &RoomId,
+    number: u64,
+    part: Part,
+    author: Option<&MemberId>,
+    agent: Option<&str>,
+    title: &str,
+    text: &str,
+    now: u64,
+) -> R<()> {
+    let room_bytes = room.as_bytes().as_slice();
+    let newest: Option<(i64, String, String)> = conn
+        .query_row(
+            "SELECT version, title, text FROM versions WHERE room = ?1 AND number = ?2
+                 AND part = ?3 ORDER BY version DESC LIMIT 1",
+            params![room_bytes, int(number), part_to_int(part)],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let version = match newest {
+        Some((_, t, x)) if t == title && x == text => return Ok(()),
+        None if title.is_empty() && text.is_empty() => return Ok(()),
+        Some((v, _, _)) => v + 1,
+        None => 1,
+    };
+    conn.execute(
+        "INSERT INTO versions(room, number, part, version, at_ms, author, agent, title, text)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            room_bytes,
+            int(number),
+            part_to_int(part),
+            version,
+            int(now),
+            author.map(|a| a.as_bytes().as_slice()),
+            agent,
+            title,
+            text
+        ],
+    )?;
+    conn.execute(
+        "DELETE FROM versions WHERE room = ?1 AND number = ?2 AND part = ?3 AND version <= ?4",
+        params![
+            room_bytes,
+            int(number),
+            part_to_int(part),
+            version - KEEP_VERSIONS
+        ],
+    )?;
+    Ok(())
+}
+
 /// A new task of `project` in `stage` (`Idea` or `Proposed`) with priority `Normal`.
 #[allow(clippy::too_many_arguments)]
 pub fn create_task(
@@ -769,14 +934,28 @@ pub fn create_task(
             int(now)
         ],
     )?;
-    require_task(conn, room, uns(number))
+    let number = uns(number);
+    record_version(
+        conn,
+        room,
+        number,
+        Part::Details,
+        Some(author),
+        None,
+        title,
+        body,
+        now,
+    )?;
+    require_task(conn, room, number)
 }
 
 /// Writes an idea up into a proposal: new title and body, stage `Proposed`; the author stays.
 /// `waits` is added to what the idea already waits for.
+#[allow(clippy::too_many_arguments)]
 pub fn propose_idea(
     conn: &Connection,
     room: &RoomId,
+    author: &MemberId,
     number: u64,
     title: &str,
     body: &str,
@@ -808,13 +987,27 @@ pub fn propose_idea(
             int(now)
         ],
     )?;
+    record_version(
+        conn,
+        room,
+        number,
+        Part::Details,
+        Some(author),
+        None,
+        title,
+        body,
+        now,
+    )?;
     require_task(conn, room, number)
 }
 
-/// Rewrites title, body and plan; not allowed once a task is `Done` or `Rejected`.
+/// Rewrites title, body and plan, each changed part a new version by `author`; not allowed
+/// once a task is `Done` or `Rejected`.
+#[allow(clippy::too_many_arguments)]
 pub fn edit_task(
     conn: &Connection,
     room: &RoomId,
+    author: &MemberId,
     number: u64,
     title: &str,
     body: &str,
@@ -833,6 +1026,28 @@ pub fn edit_task(
             plan,
             int(now)
         ],
+    )?;
+    record_version(
+        conn,
+        room,
+        number,
+        Part::Details,
+        Some(author),
+        None,
+        title,
+        body,
+        now,
+    )?;
+    record_version(
+        conn,
+        room,
+        number,
+        Part::Plan,
+        Some(author),
+        None,
+        "",
+        plan,
+        now,
     )?;
     require_task(conn, room, number)
 }
@@ -1082,6 +1297,12 @@ pub fn submit_plan(
         }
         stage => return Err(ApiError::WrongStage(stage).into()),
     }
+    // The planner's agent; a refinement of a `Planned` task has no claim.
+    let agent = task
+        .claim
+        .as_ref()
+        .filter(|c| c.work == Work::Plan)
+        .map(|c| c.agent.as_str());
     clear_claim(conn, room, number)?;
     conn.execute(
         "UPDATE tasks SET plan = ?3, stage = ?4, updated_ms = ?5 WHERE room = ?1 AND number = ?2",
@@ -1092,6 +1313,17 @@ pub fn submit_plan(
             stage_to_int(Stage::Planned),
             int(now)
         ],
+    )?;
+    record_version(
+        conn,
+        room,
+        number,
+        Part::Plan,
+        Some(member),
+        agent,
+        "",
+        plan,
+        now,
     )?;
     require_task(conn, room, number)
 }
@@ -1154,6 +1386,189 @@ pub fn add_note(
 ) -> R<Task> {
     require_task(conn, room, number)?;
     append_note(conn, room, number, member, agent, text, now)?;
+    touch(conn, room, number, now)?;
+    require_task(conn, room, number)
+}
+
+/// The stored versions of `part` of a task, newest first.
+pub fn history(conn: &Connection, room: &RoomId, number: u64, part: Part) -> R<Vec<Revision>> {
+    require_task(conn, room, number)?;
+    let mut stmt = conn.prepare(
+        "SELECT version, author, agent, at_ms, title, text FROM versions
+         WHERE room = ?1 AND number = ?2 AND part = ?3 ORDER BY version DESC",
+    )?;
+    let versions = stmt
+        .query_map(
+            params![room.as_bytes().as_slice(), int(number), part_to_int(part)],
+            |r| {
+                let author: Option<Vec<u8>> = r.get(1)?;
+                Ok(Revision {
+                    version: uns(r.get(0)?),
+                    author: match author {
+                        None => None,
+                        Some(bytes) => Some(
+                            MemberId::from_slice(&bytes)
+                                .ok_or_else(|| corrupt(1, "id", rusqlite::types::Type::Blob))?,
+                        ),
+                    },
+                    agent: r.get(2)?,
+                    at_ms: uns(r.get(3)?),
+                    title: r.get(4)?,
+                    text: r.get(5)?,
+                })
+            },
+        )?
+        .collect::<rusqlite::Result<Vec<Revision>>>()?;
+    Ok(versions)
+}
+
+/// Name of `part` in messages.
+fn part_name(part: Part) -> &'static str {
+    match part {
+        Part::Details => "details",
+        Part::Plan => "plan",
+    }
+}
+
+/// Stores an agent's suggestion for `part` of an open task, written on `version`; the text
+/// of the task stays as it is. `title` is empty for a plan.
+#[allow(clippy::too_many_arguments)]
+pub fn suggest(
+    conn: &Connection,
+    room: &RoomId,
+    author: &MemberId,
+    number: u64,
+    part: Part,
+    version: u64,
+    agent: Option<&str>,
+    title: &str,
+    text: &str,
+    note: &str,
+    now: u64,
+) -> R<Task> {
+    let task = require_task(conn, room, number)?;
+    require_open(&task)?;
+    if version > task.version(part) {
+        return Err(ApiError::Invalid(format!(
+            "version {version} of the {} does not exist",
+            part_name(part)
+        ))
+        .into());
+    }
+    let same = match part {
+        Part::Details => title == task.title && text == task.body,
+        Part::Plan => text == task.plan,
+    };
+    if same {
+        return Err(
+            ApiError::Invalid("the suggestion is the same as the current text".into()).into(),
+        );
+    }
+    if task.suggestions.len() >= caps::SUGGESTIONS {
+        return Err(ApiError::Invalid(format!(
+            "the task already has {} pending suggestions; apply or discard one first",
+            caps::SUGGESTIONS
+        ))
+        .into());
+    }
+    conn.execute(
+        "INSERT INTO suggestions(room, number, part, version, at_ms, author, agent, note,
+             title, text) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            room.as_bytes().as_slice(),
+            int(number),
+            part_to_int(part),
+            int(version),
+            int(now),
+            author.as_bytes().as_slice(),
+            agent,
+            note,
+            title,
+            text
+        ],
+    )?;
+    touch(conn, room, number, now)?;
+    require_task(conn, room, number)
+}
+
+/// A pending suggestion of a task with its title and text, or `NoSuchSuggestion`.
+pub fn suggestion(
+    conn: &Connection,
+    room: &RoomId,
+    number: u64,
+    id: u64,
+) -> R<(Suggestion, String, String)> {
+    let found = conn
+        .query_row(
+            "SELECT id, part, version, at_ms, author, agent, note, title, text FROM suggestions
+             WHERE id = ?1 AND room = ?2 AND number = ?3",
+            params![int(id), room.as_bytes().as_slice(), int(number)],
+            |r| Ok((suggestion_from_row(r)?, r.get(7)?, r.get(8)?)),
+        )
+        .optional()?;
+    Ok(found.ok_or(ApiError::NoSuchSuggestion)?)
+}
+
+fn delete_suggestion(conn: &Connection, id: u64) -> R<()> {
+    conn.execute("DELETE FROM suggestions WHERE id = ?1", [int(id)])?;
+    Ok(())
+}
+
+/// Makes a suggestion the text of its part, as a new version by its author and agent, and
+/// drops it; not once the task is `Done` or `Rejected`. The stage stays. An outdated
+/// suggestion replaces the text all the same.
+pub fn apply_suggestion(
+    conn: &Connection,
+    room: &RoomId,
+    number: u64,
+    id: u64,
+    now: u64,
+) -> R<Task> {
+    require_open(&require_task(conn, room, number)?)?;
+    let (s, title, text) = suggestion(conn, room, number, id)?;
+    match s.part {
+        Part::Details => conn.execute(
+            "UPDATE tasks SET title = ?3, body = ?4, updated_ms = ?5
+             WHERE room = ?1 AND number = ?2",
+            params![
+                room.as_bytes().as_slice(),
+                int(number),
+                title,
+                text,
+                int(now)
+            ],
+        )?,
+        Part::Plan => conn.execute(
+            "UPDATE tasks SET plan = ?3, updated_ms = ?4 WHERE room = ?1 AND number = ?2",
+            params![room.as_bytes().as_slice(), int(number), text, int(now)],
+        )?,
+    };
+    record_version(
+        conn,
+        room,
+        number,
+        s.part,
+        Some(&s.author),
+        s.agent.as_deref(),
+        &title,
+        &text,
+        now,
+    )?;
+    delete_suggestion(conn, id)?;
+    require_task(conn, room, number)
+}
+
+/// Drops a suggestion; allowed in every stage, so leftovers of a closed task can go.
+pub fn discard_suggestion(
+    conn: &Connection,
+    room: &RoomId,
+    number: u64,
+    id: u64,
+    now: u64,
+) -> R<Task> {
+    require_task(conn, room, number)?;
+    suggestion(conn, room, number, id)?;
+    delete_suggestion(conn, id)?;
     touch(conn, room, number, now)?;
     require_task(conn, room, number)
 }
@@ -1292,13 +1707,13 @@ mod tests {
             claim(&conn, &room, &me, Work::Plan, None, Some(n), "a", NOW),
             Err(Fail::Api(ApiError::WrongStage(Stage::Idea)))
         ));
-        let task = propose_idea(&conn, &room, n, "T2", "b2", &[], NOW + 1).unwrap();
+        let task = propose_idea(&conn, &room, &me, n, "T2", "b2", &[], NOW + 1).unwrap();
         assert_eq!(task.number, n);
         assert_eq!(task.stage, Stage::Proposed);
         assert_eq!((task.title.as_str(), task.body.as_str()), ("T2", "b2"));
         assert_eq!(task.author, me);
         assert!(matches!(
-            propose_idea(&conn, &room, n, "T3", "", &[], NOW),
+            propose_idea(&conn, &room, &me, n, "T3", "", &[], NOW),
             Err(Fail::Api(ApiError::WrongStage(Stage::Proposed)))
         ));
     }
@@ -1349,7 +1764,7 @@ mod tests {
         assert_eq!(decide_from(at(Ready), MarkDone), Ok(Done));
         let with_plan = |c: &Connection, r: &RoomId, m: &MemberId| {
             let n = task_in(c, r, m, Accepted);
-            edit_task(c, r, n, "t", "", "plan", NOW).unwrap();
+            edit_task(c, r, m, n, "t", "", "plan", NOW).unwrap();
             n
         };
         assert_eq!(decide_from(with_plan, MarkPlanned), Ok(Planned));
@@ -1412,7 +1827,7 @@ mod tests {
     fn approve_needs_a_plan_and_reject_clears_the_claim() {
         let (conn, room, me) = setup();
         let n = task_in(&conn, &room, &me, Stage::Planned);
-        edit_task(&conn, &room, n, "t", "", "", NOW).unwrap();
+        edit_task(&conn, &room, &me, n, "t", "", "", NOW).unwrap();
         assert!(matches!(
             decide(&conn, &room, n, Decision::Approve, NOW),
             Err(Fail::Api(ApiError::Invalid(m))) if m == "plan is empty"
@@ -1431,7 +1846,7 @@ mod tests {
         let agent = member(2);
         let n = task_in(&conn, &room, &me, Stage::Accepted);
         claim(&conn, &room, &agent, Work::Plan, None, Some(n), "a", NOW).unwrap();
-        edit_task(&conn, &room, n, "t", "", "p", NOW).unwrap();
+        edit_task(&conn, &room, &me, n, "t", "", "p", NOW).unwrap();
         let task = decide(&conn, &room, n, Decision::MarkPlanned, NOW).unwrap();
         assert_eq!(task.stage, Stage::Planned);
         assert!(task.claim.is_none());
@@ -1456,7 +1871,7 @@ mod tests {
 
     #[test]
     fn newer_schema_versions_are_refused() {
-        for version in [4, 99, -1] {
+        for version in [5, 99, -1] {
             let conn = Connection::open_in_memory().unwrap();
             conn.pragma_update(None, "user_version", version).unwrap();
             let err = Store::init(conn).err().expect("refused");
@@ -1534,8 +1949,11 @@ CREATE INDEX notes_by_task ON notes(room, number);
     #[test]
     fn schema_2_gains_the_waits_table() {
         let conn = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
-        conn.execute_batch("DROP TABLE waits; PRAGMA user_version = 2;")
-            .unwrap();
+        conn.execute_batch(
+            "DROP TABLE waits; DROP TABLE versions; DROP TABLE suggestions;
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
         let conn = into_conn(Store::init(conn).unwrap());
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
@@ -1630,7 +2048,7 @@ CREATE INDEX notes_by_task ON notes(room, number);
         let y = task_in(&conn, &room, &me, Stage::Proposed);
         let idea = task_in(&conn, &room, &me, Stage::Idea);
         set_waits(&conn, &room, idea, &[x], NOW).unwrap();
-        let task = propose_idea(&conn, &room, idea, "T", "", &[y, x], NOW).unwrap();
+        let task = propose_idea(&conn, &room, &me, idea, "T", "", &[y, x], NOW).unwrap();
         assert_eq!(task.waits_for, vec![x, y]);
     }
 
@@ -1734,5 +2152,148 @@ CREATE INDEX notes_by_task ON notes(room, number);
         claim(&conn, &room, &me, Work::Build, None, Some(done), "a", NOW).unwrap();
         finish(&conn, &room, &me, done, "", NOW).unwrap();
         assert_eq!(move_task(&conn, &room, done, 2, NOW).unwrap().project, 2);
+    }
+
+    #[test]
+    fn every_change_of_text_is_a_version() {
+        let (conn, room, me) = setup();
+        let n = task_in(&conn, &room, &me, Stage::Proposed);
+        let task = read_task(&conn, &room, n).unwrap().unwrap();
+        assert_eq!((task.details_version, task.plan_version), (1, 0));
+
+        let task = edit_task(&conn, &room, &me, n, "t", "b", "", NOW).unwrap();
+        assert_eq!((task.details_version, task.plan_version), (2, 0));
+        let task = edit_task(&conn, &room, &me, n, "t", "b", "", NOW).unwrap();
+        assert_eq!((task.details_version, task.plan_version), (2, 0));
+
+        let planned = task_in(&conn, &room, &me, Stage::Planned);
+        let task = read_task(&conn, &room, planned).unwrap().unwrap();
+        assert_eq!(task.plan_version, 1);
+        let plans = history(&conn, &room, planned, Part::Plan).unwrap();
+        assert_eq!(plans[0].agent.as_deref(), Some("a"));
+        assert_eq!(plans[0].author, Some(me));
+        assert_eq!(plans[0].text, "plan");
+    }
+
+    #[test]
+    fn only_the_newest_versions_are_kept() {
+        let (conn, room, me) = setup();
+        let n = task_in(&conn, &room, &me, Stage::Proposed);
+        for i in 0..55 {
+            edit_task(&conn, &room, &me, n, "t", &i.to_string(), "", NOW).unwrap();
+        }
+        let versions = history(&conn, &room, n, Part::Details).unwrap();
+        assert_eq!(versions.len(), 50);
+        assert_eq!(versions[0].version, 56);
+        assert_eq!(versions[49].version, 7);
+        assert!(versions.windows(2).all(|w| w[0].version > w[1].version));
+    }
+
+    #[test]
+    fn an_applied_suggestion_is_a_version_of_its_author() {
+        let (conn, room, me) = setup();
+        let bob = member(2);
+        let n = task_in(&conn, &room, &me, Stage::Proposed);
+        let task = suggest(
+            &conn,
+            &room,
+            &bob,
+            n,
+            Part::Details,
+            1,
+            Some("omp"),
+            "t",
+            "new",
+            "why",
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(task.suggestions.len(), 1);
+        assert_eq!(task.body, "");
+        let id = task.suggestions[0].id;
+
+        let task = apply_suggestion(&conn, &room, n, id, NOW + 1).unwrap();
+        assert_eq!(task.body, "new");
+        assert_eq!(task.details_version, 2);
+        assert!(task.suggestions.is_empty());
+        let newest = &history(&conn, &room, n, Part::Details).unwrap()[0];
+        assert_eq!(newest.author, Some(bob));
+        assert_eq!(newest.agent.as_deref(), Some("omp"));
+        assert!(matches!(
+            discard_suggestion(&conn, &room, n, id, NOW),
+            Err(Fail::Api(ApiError::NoSuchSuggestion))
+        ));
+    }
+
+    #[test]
+    fn suggestions_are_checked() {
+        let (conn, room, me) = setup();
+        let n = task_in(&conn, &room, &me, Stage::Proposed);
+        let try_suggest = |version, body: &str| {
+            suggest(
+                &conn,
+                &room,
+                &me,
+                n,
+                Part::Details,
+                version,
+                None,
+                "t",
+                body,
+                "",
+                NOW,
+            )
+        };
+        assert!(matches!(
+            try_suggest(2, "x"),
+            Err(Fail::Api(ApiError::Invalid(_)))
+        ));
+        assert!(matches!(
+            try_suggest(1, ""),
+            Err(Fail::Api(ApiError::Invalid(_)))
+        ));
+        for i in 0..caps::SUGGESTIONS {
+            try_suggest(1, &i.to_string()).unwrap();
+        }
+        assert!(matches!(
+            try_suggest(1, "x"),
+            Err(Fail::Api(ApiError::Invalid(_)))
+        ));
+
+        let id = read_task(&conn, &room, n).unwrap().unwrap().suggestions[0].id;
+        decide(&conn, &room, n, Decision::Reject, NOW).unwrap();
+        assert!(matches!(
+            apply_suggestion(&conn, &room, n, id, NOW),
+            Err(Fail::Api(ApiError::WrongStage(Stage::Rejected)))
+        ));
+        // A closed task's leftovers can still be discarded.
+        discard_suggestion(&conn, &room, n, id, NOW).unwrap();
+    }
+
+    #[test]
+    fn schema_3_seeds_versions_from_the_current_text() {
+        let (conn, room, me) = setup();
+        let n = task_in(&conn, &room, &me, Stage::Proposed);
+        edit_task(&conn, &room, &me, n, "t", "b", "p", NOW).unwrap();
+        conn.execute_batch("DROP TABLE versions; DROP TABLE suggestions; PRAGMA user_version = 3;")
+            .unwrap();
+        let conn = into_conn(Store::init(conn).unwrap());
+        let details = history(&conn, &room, n, Part::Details).unwrap();
+        assert_eq!(details.len(), 1);
+        assert_eq!(
+            (
+                details[0].version,
+                details[0].author,
+                details[0].text.as_str()
+            ),
+            (1, None, "b")
+        );
+        let plans = history(&conn, &room, n, Part::Plan).unwrap();
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].text, "p");
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
     }
 }

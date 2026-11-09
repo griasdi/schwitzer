@@ -458,7 +458,7 @@ impl App {
         }
     }
 
-    fn open_ids(&self) -> Option<(RoomId, u64)> {
+    pub(super) fn open_ids(&self) -> Option<(RoomId, u64)> {
         self.open().map(|(state, task)| (state.id, task.number))
     }
 

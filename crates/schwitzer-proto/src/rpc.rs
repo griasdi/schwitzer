@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    DebugId, DebugInstruction, DebugSession, Decision, MemberId, Priority, Project, RoomId,
-    RoomToken, SessionInfo, Stage, Task, Work,
+    DebugId, DebugInstruction, DebugSession, Decision, MemberId, Part, Priority, Project, Revision,
+    RoomId, RoomToken, SessionInfo, Stage, Suggestion, Task, Work,
 };
 
 // Postcard is positional: enum variants are append-only.
@@ -156,18 +156,64 @@ pub enum Request {
         to: Vec<MemberId>,
         text: String,
     },
+    /// An agent's whole new text for `part` (title only with `Details`), written on `version`;
+    /// changes nothing until applied.
+    SuggestRevision {
+        room: RoomId,
+        task: u64,
+        part: Part,
+        version: u64,
+        title: String,
+        text: String,
+        note: String,
+        agent: Option<String>,
+    },
+    /// Makes the suggestion the task's text (a new version) and drops it; not once the task is
+    /// `Done` or `Rejected`.
+    ApplySuggestion {
+        room: RoomId,
+        task: u64,
+        suggestion: u64,
+    },
+    DiscardSuggestion {
+        room: RoomId,
+        task: u64,
+        suggestion: u64,
+    },
+    /// The stored versions of `part`, newest first, as many as fit one reply.
+    History {
+        room: RoomId,
+        task: u64,
+        part: Part,
+    },
+    GetSuggestion {
+        room: RoomId,
+        task: u64,
+        suggestion: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Response {
-    Hello { member: MemberId },
+    Hello {
+        member: MemberId,
+    },
     Ok,
-    Room { id: RoomId, token: RoomToken },
+    Room {
+        id: RoomId,
+        token: RoomToken,
+    },
     Task(Task),
     Claimed(Option<Task>),
     Project(Project),
     Debug(DebugSession),
     DebugInstruction(DebugInstruction),
+    History(Vec<Revision>),
+    Suggestion {
+        suggestion: Suggestion,
+        title: String,
+        text: String,
+    },
 }
 
 /// Shown verbatim by the UI and over MCP.
@@ -211,6 +257,8 @@ pub enum ApiError {
     NotDebugMaster,
     #[error("too much log data, try again in {0} s")]
     LogBudget(u64),
+    #[error("no such suggestion; it was applied or discarded")]
+    NoSuchSuggestion,
 }
 
 pub type Reply = Result<Response, ApiError>;

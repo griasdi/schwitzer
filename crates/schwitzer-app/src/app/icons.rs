@@ -55,6 +55,7 @@ icons! {
     DoorOpen => "door-open",
     Bug => "bug",
     Terminal => "square-terminal",
+    History => "history",
 }
 
 /// How an icon is coloured; resolved against the theme when drawn.

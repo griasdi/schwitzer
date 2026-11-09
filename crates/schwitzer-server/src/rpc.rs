@@ -10,8 +10,8 @@ use std::time::Instant;
 use rusqlite::Connection;
 use schwitzer_proto::{
     ApiError, DebugId, DebugSession, Event, MAX_RPC_BYTES, Member, MemberId, PROTOCOL_VERSION,
-    Project, RPC_TIMEOUT, Reply, Request, Response, RoomId, RoomToken, SessionInfo, Stage, Task,
-    caps, from_bytes, now_ms, to_bytes, valid_stream_name,
+    Part, Project, RPC_TIMEOUT, Reply, Request, Response, Revision, RoomId, RoomToken, SessionInfo,
+    Stage, Task, caps, encoded_len, from_bytes, now_ms, to_bytes, valid_stream_name,
 };
 use tokio::time::timeout;
 use weida::{ErrorCode, IncomingRequest, Replier, TransferMeta};
@@ -216,7 +216,7 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             let body = text("body", &body, caps::BODY, false)?;
             let waits_for = waits(waits_for)?;
             mutate(state, caller, room, move |conn, now| {
-                store::propose_idea(conn, &room, task, &title, &body, &waits_for, now)
+                store::propose_idea(conn, &room, &caller, task, &title, &body, &waits_for, now)
             })
             .await
         }
@@ -231,7 +231,7 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             let body = text("body", &body, caps::BODY, false)?;
             let plan = text("plan", &plan, caps::PLAN, false)?;
             mutate(state, caller, room, move |conn, now| {
-                store::edit_task(conn, &room, task, &title, &body, &plan, now)
+                store::edit_task(conn, &room, &caller, task, &title, &body, &plan, now)
             })
             .await
         }
@@ -296,11 +296,7 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             agent,
         } => {
             let note = text("text", &note, caps::NOTE, true)?;
-            let agent = match agent {
-                Some(label) => Some(text("agent", &label, caps::AGENT_LABEL, false)?)
-                    .filter(|label| !label.is_empty()),
-                None => None,
-            };
+            let agent = agent_label(agent)?;
             mutate(state, caller, room, move |conn, now| {
                 store::add_note(conn, &room, &caller, task, &note, agent.as_deref(), now)
             })
@@ -370,7 +366,119 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             let instruction = text("instruction", &instruction, caps::INSTRUCTION, true)?;
             debug_instruct(state, caller, room, session, to, instruction).await
         }
+        Request::SuggestRevision {
+            room,
+            task,
+            part,
+            version,
+            title,
+            text: new_text,
+            note,
+            agent,
+        } => {
+            let (title, body) = match part {
+                Part::Details => (
+                    text("title", &title, caps::TITLE, true)?,
+                    text("text", &new_text, caps::BODY, false)?,
+                ),
+                Part::Plan => (String::new(), text("plan", &new_text, caps::PLAN, false)?),
+            };
+            let note = text("note", &note, caps::SUGGESTION_NOTE, false)?;
+            let agent = agent_label(agent)?;
+            mutate(state, caller, room, move |conn, now| {
+                store::suggest(
+                    conn,
+                    &room,
+                    &caller,
+                    task,
+                    part,
+                    version,
+                    agent.as_deref(),
+                    &title,
+                    &body,
+                    &note,
+                    now,
+                )
+            })
+            .await
+        }
+        Request::ApplySuggestion {
+            room,
+            task,
+            suggestion,
+        } => {
+            mutate(state, caller, room, move |conn, now| {
+                store::apply_suggestion(conn, &room, task, suggestion, now)
+            })
+            .await
+        }
+        Request::DiscardSuggestion {
+            room,
+            task,
+            suggestion,
+        } => {
+            mutate(state, caller, room, move |conn, now| {
+                store::discard_suggestion(conn, &room, task, suggestion, now)
+            })
+            .await
+        }
+        Request::History { room, task, part } => {
+            let versions = state
+                .store
+                .run(move |conn| {
+                    store::require_member(conn, &room, &caller)?;
+                    store::history(conn, &room, task, part)
+                })
+                .await?;
+            Ok(Response::History(fit_history(versions)))
+        }
+        Request::GetSuggestion {
+            room,
+            task,
+            suggestion,
+        } => {
+            let (suggestion, title, text) = state
+                .store
+                .run(move |conn| {
+                    store::require_member(conn, &room, &caller)?;
+                    store::suggestion(conn, &room, task, suggestion)
+                })
+                .await?;
+            Ok(Response::Suggestion {
+                suggestion,
+                title,
+                text,
+            })
+        }
     }
+}
+
+/// An optional agent label: trimmed, capped, and `None` when empty.
+fn agent_label(agent: Option<String>) -> Result<Option<String>, ApiError> {
+    Ok(match agent {
+        Some(label) => {
+            Some(text("agent", &label, caps::AGENT_LABEL, false)?).filter(|l| !l.is_empty())
+        }
+        None => None,
+    })
+}
+
+/// Reply budget of a history: the versions, newest first, that fit one reply.
+const HISTORY_BYTES: usize = MAX_RPC_BYTES - 64;
+
+/// The longest prefix of `versions` that fits [`HISTORY_BYTES`], and always the first.
+fn fit_history(mut versions: Vec<Revision>) -> Vec<Revision> {
+    let mut used = 0;
+    let keep = versions
+        .iter()
+        .position(|v| {
+            used += encoded_len(v);
+            used > HISTORY_BYTES
+        })
+        .unwrap_or(versions.len())
+        .max(1);
+    versions.truncate(keep);
+    versions
 }
 
 /// Runs `change` in one store transaction as a member of `room`, commits, then

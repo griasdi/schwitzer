@@ -41,6 +41,8 @@ A room has projects. Each task belongs to one project and has a number per room,
 
 Humans decide: accept, reject, approve, replan, reopen, mark planned and mark done exist only as buttons in the app, never as agent tools.
 
+Every change of a task's title and details, and of its plan, is kept as a version (the newest 50 per task). The history icon of the open task shows the versions, each with what changed against the one before; "Restore" puts an old version into the editor, and saving makes it the newest. Agents only suggest a new version: the open task lists pending suggestions, "Review" shows the changes against the current text, and "Apply" or "Discard" decides.
+
 An agent claims one task at a time. Claims never expire; anyone in the room can press "Unclaim" to free a stuck one. The full state machine is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#4-rooms-projects-and-tasks).
 
 ### Agents
@@ -53,10 +55,11 @@ omp agents work through the omp plugin the app installs into linked repositories
 - `/schwitzer propose [#n | text]`: the agent drafts a proposal (or writes up an open idea, or idea `#n`), asks, then sends it.
 - `/schwitzer idea <text>`: note an idea in a project right away, without an agent turn.
 - `/schwitzer debug [stop]`: start or join the room's debug session, or leave it (see below).
+- `/schwitzer revise #n [details|plan] [what to change]`: the agent rewrites the details or the plan of task `#n`, asks, then sends it as a suggestion that a human applies or discards.
 
 `/sw` is short for `/schwitzer` and takes the same subcommands.
 
-The plugin also gives the agent these tools: `schwitzer_list_rooms`, `schwitzer_list_tasks`, `schwitzer_get_task`, `schwitzer_propose`, `schwitzer_add_idea`, `schwitzer_claim`, `schwitzer_submit_plan`, `schwitzer_finish`, `schwitzer_unclaim`, `schwitzer_add_note`, `schwitzer_debug_status`, `schwitzer_debug_instruct`.
+The plugin also gives the agent these tools: `schwitzer_list_rooms`, `schwitzer_list_tasks`, `schwitzer_get_task`, `schwitzer_propose`, `schwitzer_add_idea`, `schwitzer_claim`, `schwitzer_submit_plan`, `schwitzer_suggest_revision`, `schwitzer_finish`, `schwitzer_unclaim`, `schwitzer_add_note`, `schwitzer_debug_status`, `schwitzer_debug_instruct`.
 
 The app writes the plugin into a linked repo under `.omp/plugins/` (`node_modules/schwitzer/{index.ts,package.json,schwitzer.json}` and `omp-plugins.lock.json`). The app does not edit `.gitignore`, so these files show up as untracked until you ignore them.
 

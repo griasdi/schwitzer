@@ -16,12 +16,12 @@ pub use events::{Event, Subscribe};
 pub use frame::{FrameError, HEADER_LEN, encode_frame, read_frame};
 pub use ids::{ClaimToken, DebugId, IdParseError, MemberId, RoomId, RoomToken};
 pub use model::{
-    Claim, DebugInstruction, DebugSession, Decision, Member, Note, Priority, Project, RoomState,
-    SessionInfo, Stage, Task, Work, valid_stream_name,
+    Claim, DebugInstruction, DebugSession, Decision, Member, Note, Part, Priority, Project,
+    Revision, RoomState, SessionInfo, Stage, Suggestion, Task, Work, valid_stream_name,
 };
 pub use rpc::{ApiError, Reply, Request, Response};
 
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 pub const PATH_RPC: &str = "/rpc";
 pub const PATH_EVENTS: &str = "/events";
@@ -54,6 +54,10 @@ pub mod caps {
     pub const INSTRUCTION: usize = 16 * 1024;
     /// Members of one debug session.
     pub const DEBUG_MEMBERS: usize = 16;
+    /// Pending suggestions of one task.
+    pub const SUGGESTIONS: usize = 5;
+    /// Bytes of a suggestion's note.
+    pub const SUGGESTION_NOTE: usize = 2 * 1024;
 
     /// `text` cut to at most `max` bytes at a character boundary.
     pub fn cut(text: &str, max: usize) -> &str {

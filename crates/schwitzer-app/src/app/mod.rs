@@ -15,6 +15,8 @@ mod plugins;
 mod projects;
 mod reading;
 mod resume;
+mod revisions;
+mod revisions_view;
 mod rooms;
 mod settings_view;
 mod sticky;
@@ -38,7 +40,7 @@ use iced::widget::{column, container, markdown, operation, stack, text_editor};
 use iced::{Element, Length, Subscription, Task, Theme};
 use schwitzer_client::{Client, ClientError, ClientEvent};
 use schwitzer_proto::{
-    Decision, Priority, Project, Request, Response, RoomId, RoomKey, RoomState, ServerAddr,
+    Decision, Part, Priority, Project, Request, Response, RoomId, RoomKey, RoomState, ServerAddr,
     SessionInfo, Task as RoomTask, Work, caps, now_ms,
 };
 use serde::{Deserialize, Serialize};
@@ -232,6 +234,18 @@ pub enum Message {
     PlanAction(text_editor::Action),
     SavePlan,
     PlanSaved(Result<Response, String>),
+    /// Shows the history of the open task's details or plan.
+    OpenHistory(Part),
+    HistoryLoaded(u64, Part, Result<Response, String>),
+    SelectVersion(u64),
+    /// Puts a version of the history into the editor of its part.
+    RestoreVersion(u64),
+    ReviewSuggestion(u64),
+    SuggestionLoaded(u64, Result<Response, String>),
+    ApplySuggestion(u64),
+    DiscardSuggestion(u64),
+    SuggestionApplied(Result<Response, String>),
+    SuggestionDiscarded(Result<Response, String>),
     SetPriority(Priority),
     AddWait(u64),
     RemoveWait(u64),
@@ -501,6 +515,8 @@ pub struct App {
     /// The text of open task `n` shown as the reading page, on the main page only; not kept
     /// over a restart.
     reading: Option<(u64, Reading)>,
+    /// The open task's history or a suggestion under review, on the main page only.
+    revisions: Option<revisions::RevisionPage>,
     /// The task whose pick is under way.
     picking: Option<u64>,
     /// The open proposal accepted last, until the list returned to its place.
@@ -646,6 +662,7 @@ impl App {
             proposal_folded: false,
             plan_folded: false,
             reading: None,
+            revisions: None,
             picking: None,
             accept_return: None,
             noting_idea: None,
@@ -759,6 +776,9 @@ impl App {
         let body: Element<'_, Message> = match self.page {
             Page::FirstStart => settings_view::first_start(self),
             Page::Main => match (self.reading, self.open()) {
+                (_, Some((state, task))) if self.revisions.is_some() => {
+                    revisions_view::page(self, state, task)
+                }
                 (Some((_, part)), Some((state, task))) => reading::page(self, state, task, part),
                 _ => {
                     let mut main = column![chrome::header(self), widgets::hrule()];
@@ -814,14 +834,16 @@ impl App {
             self.reset_drafts();
         }
         self.reading = None;
+        self.revisions = None;
         true
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
         self.settle_reading();
+        let settle = self.settle_revisions();
         self.refresh_markdown();
-        task
+        Task::batch([task, settle])
     }
 
     /// Drops the reading page unless the main page shows it, its task is still the open one and
@@ -1051,6 +1073,9 @@ impl App {
                 }
                 if self.confirm.take().is_some() {
                     return Task::none();
+                }
+                if self.revisions.take().is_some() {
+                    return reveal("open-task");
                 }
                 if self.reading.take().is_some() {
                     return reveal("open-task");
@@ -1416,6 +1441,20 @@ impl App {
             }
             Message::SavePlan => self.save_plan(),
             Message::PlanSaved(result) => self.plan_saved(result),
+            Message::OpenHistory(part) => self.open_history(part),
+            Message::HistoryLoaded(n, part, result) => self.history_loaded(n, part, result),
+            Message::SelectVersion(v) => self.select_version(v),
+            Message::RestoreVersion(v) => self.restore_version(v),
+            Message::ReviewSuggestion(id) => self.review_suggestion(id),
+            Message::SuggestionLoaded(id, result) => self.suggestion_loaded(id, result),
+            Message::ApplySuggestion(id) => self.settle_suggestion(id, true),
+            Message::DiscardSuggestion(id) => self.settle_suggestion(id, false),
+            Message::SuggestionApplied(result) => {
+                self.suggestion_settled(result, "Suggestion applied")
+            }
+            Message::SuggestionDiscarded(result) => {
+                self.suggestion_settled(result, "Suggestion discarded")
+            }
             Message::SetPriority(priority) => self.set_priority(priority),
             Message::AddWait(n) => self.set_waits(|w| w.push(n)),
             Message::RemoveWait(n) => self.set_waits(|w| w.retain(|x| *x != n)),
@@ -1823,6 +1862,7 @@ impl App {
         self.proposal_folded = false;
         self.plan_folded = false;
         self.forms.note.clear();
+        self.revisions = None;
     }
 
     /// Writes what the window shows for the new process, starts it and exits (for an installed

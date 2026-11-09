@@ -1,8 +1,8 @@
 //! The MCP tools and what they answer: the arguments, the JSON rows, how a call finds its room,
 //! and the bound that keeps a stuck server from hanging the agent.
 //!
-//! There is deliberately no tool to accept, reject, approve, replan or reopen a task: those
-//! decisions stay with humans in the UI.
+//! There is deliberately no tool to accept, reject, approve, replan or reopen a task, nor to
+//! apply or discard a suggestion: those decisions stay with humans in the UI.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -13,8 +13,8 @@ use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabiliti
 use rmcp::{ServerHandler, schemars, tool, tool_handler, tool_router};
 use schwitzer_client::Client;
 use schwitzer_proto::{
-    ApiError, Claim, DebugSession, Member, MemberId, Priority, Project, Request, Response, RoomId,
-    RoomState, Stage, Task, Work,
+    ApiError, Claim, DebugSession, Member, MemberId, Part, Priority, Project, Request, Response,
+    RoomId, RoomState, Stage, Task, Work,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -43,6 +43,31 @@ impl From<WorkArg> for Work {
             WorkArg::Plan => Work::Plan,
             WorkArg::Build => Work::Build,
         }
+    }
+}
+
+/// The text of a task a suggestion rewrites.
+#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum PartArg {
+    Details,
+    Plan,
+}
+
+impl From<PartArg> for Part {
+    fn from(part: PartArg) -> Self {
+        match part {
+            PartArg::Details => Part::Details,
+            PartArg::Plan => Part::Plan,
+        }
+    }
+}
+
+/// The name of `part` in tool rows.
+fn part_name(part: Part) -> &'static str {
+    match part {
+        Part::Details => "details",
+        Part::Plan => "plan",
     }
 }
 
@@ -176,6 +201,30 @@ struct SubmitPlanArgs {
     task: u64,
     /// The plan (Markdown).
     plan: String,
+}
+
+/// Arguments of `suggest_revision`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SuggestRevisionArgs {
+    /// Room name or id prefix; may be omitted when exactly one room is joined.
+    #[serde(default)]
+    room: Option<String>,
+    /// Task number.
+    task: u64,
+    /// "details" rewrites title and details, "plan" the plan.
+    part: PartArg,
+    /// The `details_version` or `plan_version` get_task showed for the text you rewrote.
+    version: u64,
+    /// New one-line title; required with part "details", not allowed with "plan".
+    #[serde(default)]
+    title: Option<String>,
+    /// The whole new text (Markdown), not a diff.
+    text: String,
+    /// What you changed and why, in a sentence or two; shown to the humans who decide.
+    #[serde(default)]
+    note: String,
+    /// Name of this agent, shown to the room.
+    agent: String,
 }
 
 /// Arguments of `finish` and `unclaim`.
@@ -468,6 +517,22 @@ fn task_json(task: &Task, members: &[Member], projects: &[Project], tasks: &[Tas
     full["created_ms"] = json!(task.created_ms);
     full["updated_ms"] = json!(task.updated_ms);
     full["notes"] = json!(notes);
+    full["details_version"] = json!(task.details_version);
+    full["plan_version"] = json!(task.plan_version);
+    full["suggestions"] = json!(
+        task.suggestions
+            .iter()
+            .map(|s| json!({
+                "id": s.id,
+                "part": part_name(s.part),
+                "version": s.version,
+                "author": logic::member_name(members, &s.author),
+                "agent": s.agent,
+                "note": s.note,
+                "at_ms": s.at_ms,
+            }))
+            .collect::<Vec<_>>()
+    );
     full
 }
 
@@ -933,6 +998,38 @@ impl Tools {
     }
 
     #[tool(
+        description = "Suggest a new version of a task's title and details, or of its plan. Nothing changes until a room member applies it in the app; they may also discard it."
+    )]
+    async fn suggest_revision(
+        &self,
+        Parameters(args): Parameters<SuggestRevisionArgs>,
+    ) -> CallToolResult {
+        Self::bounded(self.update_task(args.room, |room| {
+            let part = Part::from(args.part);
+            match (part, &args.title) {
+                (Part::Details, None) => {
+                    return Err("a suggestion for the details needs a title".to_owned());
+                }
+                (Part::Plan, Some(_)) => {
+                    return Err("a suggestion for the plan takes no title".to_owned());
+                }
+                _ => {}
+            }
+            Ok(Request::SuggestRevision {
+                room: room.id,
+                task: args.task,
+                part,
+                version: args.version,
+                title: args.title.unwrap_or_default(),
+                text: args.text,
+                note: args.note,
+                agent: Some(args.agent),
+            })
+        }))
+        .await
+    }
+
+    #[tool(
         description = "Finish a task you claimed with work \"build\", with a note on what was done."
     )]
     async fn finish(&self, Parameters(args): Parameters<NoteArgs>) -> CallToolResult {
@@ -1099,6 +1196,8 @@ impl ServerHandler for Tools {
                  accepts it; an agent claims it to write a plan (claim with work \"plan\", then \
                  submit_plan); a human approves the plan; an agent claims it to build (claim \
                  with work \"build\") and reports with finish, or gives it back with unclaim. \
+                 To improve a task's text, send suggest_revision with the version get_task \
+                 showed; a human applies or discards it. \
                  Stages: idea, proposed, accepted, planned, ready, in_progress, done, rejected. \
                  You cannot accept, reject, approve or reopen: humans decide. Keep the \
                  `schwitzer-claim:` line of a claim in your output. A change another project \
@@ -1149,6 +1248,9 @@ mod tests {
                 at_ms: 3,
             }],
             waits_for: Vec::new(),
+            details_version: 1,
+            plan_version: 0,
+            suggestions: Vec::new(),
         }
     }
 

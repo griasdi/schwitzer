@@ -64,6 +64,38 @@ pub struct Note {
     pub at_ms: u64,
 }
 
+/// Which text of a task a version or a suggestion holds: `Details` is title and body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Part {
+    Details,
+    Plan,
+}
+
+/// One stored version of a task's details or plan. `author` is `None` for the version the
+/// schema migration took over from before the history; `title` is empty for a plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Revision {
+    pub version: u64,
+    pub author: Option<MemberId>,
+    pub agent: Option<String>,
+    pub at_ms: u64,
+    pub title: String,
+    pub text: String,
+}
+
+/// A pending suggestion of an agent, without its text (`Request::GetSuggestion` loads that).
+/// `version` is the version of `part` the agent read before it rewrote it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Suggestion {
+    pub id: u64,
+    pub part: Part,
+    pub version: u64,
+    pub author: MemberId,
+    pub agent: Option<String>,
+    pub note: String,
+    pub at_ms: u64,
+}
+
 /// A part of a room, for example one product or repository; every task belongs to one.
 /// Ids are per-room numbers starting at 1, like task numbers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,6 +121,12 @@ pub struct Task {
     /// Numbers of the tasks of the room this one waits for, ascending and without duplicates:
     /// a build claim skips it until all of them are `Done`.
     pub waits_for: Vec<u64>,
+    /// The newest version of the details (title and body).
+    pub details_version: u64,
+    /// The newest version of the plan, 0 while there never was one.
+    pub plan_version: u64,
+    /// Pending suggestions of agents, oldest first.
+    pub suggestions: Vec<Suggestion>,
 }
 
 impl Task {
@@ -109,6 +147,14 @@ impl Task {
     /// Whether the plan has any text besides whitespace.
     pub fn has_plan(&self) -> bool {
         !self.plan.trim().is_empty()
+    }
+
+    /// The newest version of `part`.
+    pub fn version(&self, part: Part) -> u64 {
+        match part {
+            Part::Details => self.details_version,
+            Part::Plan => self.plan_version,
+        }
     }
 }
 

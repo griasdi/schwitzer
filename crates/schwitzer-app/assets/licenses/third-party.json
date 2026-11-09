@@ -1,5 +1,5 @@
 {
-  "lock": "c6ced03d62aa0eee4503f71895e37714bf0c836ea736ac1de2f0c6edfca4780f",
+  "lock": "c76bdd37e5e9d4ccf7c7aad59798c6f3836b6dec48d53ad4dfb0f3358dc61c2a",
   "licenses": [
     {
       "id": "Apache-2.0",
@@ -133,6 +133,11 @@
           "name": "ring",
           "version": "0.17.14",
           "source": "https://crates.io/crates/ring/0.17.14"
+        },
+        {
+          "name": "similar",
+          "version": "2.7.0",
+          "source": "https://crates.io/crates/similar/2.7.0"
         }
       ]
     },

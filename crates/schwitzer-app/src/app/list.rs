@@ -180,6 +180,20 @@ pub fn summary<'a>(
     if logic::editable(task) && !open.is_empty() {
         meta = meta.push(muted(logic::waits_label(&open)));
     }
+    if !task.suggestions.is_empty() {
+        let label = match task.suggestions.len() {
+            1 => "1 suggestion".to_owned(),
+            n => format!("{n} suggestions"),
+        };
+        meta = meta.push(
+            row![
+                icon(Icon::Bot, 12.0, Tone::Ink),
+                text(label).size(TS_12).style(theme::text_ink)
+            ]
+            .spacing(SP_1)
+            .align_y(Alignment::Center),
+        );
+    }
     meta = meta.push(Space::new().width(Length::Fill));
     if let Some((label, why)) = hint {
         meta = meta.push(with_tip(muted(label), why));

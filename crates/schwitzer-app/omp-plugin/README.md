@@ -13,14 +13,15 @@ The Schwitzer app writes an omp extension into every repository linked to a proj
 |`/schwitzer propose [#n \| text]`|The agent drafts a proposal (or writes up an open idea, or idea `#n`), asks, then sends it|
 |`/schwitzer idea <text>`|Note an idea in a project right away, without an agent turn|
 |`/schwitzer debug [stop]`|Start or join the debug session of a room, or leave it|
+|`/schwitzer revise #n [details\|plan] [what to change]`|The agent rewrites the details or plan of task `#n`, asks, then sends it as a suggestion that a human applies or discards in the app|
 
 `/sw` is short for `/schwitzer` and takes the same subcommands; the plugin's messages always name `/schwitzer`. A task number is written `#12` or `12`.
 
-The menu of a bare `/schwitzer` shows "plan · plan a task that waits for a plan", "build · build an approved task", "propose · propose a new task", "idea · note an idea for later" and "debug · test together: start or join a debug session".
+The menu of a bare `/schwitzer` shows "plan · plan a task that waits for a plan", "build · build an approved task", "propose · propose a new task", "idea · note an idea for later", "debug · test together: start or join a debug session" and "revise · let the agent suggest a better version of a task".
 
 For all of them:
 
-- An unknown subcommand is refused with `Schwitzer: unknown subcommand "<sub>". Usage: /schwitzer plan [#n [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop]`. An argument to `plan` or `build` that is no task number, optionally followed by `now` (and not `new` for `build`), or to `debug` other than `stop`, is refused with `Schwitzer: unknown argument "<arg>".` and the same usage line.
+- An unknown subcommand is refused with `Schwitzer: unknown subcommand "<sub>". Usage: /schwitzer plan [#n [now]] | build [#n [now] | new] | propose [#n | text] | idea <text> | debug [stop] | revise #n [details|plan] [what to change]`. An argument to `plan` or `build` that is no task number, optionally followed by `now` (and not `new` for `build`), to `debug` other than `stop`, or to `revise` that does not start with a task number, is refused with `Schwitzer: unknown argument "<arg>".` and the same usage line.
 - When `schwitzer.json` lists no project, the plugin says "This repo is not linked to a Schwitzer project."
 - Every subcommand except `idea` needs the agent idle, otherwise: "Wait until the agent is idle, then run /schwitzer again." `idea` works while the agent is busy.
 - Only projects that are in `schwitzer.json` and exist in a room joined by the app (`list_rooms`) count. A configured project of a room the app has left is skipped.
@@ -127,6 +128,13 @@ Starts or joins the debug session of a room: members test a networked app togeth
 
 `/schwitzer debug stop` leaves the session and stops the wait: a participant at once, the master after the dialog `End the debug session in "<room>" for everyone?` ("End it", "Cancel"). It then shows the app's answer to `debug_leave`: `Ended the debug session.` for the master, `Left the debug session.` for a participant. Without a session of this member: `You are not in the debug session of "<room>".`
 
+### /schwitzer revise #n [details|plan] [what to change]
+
+- Without arguments, the editor gets `/schwitzer revise ` and the plugin says "Type the task number after /schwitzer revise, optionally details or plan and what to change, then press Enter."
+- The plugin looks the number up like `/schwitzer plan #n`, among the tasks that are not done or rejected; with several, the picker "Revise which task?" shows `#<n> <title> · <project> · <room>`. No task of that number: "No task #<n> in this repo's Schwitzer projects."; one closed task: "Task #<n> is <stage>; only a task that is not done or rejected can be revised."; several, all closed: "Task #<n> is done or rejected in every one of this repo's Schwitzer projects."
+- It sends a user message that asks the agent to read the task with `schwitzer_get_task`, revise the plan (`plan`), the title and details (`details`) or, without either, the plan when there is one, else the title and details; to follow `What to change: <text>` or, without it, to make the text clearer and more concrete from the conversation and the repository; to change nothing in the repository; to show the whole new text and what changed in the chat and ask with the ask tool; and only after agreement to call `schwitzer_suggest_revision` with the version `get_task` showed.
+- The suggestion changes nothing until a room member applies it in the app; they may also discard it.
+
 ## Other projects
 
 An agent in one repo may need a change in another Schwitzer project, for example a dependency. That change goes to the other project as a proposal instead of being made from this session. The origin is only written into the proposal's body.
@@ -155,6 +163,7 @@ A member can switch on "Task number in commits" per project in the app (Settings
 |`schwitzer_add_idea`|Note an idea|
 |`schwitzer_claim`|Claim a task for planning or building|
 |`schwitzer_submit_plan`|Hand in the plan for a planning claim|
+|`schwitzer_suggest_revision`|Suggest a new version of a task's title and details or of its plan, written on the `details_version` or `plan_version` `get_task` showed; a human applies or discards it|
 |`schwitzer_finish`|Finish a build claim with a note|
 |`schwitzer_unclaim`|Give a claim back with a note|
 |`schwitzer_add_note`|Add a note to a task|
@@ -164,7 +173,7 @@ A member can switch on "Task number in commits" per project in the app (Settings
 - The plugin registers them when omp loads it, whether the app runs or not; each call goes to the app like the commands' calls (below), so without the app it fails with "not reachable".
 - `schwitzer_list_rooms`, `schwitzer_list_tasks`, `schwitzer_get_task` and `schwitzer_debug_status` have approval tier `read`, the rest `write`.
 - A restricted subagent does not get extension tools (an omp rule), so it does not get these either.
-- None accepts, rejects or approves: humans decide in the app.
+- None accepts, rejects or approves, or applies or discards a suggestion: humans decide in the app.
 - A build claim (`/schwitzer build`, the build after an approved plan, or `schwitzer_claim` with `work: build`) remembers `HEAD` of this repo in the omp process, keyed by room and task. `schwitzer_finish` then appends the commits since then to its note: a `Commits:` line and `` - `<hash>` <subject> `` per commit, newest first, at most 50, cut so the note stays within 16 KiB, the rest as `- … <n> more`. No new commit, no git repo, an omp restart since the claim, or a note that alone leaves no room: the note goes out as written. A finish or unclaim forgets the start.
 
 ## How the app installs it

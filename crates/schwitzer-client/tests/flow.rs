@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use schwitzer_client::{Client, ClientError, ClientEvent};
 use schwitzer_proto::{
-    ApiError, Decision, MemberId, Priority, Project, Request, Response, RoomId, RoomKey, RoomState,
-    ServerAddr, Stage, Task, Work, caps,
+    ApiError, Decision, MemberId, Part, Priority, Project, Request, Response, RoomId, RoomKey,
+    RoomState, ServerAddr, Stage, Task, Work, caps,
 };
 use schwitzer_server::{Options, Releases, Server};
 use tempfile::TempDir;
@@ -687,6 +687,131 @@ async fn an_empty_project_is_deleted_for_every_member() {
     assert_eq!(
         api_error(b.request(room, propose(old.id)).await),
         ApiError::NoSuchProject
+    );
+
+    a.shutdown();
+    b.shutdown();
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn suggestions_are_applied_and_kept_in_the_history() {
+    let data = TempDir::new().unwrap();
+    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
+    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
+    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
+    let mut rx_a = a.subscribe();
+
+    let key = a
+        .create_room(server.addr.clone(), "crew".into())
+        .await
+        .unwrap();
+    let room = RoomId::of(&key.token);
+    assert_eq!(b.join_room(key).await.unwrap(), room);
+    let app = project(
+        a.request(
+            room,
+            Request::CreateProject {
+                room,
+                name: "app".into(),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let proposal = task(
+        a.request(
+            room,
+            Request::Propose {
+                room,
+                project: app.id,
+                title: "t".into(),
+                body: "old".into(),
+                waits_for: vec![],
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(proposal.details_version, 1);
+
+    b.request(
+        room,
+        Request::SuggestRevision {
+            room,
+            task: proposal.number,
+            part: Part::Details,
+            version: 1,
+            title: "t2".into(),
+            text: "new".into(),
+            note: "n".into(),
+            agent: Some("omp".into()),
+        },
+    )
+    .await
+    .unwrap();
+    let state = room_where(&mut rx_a, |s| {
+        s.tasks.iter().any(|t| t.suggestions.len() == 1)
+    })
+    .await;
+    let id = state.tasks[0].suggestions[0].id;
+    assert_eq!(state.tasks[0].body, "old");
+
+    let get = Request::GetSuggestion {
+        room,
+        task: proposal.number,
+        suggestion: id,
+    };
+    match a.request(room, get).await.unwrap() {
+        Response::Suggestion { text, .. } => assert_eq!(text, "new"),
+        other => panic!("expected a suggestion, got {other:?}"),
+    }
+
+    let applied = task(
+        a.request(
+            room,
+            Request::ApplySuggestion {
+                room,
+                task: proposal.number,
+                suggestion: id,
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(
+        (applied.title.as_str(), applied.body.as_str()),
+        ("t2", "new")
+    );
+    assert!(applied.suggestions.is_empty());
+    let history = Request::History {
+        room,
+        task: proposal.number,
+        part: Part::Details,
+    };
+    let Response::History(versions) = a.request(room, history).await.unwrap() else {
+        panic!("expected a history");
+    };
+    assert_eq!(
+        versions.iter().map(|v| v.version).collect::<Vec<_>>(),
+        [2, 1]
+    );
+    assert_eq!(versions[0].title, "t2");
+    assert_eq!(versions[0].agent.as_deref(), Some("omp"));
+    assert_eq!(
+        api_error(
+            a.request(
+                room,
+                Request::DiscardSuggestion {
+                    room,
+                    task: proposal.number,
+                    suggestion: id,
+                },
+            )
+            .await
+        ),
+        ApiError::NoSuchSuggestion
     );
 
     a.shutdown();

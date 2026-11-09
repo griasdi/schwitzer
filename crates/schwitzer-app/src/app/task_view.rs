@@ -5,7 +5,7 @@ use std::fmt;
 use iced::widget::text::LineHeight;
 use iced::widget::{Row, Space, column, container, row, text, text_editor};
 use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{Decision, Priority, RoomState, Stage, Task, caps};
+use schwitzer_proto::{Decision, Part, Priority, RoomState, Stage, Task, caps};
 
 use super::chrome::ProjectChoice;
 use super::icons::{Icon, Tone, icon};
@@ -69,6 +69,16 @@ pub fn view<'a>(
             theme::button_ghost,
         ));
     }
+    if app.task_draft.is_none() && task.details_version > 1 {
+        icons = icons.push(icon_button(
+            "history-details",
+            Icon::History,
+            Tone::Muted,
+            "History of title and details",
+            Some(Message::OpenHistory(Part::Details)),
+            theme::button_ghost,
+        ));
+    }
     icons = icons.push(icon_button(
         "close-task",
         Icon::Close,
@@ -95,16 +105,20 @@ pub fn view<'a>(
     if let Some(details) = details(app, task, list_height) {
         body = body.push(details);
     }
+    if let Some(s) = suggestions(app, state, task, Part::Details) {
+        body = body.push(s);
+    }
     body = body.push(people(app, state, task));
     if let Some(actions) = actions(app, state, task) {
         body = body.push(actions);
     }
     body = body
         .push(hrule())
-        .push(plan(app, task, editable, list_height))
-        .push(hrule())
-        .push(priority(task))
-        .push(hrule());
+        .push(plan(app, task, editable, list_height));
+    if let Some(s) = suggestions(app, state, task, Part::Plan) {
+        body = body.push(s);
+    }
+    body = body.push(hrule()).push(priority(task)).push(hrule());
     if state.projects.len() > 1 {
         body = body.push(project(state, task)).push(hrule());
     }
@@ -491,6 +505,16 @@ fn plan<'a>(
             theme::button_ghost,
         ));
     }
+    if app.plan_draft.is_none() && task.plan_version > 1 {
+        head = head.push(icon_button(
+            "history-plan",
+            Icon::History,
+            Tone::Muted,
+            "History of the plan",
+            Some(Message::OpenHistory(Part::Plan)),
+            theme::button_ghost,
+        ));
+    }
     if editable && app.plan_draft.is_none() {
         head = head.push(widgets::icon_button(
             "edit-plan",
@@ -557,6 +581,47 @@ fn plan<'a>(
     )
     .id("plan")
     .into()
+}
+
+/// The pending suggestions of agents for `part`, one line each with Review; `None` without.
+fn suggestions<'a>(
+    app: &'a App,
+    state: &'a RoomState,
+    task: &'a Task,
+    part: Part,
+) -> Option<Element<'a, Message>> {
+    let mut col = column![].spacing(SP_2);
+    let mut any = false;
+    for s in task.suggestions.iter().filter(|s| s.part == part) {
+        any = true;
+        let mut line = row![
+            icon(Icon::Bot, 14.0, Tone::Ink),
+            muted("Suggestion"),
+            member_tag_of(&state.members, &s.author),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center);
+        if let Some(agent) = &s.agent {
+            line = line.push(muted(agent));
+        }
+        if logic::outdated(task, s) {
+            line = line.push(widgets::pill("outdated"));
+        }
+        line = line
+            .push(Space::new().width(Length::Fill))
+            .push(muted(format!(
+                "{} ago",
+                logic::ago(app.now_ms.saturating_sub(s.at_ms))
+            )))
+            .push(text_button(
+                format!("review-suggestion-{}", s.id),
+                "Review",
+                Some(Message::ReviewSuggestion(s.id)),
+                theme::button_secondary,
+            ));
+        col = col.push(line);
+    }
+    any.then(|| col.into())
 }
 
 fn priority(task: &Task) -> Element<'_, Message> {

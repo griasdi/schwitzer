@@ -36,7 +36,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |Component|Runs where|Role|Talks to|
 |---|---|---|---|
 |`schwitzer` desktop app|each member's machine (Linux, Windows, macOS)|task list, decisions, settings; MCP server for the member's agents; session scanner; plugin keeper; self-update|room servers over weida/QUIC; omp through the plugin files and the MCP server; GitHub over HTTPS|
-|omp + the Schwitzer plugin|the member's machine, in every repo linked to a project|the coding agent; `/schwitzer plan · build · propose · idea · debug` (short `/sw`) and the `schwitzer_*` tools|the app's MCP server on `127.0.0.1`|
+|omp + the Schwitzer plugin|the member's machine, in every repo linked to a project|the coding agent; `/schwitzer plan · build · propose · idea · debug · revise` (short `/sw`) and the `schwitzer_*` tools|the app's MCP server on `127.0.0.1`|
 |`schwitzer-server`|anyone's host, UDP (default `0.0.0.0:7444`)|rooms, projects, tasks, claims, notes; fans out events; holds live sessions in memory; announces the newest stable release|apps over weida/QUIC; the GitHub releases API|
 |stkn.org|the shared server, `weida://…@stkn.org:7444`|`schwitzer-server --auto-update` as the systemd user unit `schwitzer-server`, set up once by the maintainer with `deploy/deploy.sh stkn`; it installs every published release itself (release channel); other people use it, so a protocol break cuts off their older apps until they update|apps|
 |GitHub Releases + releases API|github.com|release assets with sha256 digests; the server polls `RELEASES_URL` every 120 s, the app downloads from it|apps, servers|
@@ -47,7 +47,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 
 |Crate|Owns|Must not know about|
 |---|---|---|
-|`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `RoomState`, `DebugSession`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (8), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
+|`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `Part`, `Revision`, `Suggestion`, `RoomState`, `DebugSession`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (9), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
 |`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `debug.rs`, `limit.rs` (the request budget and the debug log `ByteBudget`), `release.rs`, `update.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
 |`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
 |`schwitzer-release`|what both updaters share: `RELEASES_URL`, `PLATFORM`, `GitHubRelease`, `Asset`/`Download` with the `sha256:` digest parsing, `parse_tag`/`is_stable`, `VERSION`/`version()`/`user_agent(program)` (this build's version: `SCHWITZER_VERSION` at build time, else the workspace version), `is_update` (newer always, older only across stable/dev), `Channel` (`release`/`dev`), `DEV_TAG`, `newest_asset`, `api_get`, `api_get_dev` and `fetch` (bounded HTTPS download, then the size and sha256 check), `extract_tar_gz`/`extract_zip` (Windows), `sibling`, `replace` (Unix swap; Windows swap through `.old`), `clean_leftovers`|iced, SQLite, weida, tokio|
@@ -99,7 +99,7 @@ Pins (root `Cargo.toml`): weida `=0.1.0-alpha.9` from crates.io is an exact vers
 
 Addresses (`addr.rs`): a `ServerAddr` is `weida://sha256:<64 hex>@host:port`, the hex being the server key fingerprint; a `RoomKey`, what members share, is `schwitzer://sha256:<fp>@host:port/<64 hex token>`.
 
-A room holds members, projects and tasks. A `Project` is `{id, name}` with ids per room from 1. A `Task` (`model.rs`) has a number per room, its project, title, body, plan, stage, priority, author, times, an optional `Claim {member, agent, work, since_ms, token}` and its `Note`s. A member's name is global per key (`people.name` on the server), set by `Hello` and `SetName`.
+A room holds members, projects and tasks. A `Project` is `{id, name}` with ids per room from 1. A `Task` (`model.rs`) has a number per room, its project, title, body, plan, stage, priority, author, times, an optional `Claim {member, agent, work, since_ms, token}`, its `Note`s, the newest version numbers of its details and plan and its pending `Suggestion`s. A member's name is global per key (`people.name` on the server), set by `Hello` and `SetName`.
 
 The stage machine, from `store.rs` (`next_stage`, `claim`, `submit_plan`, `finish`, `unclaim`):
 
@@ -159,13 +159,14 @@ weida is a QUIC framework with mutual TLS; Schwitzer pins it to an exact version
 
 The client holds one `Requester` per endpoint, so two QUIC connections per server (`conn.rs`).
 
-`Request` has 27 variants:
+`Request` has 32 variants:
 
 |Group|Variants|
 |---|---|
 |session|`Hello`, `SetName`|
 |rooms|`CreateRoom`, `JoinRoom`, `LeaveRoom`|
 |tasks|`Propose`, `AddIdea`, `ProposeIdea`, `EditTask`, `SetPriority`, `MoveTask`, `AddNote`, `SetWaits`|
+|revisions|`SuggestRevision` (an agent's whole new text of the details or the plan, written on a version; changes nothing), `ApplySuggestion`, `DiscardSuggestion` (UI only), `History` and `GetSuggestion` (read only, no event)|
 |decisions|`Decide`|
 |work|`Claim`, `SubmitPlan`, `Finish`, `Unclaim`|
 |projects|`CreateProject`, `RenameProject`, `DeleteProject` (only a project without tasks in any stage; its id is never given again)|
@@ -228,7 +229,7 @@ sequenceDiagram
 - Room and task size (`lib.rs`): a room snapshot (`Event::Room`) stays under `ROOM_BYTES = MAX_EVENT_FRAME − 64 KiB`, a task under `TASK_BYTES = MAX_RPC_BYTES − 16`, so the snapshot and the task reply always fit their frames. Every task mutation (`mutate`) checks both, a project mutation, a first `JoinRoom` and a non-empty `PublishSessions` check the room, inside the transaction, so a refusal rolls back. The 64 KiB headroom covers name changes, which are not checked. Refusals: `the room is full: its tasks, notes, members and sessions must stay under 4 MiB`, `the task is full: with its notes it must stay under 1 MiB`. The server has no delete; a full room still takes edits that shorten bodies or plans.
 - Rooms per member (`rpc.rs`): `MAX_ROOMS_PER_MEMBER = 50` memberships; `CreateRoom` and a first `JoinRoom` above it are refused with `you are in 50 rooms already; leave one to create or join another`. Leaving frees a slot; the left room stays on disk.
 
-**Store** (`store.rs`): SQLite in WAL mode with `synchronous=NORMAL`, one connection behind a mutex, used from `spawn_blocking`. `SCHEMA_VERSION = 3` sits in `PRAGMA user_version`: 0 creates the schema, 1 and 2 migrate in one transaction (`MIGRATE_1` for 1, then `MIGRATE_2`), any other version is refused.
+**Store** (`store.rs`): SQLite in WAL mode with `synchronous=NORMAL`, one connection behind a mutex, used from `spawn_blocking`. `SCHEMA_VERSION = 4` sits in `PRAGMA user_version`: 0 creates the schema, 1 to 3 migrate in one transaction (`MIGRATE_1` for 1, `MIGRATE_2` for 1 and 2, then `MIGRATE_3`, which makes every task's current text its version 1), any other version is refused.
 
 |Table|Holds|
 |---|---|
@@ -239,6 +240,10 @@ sequenceDiagram
 |`tasks`|everything of a task, the claim in `claim_*` columns|
 |`notes`|per task, in insertion order|
 |`waits`|room, task number, the number of a task it waits for|
+|`versions`|per task and part (`0` details, `1` plan): version number, time, author (`NULL` for the version the migration took over), agent, title, text; `record_version` adds one when `Propose`, `AddIdea`, `ProposeIdea`, `EditTask`, `SubmitPlan` or an applied suggestion changes the text, and keeps the newest 50|
+|`suggestions`|pending agent suggestions: part, the version they were written on, author, agent, note (at most 2 KiB), title, text; at most `caps::SUGGESTIONS = 5` per task|
+
+A `Task` carries `details_version`, `plan_version` and its pending `suggestions` without their text; `History` answers the stored versions of one part, newest first, as many as fit one reply, and `GetSuggestion` one suggestion's text. `ApplySuggestion` makes the suggestion the text of its part (not once the task is Done or Rejected; the stage stays; an outdated one too, the app warns), `DiscardSuggestion` drops it in every stage.
 
 Enums are stored as explicit integers (`stage_to_int`: `Proposed 0`, `Accepted 1`, `Planned 2`, `Ready 3`, `Done 4`, `Rejected 5`, `Idea 6`), never as their postcard encoding.
 
@@ -285,6 +290,8 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |`debug_view.rs`|the Debug page: start or join, the people in the session, the folders, what was sent and received, the instructions|
 |`debug_session.rs`|no view: the debug session lifecycle (`impl App`: start, join, leave, one worker subscription per joined session and the counts they report, the notices of a session change and of an instruction)|
 |`tasks.rs`|no view: the task actions (`impl App`: propose, note an idea, pick, edit, plan, note, move, priority, waits, decide, unclaim) and what each reply does to the forms and drafts|
+|`revisions_view.rs`|the History page of the open task's details or plan (versions with the diff to the one before, Restore) and the review page of an agent's suggestion (diff against the current text, Apply, Discard)|
+|`revisions.rs`|no view: loading the history and a suggestion, selecting and restoring a version, applying or discarding (`impl App`), and `settle_revisions`, which closes the page when its task or suggestion goes, reloads a history a new version made stale and recomputes a suggestion's diff|
 |`projects.rs`|no view: creating and joining a room, creating, renaming and deleting a project, the projects folders and the repos linked to a project (`impl App`)|
 |`widgets.rs`|lamps, pills, buttons and other shared widgets|
 |`sticky.rs`|`Sticky`: the open task's head, pinned to the list's top while its slab is scrolled past|
@@ -355,8 +362,8 @@ A bad `settings.toml` loads as defaults with a notice and is not overwritten unt
 
 |Piece|Where|Job|
 |---|---|---|
-|omp plugin|`.omp/plugins/node_modules/schwitzer/` in each linked repo; source `crates/schwitzer-app/omp-plugin/index.ts`|`/schwitzer` command (`plan · build · propose · idea · debug`, short `/sw`), `schwitzer_*` tools, plan review hook, projects hint, cross-project edit guard|
-|MCP server|`crates/schwitzer-app/src/mcp/serve.rs`, `mcp/tools.rs`|the twelve agent tools and four plugin-only debug tools (§9.4), on `127.0.0.1:<mcp_port>/mcp`|
+|omp plugin|`.omp/plugins/node_modules/schwitzer/` in each linked repo; source `crates/schwitzer-app/omp-plugin/index.ts`|`/schwitzer` command (`plan · build · propose · idea · debug · revise`, short `/sw`), `schwitzer_*` tools, plan review hook, projects hint, cross-project edit guard|
+|MCP server|`crates/schwitzer-app/src/mcp/serve.rs`, `mcp/tools.rs`|the thirteen agent tools and four plugin-only debug tools (§9.4), on `127.0.0.1:<mcp_port>/mcp`|
 |plugin keeper|`crates/schwitzer-app/src/omp_plugin.rs`, `app/plugins.rs` (`App::check_plugins`, `App::sync_plugins`)|installs, compares, updates and removes the plugin|
 |session scanner|`crates/schwitzer-app/src/sessions.rs`, `logic::shared_sessions`, `App::publish`|reads omp session logs, shares the ones in linked repos|
 |pick prompt|`logic::pick_prompt`, `App::pick`|the prompt a human pastes into their own agent|
@@ -400,6 +407,7 @@ The plugin turns failures into one line: "no MCP token in <dir>; start the Schwi
 |`add_idea`|`room?`, `project?`, `title`, `body?`|`AddIdea`|
 |`claim`|`room?`, `work: plan\|build`, `task?`, `project?`, `agent`|`Claim`; answers `schwitzer-claim: <token>`, the next step and the task JSON, or "No free task."|
 |`submit_plan`|`room?`, `task`, `plan`|`SubmitPlan`|
+|`suggest_revision`|`room?`, `task`, `part: details\|plan`, `version`, `title?` (required with `details`), `text`, `note?`, `agent`|`SuggestRevision`; a human applies or discards it in the app|
 |`finish`|`room?`, `task`, `note`|`Finish`|
 |`unclaim`|`room?`, `task`, `note`|`Unclaim`|
 |`add_note`|`room?`, `task`, `text`, `agent?`|`AddNote`|
@@ -407,7 +415,7 @@ The plugin turns failures into one line: "no MCP token in <dir>; start the Schwi
 |`debug_instruct`|`room?`, `text`, `to?`|`DebugInstruct` (master only); `to` names participants, omitted every participant|
 |`debug_start`, `debug_join`, `debug_leave`, `debug_inbox`|`room?`|for the plugin's `/schwitzer debug` only, not in its `TOOLS`: start, join, leave; `debug_inbox` takes the oldest instruction for this member no omp session has taken yet|
 
-`room` may be left out when the app has joined one room; otherwise it matches a room name or at least 4 hex digits of the room id. The plugin registers each tool of its `TOOLS` as `schwitzer_<name>`, with approval tier `read` for `list_rooms`, `list_tasks`, `get_task` and `debug_status` and `write` for the rest. **There is no accept, reject, approve, replan or reopen tool, and none for `EditTask`, `SetPriority`, `MoveTask`, `SetWaits`, projects or rooms.**
+`room` may be left out when the app has joined one room; otherwise it matches a room name or at least 4 hex digits of the room id. The plugin registers each tool of its `TOOLS` as `schwitzer_<name>`, with approval tier `read` for `list_rooms`, `list_tasks`, `get_task` and `debug_status` and `write` for the rest. **There is no accept, reject, approve, replan or reopen tool, none to apply or discard a suggestion, and none for `EditTask`, `SetPriority`, `MoveTask`, `SetWaits`, projects or rooms.**
 
 ### 9.5 One task, end to end
 
@@ -497,6 +505,7 @@ What is shared, per session (`SessionInfo`): id, title (≤ 200 bytes), `project
 - Other projects: before each prompt of the main agent, the plugin adds a hidden `schwitzer-projects` message listing the other projects of the joined rooms and their local repos, with the rule to propose a change there instead of making it; such a proposal's body starts with `Requested from project "<p>" in room "<r>"`. An `edit`, `write` or `ast_edit` call into another project's repo is held by a `tool_call` guard: "Allow this edit", "Allow edits in "<project>" for this session" or "Block: propose it to "<project>" instead"; without a UI it is blocked.
 - Task number in commits: a per-member switch per project (`Settings::commit_trailers`, the project's settings page). `App::write_plugin_configs` rewrites only `schwitzer.json` in the project's repos when it changes, so omp sees it at the next commit. While a build claim of the omp process is on such a project, a `tool_call` guard blocks a `bash` `git commit` in the repo whose command lacks `Schwitzer-Task: #<n>` and tells the agent to add `--trailer "Schwitzer-Task: #<n>"`.
 - `/schwitzer debug [stop]` (UI only) asks for the room when several qualify, then offers to start a debug session (the caller becomes master) or to join the running one, and sends a `schwitzer-debug` message with the session's folders and rules into the next turn. A participant's omp process then polls `debug_inbox` every 2 s while the agent is idle; each instruction becomes a dialog, and only "Put it into the editor" places it there (`setEditorText`) for the human to send. The plugin never sends an instruction to the agent itself. `stop` leaves, or as master ends the session after asking. The app's side is `debug.rs`: per joined session a worker sends the new bytes of each file in `<data dir>/debug/<session>/out` every 500 ms and writes received bytes to `in/<member dir>/<stream>`; the client joins again after a reconnect (`debug_rejoin`).
+- `/schwitzer revise #n [details|plan] [what to change]` asks the agent to read task `#n` (not done or rejected), rewrite its details or plan, show the whole new text in the chat, ask, and after agreement call `schwitzer_suggest_revision` with the version `get_task` showed.
 
 Every message text is in [the plugin README](../crates/schwitzer-app/omp-plugin/README.md).
 
@@ -510,6 +519,8 @@ Every message text is in [the plugin README](../crates/schwitzer-app/omp-plugin/
 |accept, reject, approve, replan, reopen, mark planned, mark done|"Accept", "Reject", "Approve & build", "Replan", "Reopen", "Mark planned", "Mark done" (`Decide`)|never|
 |claim for planning|none|`/schwitzer plan`, `schwitzer_claim` (`work: plan`)|
 |hand in a plan|"Mark planned" (`Decide`, clears the claim); "Edit plan" → "Save plan" only edits the text (`EditTask`)|plan review hook, `schwitzer_submit_plan`|
+|improve the details or the plan|"Edit" (`EditTask`); the history icon shows the versions with diffs, "Restore" puts an old one into the editor|`/schwitzer revise`, `schwitzer_suggest_revision` (a suggestion only)|
+|apply or discard a suggestion|"Review", then "Apply" or "Discard" (`ApplySuggestion`, `DiscardSuggestion`)|never|
 |claim for building|"Pick and copy prompt" (Approved tasks only)|`/schwitzer build`, `schwitzer_claim` (`work: build`)|
 |finish|"Mark done" (`Decide`, clears the claim)|`schwitzer_finish`|
 |give a claim back|"Unclaim"|`schwitzer_unclaim`|

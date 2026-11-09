@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use schwitzer_proto::{
-    ClaimToken, Decision, Member, MemberId, RoomId, RoomState, ServerAddr, SessionInfo, Stage,
-    Task, Work, caps,
+    ClaimToken, Decision, Member, MemberId, Part, RoomId, RoomState, ServerAddr, SessionInfo,
+    Stage, Suggestion, Task, Work, caps,
 };
 use schwitzer_release::Channel;
 use serde::{Deserialize, Serialize};
@@ -561,6 +561,78 @@ pub fn details_markdown(title: &str, body: &str) -> String {
     }
 }
 
+/// The text of `part` a diff compares: the details as [`details_markdown`], so a new title
+/// shows as a changed `#` line, the plan as it is.
+pub fn part_text(part: Part, title: &str, text: &str) -> String {
+    match part {
+        Part::Details => details_markdown(title, text),
+        Part::Plan => text.to_owned(),
+    }
+}
+
+/// Whether the part a suggestion rewrites has a newer version than the one it was written on.
+pub fn outdated(task: &Task, s: &Suggestion) -> bool {
+    s.version != task.version(s.part)
+}
+
+/// A line of a diff: kept, added, removed, or a gap of unchanged lines left out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffLine {
+    Same(String),
+    Added(String),
+    Removed(String),
+    Gap,
+}
+
+/// The changed lines of `new` against `old` with 2 lines of context each; a `Gap` stands for
+/// two or more unchanged lines left out before, between and after the groups (a single one is
+/// shown instead). Empty when the texts are equal. Lines carry no trailing newline.
+pub fn diff_lines(old: &str, new: &str) -> Vec<DiffLine> {
+    use similar::{ChangeTag, TextDiff};
+
+    // A last line without its newline is the same line as one with it.
+    let ended = |text: &str| {
+        let mut text = text.to_owned();
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text
+    };
+    let (old, new) = (ended(old), ended(new));
+    let diff = TextDiff::from_lines(&old, &new);
+    let old_slices = diff.old_slices();
+    let trim = |line: &str| line.trim_end_matches(['\n', '\r']).to_owned();
+    let mut out = Vec::new();
+    let skip = |out: &mut Vec<DiffLine>, from: usize, to: usize| match to.saturating_sub(from) {
+        0 => {}
+        1 => out.push(DiffLine::Same(trim(old_slices[from]))),
+        _ => out.push(DiffLine::Gap),
+    };
+    let groups = diff.grouped_ops(2);
+    let mut shown_to = 0;
+    for group in &groups {
+        let (Some(first), Some(last)) = (group.first(), group.last()) else {
+            continue;
+        };
+        skip(&mut out, shown_to, first.old_range().start);
+        for op in group {
+            for change in diff.iter_changes(op) {
+                let line = trim(change.value());
+                out.push(match change.tag() {
+                    ChangeTag::Equal => DiffLine::Same(line),
+                    ChangeTag::Insert => DiffLine::Added(line),
+                    ChangeTag::Delete => DiffLine::Removed(line),
+                });
+            }
+        }
+        shown_to = last.old_range().end;
+    }
+    if !groups.is_empty() {
+        skip(&mut out, shown_to, old_slices.len());
+    }
+    out
+}
+
 /// Whether `url` is an http or https link with something after the scheme: the only
 /// links a click in task text opens.
 pub fn is_web_link(url: &str) -> bool {
@@ -996,6 +1068,9 @@ mod tests {
             claim,
             notes: Vec::new(),
             waits_for: Vec::new(),
+            details_version: 1,
+            plan_version: 0,
+            suggestions: Vec::new(),
         }
     }
 
@@ -1556,5 +1631,62 @@ mod tests {
                 Check::Ask(Lookup::Dev)
             );
         }
+    }
+
+    #[test]
+    fn a_diff_shows_changed_lines_in_their_context() {
+        use DiffLine::{Added, Gap, Removed, Same};
+        let s = |t: &str| t.to_owned();
+        assert!(diff_lines("a\nb\n", "a\nb\n").is_empty());
+        // A line added after a last line without newline leaves that line alone.
+        assert_eq!(
+            diff_lines("a\nb", "a\nb\nc"),
+            [Same(s("a")), Same(s("b")), Added(s("c"))]
+        );
+        assert_eq!(
+            diff_lines("a\nb\nc", "a\nB\nc"),
+            [Same(s("a")), Removed(s("b")), Added(s("B")), Same(s("c"))]
+        );
+        let old: Vec<String> = (1..=20).map(|n| n.to_string()).collect();
+        let mut new = old.clone();
+        new[1] = s("two");
+        new[17] = s("eighteen");
+        let diff = diff_lines(&old.join("\n"), &new.join("\n"));
+        assert_eq!(diff.iter().filter(|l| **l == Gap).count(), 1);
+        let gap = diff.iter().position(|l| *l == Gap).unwrap();
+        assert!(diff[..gap].contains(&Added(s("two"))));
+        assert!(diff[gap..].contains(&Added(s("eighteen"))));
+        assert_eq!(diff.first(), Some(&Same(s("1"))));
+        assert_eq!(diff.last(), Some(&Same(s("20"))));
+        // One left-out line is shown, not hidden behind a gap.
+        assert_eq!(
+            diff_lines("# T\n\none\ntwo", "# T\n\none\n2")[0],
+            Same(s("# T"))
+        );
+        // A change in the middle of a long text leaves gaps on both sides.
+        let mut middle = old.clone();
+        middle[9] = s("ten");
+        let diff = diff_lines(&old.join("\n"), &middle.join("\n"));
+        assert_eq!(diff.first(), Some(&Gap));
+        assert_eq!(diff.last(), Some(&Gap));
+    }
+
+    #[test]
+    fn a_suggestion_is_outdated_once_its_part_moved_on() {
+        let mut t = task(1, Stage::Proposed, None);
+        let s = Suggestion {
+            id: 1,
+            part: Part::Details,
+            version: 1,
+            author: MemberId([1; 32]),
+            agent: None,
+            note: String::new(),
+            at_ms: 0,
+        };
+        assert!(!outdated(&t, &s));
+        t.plan_version = 3;
+        assert!(!outdated(&t, &s));
+        t.details_version = 2;
+        assert!(outdated(&t, &s));
     }
 }

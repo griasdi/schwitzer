@@ -429,6 +429,18 @@ pub fn code_block(theme: &Theme) -> container::Style {
     }
 }
 
+/// An added line of a diff: the selection's Leaf tint.
+pub fn diff_added(theme: &Theme) -> container::Style {
+    let t = tokens(theme);
+    surface(t.selected, t.text)
+}
+
+/// A removed line of a diff: the danger tint.
+pub fn diff_removed(theme: &Theme) -> container::Style {
+    let t = tokens(theme);
+    surface(t.danger_soft, t.text)
+}
+
 /// A member's name tag.
 pub fn tag(hue: usize) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
