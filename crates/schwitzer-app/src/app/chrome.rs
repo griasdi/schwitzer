@@ -69,8 +69,8 @@ impl ProjectChoice {
     }
 }
 
-/// The header bar: room and project switchers on the left; members, invite, debug session and
-/// settings on the right.
+/// The header bar: room and project switchers on the left; members, the fast lane, debug session,
+/// invite and settings on the right.
 pub fn header(app: &App) -> Element<'_, Message> {
     let in_room = app.selected_state().is_some();
     let choices: Vec<RoomChoice> = app.room_choices();
@@ -166,19 +166,19 @@ pub fn header(app: &App) -> Element<'_, Message> {
     }
     widgets::bar(
         bar.push(bar_icon_button(
-            "copy-key",
-            Icon::UserPlus,
-            Tone::Text,
-            "Copy room key to invite someone",
-            in_room.then_some(Message::CopyKey),
-            theme::button_ghost,
-        ))
-        .push(bar_icon_button(
             "debug",
             Icon::Bug,
             debug_tone,
             debug.unwrap_or_else(|| "Debug session".to_owned()),
             in_room.then_some(Message::OpenPage(Page::Debug)),
+            theme::button_ghost,
+        ))
+        .push(bar_icon_button(
+            "copy-key",
+            Icon::UserPlus,
+            Tone::Text,
+            "Copy room key to invite someone",
+            in_room.then_some(Message::CopyKey),
             theme::button_ghost,
         ))
         .push(bar_icon_button(
