@@ -86,7 +86,7 @@ flowchart LR
   client -.->|flow test, dev only| server
 ```
 
-Pins (root `Cargo.toml`): weida `=0.1.0-alpha.9` from crates.io is an exact version, because weida is alpha and its wire protocol may break within 0.x; moving the version is its own change. iced_impeccable 0.3 from crates.io, iced 0.14, rmcp 3.5, axum 0.8, rusqlite 0.37 with bundled SQLite.
+Pins (root `Cargo.toml`): weida `=0.1.0-alpha.9` from crates.io is an exact version, because weida is alpha and its wire protocol may break within 0.x; moving the version is its own change. iced_impeccable 0.3 from crates.io, iced 0.14, rmcp 3.9, axum 0.8, rusqlite 0.41 with bundled SQLite.
 
 ## 4. Rooms, projects and tasks
 
