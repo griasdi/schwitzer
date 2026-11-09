@@ -11,9 +11,9 @@ use schwitzer_proto::{Annotation, Part, RoomState, Stage, Task};
 
 use super::annotations::AnnotationDraft;
 use super::icons::{Icon, Tone, icon};
-use super::widgets::{hrule, id_button, member_tag_of, muted, pill, text_button, with_tip};
+use super::widgets::{group_head, hrule, id_button, member_tag_of, muted, text_button, with_tip};
 use super::{App, Message, Reading, list, logic, pages};
-use crate::theme::{self, MEDIUM, READ_LINE_HEIGHT, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
+use crate::theme::{self, READ_LINE_HEIGHT, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
 
 /// Task text as Markdown, set for reading; a click on a link opens it.
 pub fn markdown<'a>(app: &'a App, parsed: &'a super::ParsedMarkdown) -> Element<'a, Message> {
@@ -28,7 +28,7 @@ pub fn markdown<'a>(app: &'a App, parsed: &'a super::ParsedMarkdown) -> Element<
 /// `part` of the open task as Markdown, block by block, with the comments on each block
 /// under it. While the task is open for comments, hovering a block shows the button that
 /// comments on it. Comments whose block is gone follow under "Outdated comments"; resolved
-/// ones show only on request.
+/// ones fold under "Resolved comments", each with the block it quoted.
 pub fn annotated<'a>(
     app: &'a App,
     state: &'a RoomState,
@@ -40,7 +40,7 @@ pub fn annotated<'a>(
     let shown: Vec<&Annotation> = task
         .annotations
         .iter()
-        .filter(|a| a.part == part && (!a.resolved || app.show_resolved))
+        .filter(|a| a.part == part && !a.resolved)
         .collect();
     let draft = app.annotating.as_ref().filter(|d| d.part == part);
     let editable = logic::editable(task);
@@ -122,6 +122,12 @@ pub fn annotated<'a>(
         outer = outer.push(items);
     }
 
+    let well = |quote: &'a str| {
+        container(text(quote).size(TS_12).style(theme::text_muted))
+            .padding([SP_1, SP_2])
+            .width(Length::Fill)
+            .style(theme::code_block)
+    };
     let unplaced: Vec<&Annotation> = shown
         .iter()
         .zip(&placed)
@@ -137,12 +143,6 @@ pub fn annotated<'a>(
                 .style(theme::text_muted)
         ]
         .spacing(SP_2);
-        let well = |quote: &'a str| {
-            container(text(quote).size(TS_12).style(theme::text_muted))
-                .padding([SP_1, SP_2])
-                .width(Length::Fill)
-                .style(theme::code_block)
-        };
         for a in unplaced {
             outdated = outdated.push(well(&a.quote));
             outdated = outdated.push(comment_card(app, state, a));
@@ -154,36 +154,37 @@ pub fn annotated<'a>(
         outer = outer.push(outdated);
     }
 
-    let resolved = task
+    let resolved: Vec<&Annotation> = task
         .annotations
         .iter()
         .filter(|a| a.part == part && a.resolved)
-        .count();
-    if resolved > 0 {
-        let label = if app.show_resolved {
-            "Hide resolved comments".to_owned()
-        } else {
-            format!("Show resolved comments ({resolved})")
-        };
-        outer = outer.push(id_button(
+        .collect();
+    if !resolved.is_empty() {
+        let mut fold = column![group_head(
             format!("toggle-resolved-{}", logic::part_name(part)),
-            container(text(label).size(TS_14).font(MEDIUM)).padding([6.0, SP_3]),
-            Some(Message::ToggleResolved),
-            theme::button_ghost,
-            Length::Shrink,
-        ));
+            "Resolved comments",
+            resolved.len(),
+            app.show_resolved,
+            Message::ToggleResolved,
+            None,
+        )]
+        .spacing(SP_2);
+        if app.show_resolved {
+            for a in resolved {
+                fold = fold.push(well(&a.quote));
+                fold = fold.push(comment_card(app, state, a));
+            }
+        }
+        outer = outer.push(fold);
     }
     outer.into()
 }
 
 /// A comment under its block: author, age, Resolve or Reopen, and the text.
 fn comment_card<'a>(app: &'a App, state: &'a RoomState, a: &'a Annotation) -> Element<'a, Message> {
-    let mut head = row![member_tag_of(&state.members, &a.author)]
+    let head = row![member_tag_of(&state.members, &a.author)]
         .spacing(6)
         .align_y(Alignment::Center);
-    if a.resolved {
-        head = head.push(pill("resolved"));
-    }
     let head = head
         .push(Space::new().width(Length::Fill))
         .push(muted(format!(
