@@ -90,24 +90,27 @@ pub fn header(app: &App) -> Element<'_, Message> {
     if let Some(state) = app.selected_state() {
         let online = state.members.iter().filter(|m| m.online).count();
         let total = state.members.len();
-        members = Some(bar_tip(
-            id_button(
-                "members",
-                container(
-                    row![
-                        icon(Icon::Users, 16.0, Tone::Text),
-                        text(format!("{online}/{total}")).size(TS_12).font(MEDIUM)
-                    ]
-                    .spacing(SP_1)
-                    .align_y(Alignment::Center),
-                )
-                .padding(SP_2),
-                Some(Message::ToggleMembers),
-                theme::button_ghost_open(app.members_open),
-                Length::Shrink,
-            ),
-            format!("Members: {online} of {total} online"),
-        ));
+        let button = id_button(
+            "members",
+            container(
+                row![
+                    icon(Icon::Users, 16.0, Tone::Text),
+                    text(format!("{online}/{total}")).size(TS_12).font(MEDIUM)
+                ]
+                .spacing(SP_1)
+                .align_y(Alignment::Center),
+            )
+            .padding(SP_2),
+            Some(Message::ToggleMembers),
+            theme::button_ghost_open(app.members_open),
+            Length::Shrink,
+        );
+        // The open row lists every member, and a tooltip below the button would cover it.
+        members = Some(if app.members_open {
+            button
+        } else {
+            bar_tip(button, format!("Members: {online} of {total} online"))
+        });
         let choices: Vec<ProjectChoice> = state
             .projects
             .iter()
