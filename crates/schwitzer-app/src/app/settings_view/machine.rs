@@ -5,7 +5,7 @@ use iced::{Alignment, Element, Length};
 use schwitzer_release::Channel;
 
 use super::{Switch, projects_folders, repos, switch_row};
-use crate::app::icons::{Icon, Tone, icon};
+use crate::app::icons::{Icon, icon};
 use crate::app::logic;
 use crate::app::pages::{frame, section};
 use crate::app::widgets::{dot, heading, input, muted, path_text, segment, text_button};
@@ -13,7 +13,7 @@ use crate::app::{App, Message};
 use crate::mcp::McpStatus;
 use crate::omp_plugin::count_outdated;
 use crate::settings;
-use crate::theme::{self, SP_1, SP_2, SP_4, TS_14};
+use crate::theme::{self, SP_1, SP_2, SP_4, TS_14, Tone};
 use crate::update::UpdateState;
 
 /// The omp connection: its port, the plugins in the shared repos, and where sessions are read.

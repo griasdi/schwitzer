@@ -10,10 +10,10 @@ use iced::{Alignment, Element, Length, alignment};
 use schwitzer_proto::{Annotation, Part, RoomState, Stage, Task};
 
 use super::annotations::AnnotationDraft;
-use super::icons::{Icon, Tone, icon};
+use super::icons::{Icon, icon};
 use super::widgets::{group_head, hrule, id_button, member_tag_of, muted, text_button, with_tip};
 use super::{App, Message, Reading, list, logic, pages};
-use crate::theme::{self, READ_LINE_HEIGHT, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
+use crate::theme::{self, READ_LINE_HEIGHT, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, Tone};
 
 /// Task text as Markdown, set for reading; a click on a link opens it.
 pub fn markdown<'a>(app: &'a App, parsed: &'a super::ParsedMarkdown) -> Element<'a, Message> {

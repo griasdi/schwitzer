@@ -6,10 +6,10 @@ use iced::widget::{column, container, row};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::Project;
 
-use super::icons::{Icon, Tone, icon};
+use super::icons::{Icon, icon};
 use super::widgets::{hrule, icon_button, icon_text_button, input, muted, path_text, text_button};
 use super::{App, FolderFor, Message, Page, list, live, logic};
-use crate::theme::{self, SP_2};
+use crate::theme::{self, SP_2, Tone};
 
 impl App {
     /// The main page below the header bar: list and sessions, or an empty state.

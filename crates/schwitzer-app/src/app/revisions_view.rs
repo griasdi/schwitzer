@@ -7,12 +7,12 @@ use iced::widget::{Column, Space, column, container, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::{MemberId, Part, RoomState, Stage, Task};
 
-use super::icons::{Icon, Tone, icon};
+use super::icons::{Icon, icon};
 use super::logic::{self, DiffLine};
 use super::revisions::{LoadedSuggestion, RevisionPage};
 use super::widgets::{self, chevron, heading, hrule, id_button, member_tag_of, muted, text_button};
 use super::{App, Message, list, pages};
-use crate::theme::{self, MEDIUM, READ_LINE_HEIGHT, SP_1, SP_2, SP_3, TS_14, TS_16};
+use crate::theme::{self, MEDIUM, READ_LINE_HEIGHT, SP_1, SP_2, SP_3, TS_14, TS_16, Tone};
 
 pub fn page<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     let (id, title, content) = match &app.revisions {

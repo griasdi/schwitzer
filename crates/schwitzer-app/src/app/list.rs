@@ -8,7 +8,7 @@ use iced::widget::{Space, column, container, responsive, row, scrollable, text, 
 use iced::{Alignment, Element, Length, Padding, Task};
 use schwitzer_proto::{Decision, MemberId, Project, RoomState, Stage, Task as RoomTask};
 
-use super::icons::{Icon, Tone, icon};
+use super::icons::{Icon, icon};
 use super::logic::{self, Group, MissingSession};
 use super::task_view;
 use super::widgets::{
@@ -16,7 +16,7 @@ use super::widgets::{
     priority_pill, with_tip,
 };
 use super::{App, Expanded, Message};
-use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14};
+use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14, Tone};
 
 /// The widget id of the task list's scrollable.
 pub const LIST_ID: &str = "tasks";

@@ -16,7 +16,7 @@ pub use machine::{folders_page, omp_page, updates_page};
 pub use project::project_page;
 pub use room::{room_page, rooms_page};
 
-use super::icons::{Icon, Tone, icon};
+use super::icons::{Icon, icon};
 use super::logic::{self, folder_label};
 use super::pages::{frame, section};
 use super::widgets::{
@@ -25,7 +25,7 @@ use super::widgets::{
 use super::{App, FolderFor, Message, Page};
 use crate::omp_plugin::{Coverage, count_outdated};
 use crate::settings::{TextSize, tilde};
-use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
+use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, Tone};
 use crate::update::{self, UpdateState};
 use crate::wsl;
 

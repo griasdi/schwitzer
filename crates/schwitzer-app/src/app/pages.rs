@@ -5,9 +5,9 @@ use iced::widget::{column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 
 use super::Message;
-use super::icons::{Icon, Tone};
+use super::icons::Icon;
 use super::widgets::{bar, bar_icon_button, hrule};
-use crate::theme::{self, SEMIBOLD, SP_1, SP_2, SP_3, TS_20};
+use crate::theme::{self, SEMIBOLD, SP_1, SP_2, SP_3, TS_20, Tone};
 
 /// The widest the body of a page grows in a wide window.
 const MAX_WIDTH: f32 = 560.0;

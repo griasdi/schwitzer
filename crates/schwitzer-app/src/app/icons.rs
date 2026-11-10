@@ -4,7 +4,7 @@
 use iced::widget::svg;
 use iced::{Length, Theme};
 
-use crate::theme::tokens;
+use crate::theme::{self, Tone};
 
 macro_rules! icons {
     ($($variant:ident => $file:literal),+ $(,)?) => {
@@ -61,31 +61,10 @@ icons! {
     ThumbsUp => "thumbs-up",
 }
 
-/// How an icon is coloured; resolved against the theme when drawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tone {
-    Text,
-    Muted,
-    Ink,
-    OnPrimary,
-    Danger,
-}
-
 /// An icon of `size` logical pixels in `tone`.
 pub fn icon<'a>(icon: Icon, size: f32, tone: Tone) -> svg::Svg<'a, Theme> {
     svg(svg::Handle::from_memory(icon.bytes()))
         .width(Length::Fixed(size))
         .height(Length::Fixed(size))
-        .style(move |theme: &Theme, _| {
-            let t = tokens(theme);
-            svg::Style {
-                color: Some(match tone {
-                    Tone::Text => t.text,
-                    Tone::Muted => t.muted,
-                    Tone::Ink => t.ink,
-                    Tone::OnPrimary => t.on_primary,
-                    Tone::Danger => t.danger,
-                }),
-            }
-        })
+        .style(theme::svg_tint(tone))
 }

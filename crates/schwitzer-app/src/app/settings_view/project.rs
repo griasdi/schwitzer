@@ -5,7 +5,7 @@ use iced::widget::{column, row, text};
 use iced::{Alignment, Element, Length};
 
 use super::{Switch, switch_row, view};
-use crate::app::icons::{Icon, Tone, icon};
+use crate::app::icons::{Icon, icon};
 use crate::app::logic;
 use crate::app::pages::{frame, section};
 use crate::app::widgets::{
@@ -13,7 +13,7 @@ use crate::app::widgets::{
 };
 use crate::app::{App, Confirm, FolderFor, Message};
 use crate::omp_plugin::PluginState;
-use crate::theme::{self, SEMIBOLD, SP_2, SP_4, TS_12};
+use crate::theme::{self, SEMIBOLD, SP_2, SP_4, TS_12, Tone};
 
 /// The selected project; the overview when there is none.
 pub fn project_page(app: &App) -> Element<'_, Message> {

@@ -8,7 +8,7 @@ use iced::widget::{Column, column, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::{DebugSession, MemberId, RoomState, caps};
 
-use super::icons::{Icon, Tone};
+use super::icons::Icon;
 use super::logic;
 use super::pages::{frame, section};
 use super::widgets::{
@@ -17,7 +17,7 @@ use super::widgets::{
 };
 use super::{App, Confirm, Message};
 use crate::debug;
-use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, TS_14};
+use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, TS_14, Tone};
 
 /// Bytes of an instruction shown on the page; the copy button takes all of it.
 const INSTRUCTION_PREVIEW: usize = 300;

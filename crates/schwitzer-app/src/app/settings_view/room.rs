@@ -6,13 +6,13 @@ use iced::{Alignment, Element, Length};
 use schwitzer_proto::RoomId;
 
 use super::view;
-use crate::app::icons::{Icon, Tone, icon};
+use crate::app::icons::{Icon, icon};
 use crate::app::pages::{frame, section};
 use crate::app::widgets::{
     confirm_row, dot, heading, icon_text_button, id_button, input, muted, path_text, text_button,
 };
 use crate::app::{App, Confirm, Message, logic};
-use crate::theme::{self, SP_2, SP_4, TS_14};
+use crate::theme::{self, SP_2, SP_4, TS_14, Tone};
 
 /// The selected room; the overview when no room is selected.
 pub fn room_page(app: &App) -> Element<'_, Message> {

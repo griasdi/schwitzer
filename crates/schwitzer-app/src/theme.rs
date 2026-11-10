@@ -1,12 +1,12 @@
 //! Schwitzer's look: raised slabs in a recessed well. Two themes (Daylight and Night) follow the system
-//! appearance; every colour of the app comes from the [`Tokens`] of the active theme, and the
+//! appearance; every colour of the app comes from the `Tokens` of the active theme, and the
 //! style functions below are the only place that reads them for widgets.
 
 use iced::font::Weight;
 use iced::theme::Palette;
 use iced::theme::palette::{Extended, Pair};
 use iced::widget::{
-    button, checkbox, container, markdown, overlay::menu, pick_list, scrollable, text_editor,
+    button, checkbox, container, markdown, overlay::menu, pick_list, scrollable, svg, text_editor,
     text_input, toggler,
 };
 use iced::{Background, Border, Color, Font, Pixels, Shadow, Theme, Vector, color};
@@ -74,7 +74,7 @@ pub struct Tag {
 
 /// The colours of one theme.
 #[derive(Debug, Clone, Copy)]
-pub struct Tokens {
+struct Tokens {
     /// The recessed well behind slabs: list, sessions, page bodies, inputs, pills.
     pub ground: Color,
     /// Slabs, bars, menus, tooltips.
@@ -259,7 +259,7 @@ impl From<Option<bool>> for Dot {
 }
 
 /// The tokens of `theme`.
-pub fn tokens(theme: &Theme) -> &'static Tokens {
+fn tokens(theme: &Theme) -> &'static Tokens {
     if theme.extended_palette().is_dark {
         &NIGHT
     } else {
@@ -560,6 +560,33 @@ pub fn text_ink(theme: &Theme) -> iced::widget::text::Style {
 pub fn text_danger(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
         color: Some(tokens(theme).danger),
+    }
+}
+
+// ---- icon tints ----------------------------------------------------------------------------
+
+/// How an icon is coloured; resolved against the theme when drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Text,
+    Muted,
+    Ink,
+    OnPrimary,
+    Danger,
+}
+
+pub fn svg_tint(tone: Tone) -> impl Fn(&Theme, svg::Status) -> svg::Style {
+    move |theme, _| {
+        let t = tokens(theme);
+        svg::Style {
+            color: Some(match tone {
+                Tone::Text => t.text,
+                Tone::Muted => t.muted,
+                Tone::Ink => t.ink,
+                Tone::OnPrimary => t.on_primary,
+                Tone::Danger => t.danger,
+            }),
+        }
     }
 }
 

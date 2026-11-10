@@ -10,9 +10,9 @@ use iced::{Alignment, Element, Length, Padding, Theme};
 use schwitzer_proto::{Member, MemberId, Priority, Stage, Task};
 
 use super::Message;
-use super::icons::{Icon, Tone, icon};
+use super::icons::{Icon, icon};
 use super::logic;
-use crate::theme::{self, Dot, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14};
+use crate::theme::{self, Dot, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, Tone};
 
 /// A text input with a widget id that submits with Enter.
 pub fn input<'a>(

@@ -6,14 +6,14 @@ use iced::widget::{Row, Space, column, container, row, text};
 use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::RoomId;
 
-use super::icons::{Icon, Tone, icon};
+use super::icons::{Icon, icon};
 use super::logic;
 use super::widgets::{
     self, DOT, bar_icon_button, bar_tip, dot, id_button, member_tag, muted, with_card, with_tip,
 };
 use super::{App, Message, Page};
 use crate::omp_plugin::Coverage;
-use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, TS_12};
+use crate::theme::{self, MEDIUM, SEMIBOLD, SP_1, SP_2, TS_12, Tone};
 
 /// A room as the switcher lists it.
 #[derive(Debug, Clone)]
