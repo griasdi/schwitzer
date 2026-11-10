@@ -22,7 +22,7 @@ use schwitzer_proto::{
     ApiError, Claim, DebugSession, Decision, Member, MemberId, Part, Priority, Project, Request,
     Response, RoomId, RoomState, Stage, Task, Work,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::{FastLane, McpEvent};
@@ -54,7 +54,7 @@ impl From<WorkArg> for Work {
 }
 
 /// A decision a human makes from omp.
-#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 enum DecisionArg {
     Accept,
@@ -80,6 +80,20 @@ impl From<DecisionArg> for Decision {
     }
 }
 
+impl From<Decision> for DecisionArg {
+    fn from(decision: Decision) -> Self {
+        match decision {
+            Decision::Accept => Self::Accept,
+            Decision::Reject => Self::Reject,
+            Decision::Approve => Self::Approve,
+            Decision::Replan => Self::Replan,
+            Decision::Reopen => Self::Reopen,
+            Decision::MarkPlanned => Self::MarkPlanned,
+            Decision::MarkDone => Self::MarkDone,
+        }
+    }
+}
+
 /// The text of a task a suggestion rewrites.
 #[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -99,7 +113,7 @@ impl From<PartArg> for Part {
 
 /// Stage filter of `list_tasks`. `Ready` is an approved task nobody builds yet, `InProgress` an
 /// approved task with a build claim.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 enum StageArg {
     Idea,
@@ -110,22 +124,6 @@ enum StageArg {
     InProgress,
     Done,
     Rejected,
-}
-
-impl StageArg {
-    /// The name this stage has in results.
-    fn name(self) -> &'static str {
-        match self {
-            Self::Idea => "idea",
-            Self::Proposed => "proposed",
-            Self::Accepted => "accepted",
-            Self::Planned => "planned",
-            Self::Ready => "ready",
-            Self::InProgress => "in_progress",
-            Self::Done => "done",
-            Self::Rejected => "rejected",
-        }
-    }
 }
 
 /// Arguments of `list_tasks`.
@@ -565,19 +563,6 @@ fn work_name(work: Work) -> &'static str {
     }
 }
 
-/// The name of `decision` in tool rows and arguments.
-fn decision_name(decision: Decision) -> &'static str {
-    match decision {
-        Decision::Accept => "accept",
-        Decision::Reject => "reject",
-        Decision::Approve => "approve",
-        Decision::Replan => "replan",
-        Decision::Reopen => "reopen",
-        Decision::MarkPlanned => "mark_planned",
-        Decision::MarkDone => "mark_done",
-    }
-}
-
 /// Whether `task` of `room` is in the fast lane, by itself or through its project.
 fn in_fast_lane(lanes: &FastLane, room: &RoomId, task: &Task) -> bool {
     lanes.task(room, task.number) || lanes.project(room, task.project)
@@ -639,12 +624,12 @@ fn decision_rows(room: &RoomRef, lanes: &FastLane, task: Option<u64>) -> Vec<Val
                 "project": project_name(&state.projects, t.project),
                 "number": t.number,
                 "title": t.title,
-                "stage": stage_of(t).name(),
+                "stage": stage_of(t),
                 "has_plan": t.has_plan(),
                 "fast_lane_task": lanes.task(&room.id, t.number),
                 "decisions": t.legal_decisions()
                     .into_iter()
-                    .map(decision_name)
+                    .map(DecisionArg::from)
                     .collect::<Vec<_>>(),
                 "suggestions": t
                     .suggestions
@@ -678,7 +663,7 @@ fn task_row(task: &Task, members: &[Member], projects: &[Project], tasks: &[Task
         "number": task.number,
         "title": task.title,
         "project": project_name(projects, task.project),
-        "stage": stage_of(task).name(),
+        "stage": stage_of(task),
         "priority": priority_name(task.priority),
         "votes": task.votes.len(),
         "claim": task.claim.as_ref().map(|c| claim_json(c, members)),
