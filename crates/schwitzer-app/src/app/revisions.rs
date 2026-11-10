@@ -1,6 +1,7 @@
-//! The open task's history of its details or plan and the review of an agent's suggestion:
-//! loading them, choosing a version, restoring it into the editor, applying or discarding a
-//! suggestion. The page itself is `revisions_view.rs`.
+//! The open task's page over the list: its details or plan for reading, its history, and the
+//! review of an agent's suggestion. Loading the history and a suggestion, choosing a version,
+//! restoring it into the editor, applying or discarding a suggestion, and keeping the page in
+//! step with the room. The pages are drawn in `reading.rs` and `revisions_view.rs`.
 
 use iced::Task;
 use iced::widget::operation;
@@ -10,9 +11,14 @@ use super::logic::{self, DiffLine};
 use super::{App, Message, Page, pages};
 use crate::bridge::call;
 
-/// The open task's history of one part, or one of its suggestions, shown as a page; not kept
-/// over a restart.
-pub(super) enum RevisionPage {
+/// What fills the window in place of the open task's list: its details or plan for reading, the
+/// history of one part, or one of its suggestions. On the main page only, not kept over a
+/// restart.
+pub(super) enum TaskPage {
+    Reading {
+        task: u64,
+        part: Part,
+    },
     History {
         task: u64,
         part: Part,
@@ -96,20 +102,19 @@ impl App {
             return Task::none();
         };
         let number = task.number;
-        self.revisions = Some(RevisionPage::History {
+        self.task_page = Some(TaskPage::History {
             task: number,
             part,
             versions: None,
             selected: task.version(part),
             diff: Vec::new(),
         });
-        self.reading = None;
         Task::batch([self.history_request(number, part), top()])
     }
 
     /// Closes the revisions page and shows `banner`: what was loading did not arrive.
     fn revisions_failed(&mut self, banner: String) {
-        self.revisions = None;
+        self.task_page = None;
         self.banner = Some(banner);
     }
 
@@ -119,13 +124,13 @@ impl App {
         loaded_part: Part,
         result: Result<Response, String>,
     ) -> Task<Message> {
-        let Some(RevisionPage::History {
+        let Some(TaskPage::History {
             task,
             part,
             versions,
             selected,
             diff,
-        }) = &mut self.revisions
+        }) = &mut self.task_page
         else {
             return Task::none();
         };
@@ -145,13 +150,13 @@ impl App {
     }
 
     pub(super) fn select_version(&mut self, version: u64) -> Task<Message> {
-        if let Some(RevisionPage::History {
+        if let Some(TaskPage::History {
             part,
             versions: Some(list),
             selected,
             diff,
             ..
-        }) = &mut self.revisions
+        }) = &mut self.task_page
         {
             *selected = version;
             *diff = diff_for(*part, list, version);
@@ -161,11 +166,11 @@ impl App {
 
     /// Puts an old version into the editor of its part; saving it makes it the newest version.
     pub(super) fn restore_version(&mut self, version: u64) -> Task<Message> {
-        let Some(RevisionPage::History {
+        let Some(TaskPage::History {
             part,
             versions: Some(list),
             ..
-        }) = &self.revisions
+        }) = &self.task_page
         else {
             return Task::none();
         };
@@ -174,7 +179,7 @@ impl App {
         };
         let part = *part;
         let (title, text) = (rev.title.clone(), rev.text.clone());
-        self.revisions = None;
+        self.task_page = None;
         self.notify(&format!(
             "Version {version} is in the editor; Save makes it the newest version"
         ));
@@ -189,13 +194,12 @@ impl App {
             return Task::none();
         };
         let (room, number) = (state.id, task.number);
-        self.revisions = Some(RevisionPage::Suggestion {
+        self.task_page = Some(TaskPage::Suggestion {
             task: number,
             id,
             loaded: None,
             busy: false,
         });
-        self.reading = None;
         let req = Request::GetSuggestion {
             room,
             task: number,
@@ -214,7 +218,7 @@ impl App {
         loaded_id: u64,
         result: Result<Response, String>,
     ) -> Task<Message> {
-        let Some(RevisionPage::Suggestion { id, .. }) = &self.revisions else {
+        let Some(TaskPage::Suggestion { id, .. }) = &self.task_page else {
             return Task::none();
         };
         if *id != loaded_id {
@@ -237,7 +241,7 @@ impl App {
                     diff: Vec::new(),
                 };
                 loaded.rediff(task);
-                if let Some(RevisionPage::Suggestion { loaded: slot, .. }) = &mut self.revisions {
+                if let Some(TaskPage::Suggestion { loaded: slot, .. }) = &mut self.task_page {
                     *slot = Some(loaded);
                 }
             }
@@ -252,9 +256,9 @@ impl App {
         let Some((room, number)) = self.open_ids() else {
             return Task::none();
         };
-        let Some(RevisionPage::Suggestion {
+        let Some(TaskPage::Suggestion {
             id: shown, busy, ..
-        }) = &mut self.revisions
+        }) = &mut self.task_page
         else {
             return Task::none();
         };
@@ -286,13 +290,13 @@ impl App {
     ) -> Task<Message> {
         match result {
             Ok(_) => {
-                if matches!(self.revisions, Some(RevisionPage::Suggestion { .. })) {
-                    self.revisions = None;
+                if matches!(self.task_page, Some(TaskPage::Suggestion { .. })) {
+                    self.task_page = None;
                 }
                 self.notify(done);
             }
             Err(e) => {
-                if let Some(RevisionPage::Suggestion { busy, .. }) = &mut self.revisions {
+                if let Some(TaskPage::Suggestion { busy, .. }) = &mut self.task_page {
                     *busy = false;
                 }
                 self.banner = Some(e);
@@ -301,15 +305,18 @@ impl App {
         Task::none()
     }
 
-    /// Keeps the page in step with the room: closes it when the main page, the open task or the
-    /// suggestion went away, reloads a history that a new version made stale and recomputes a
-    /// suggestion's diff after its part changed.
-    pub(super) fn settle_revisions(&mut self) -> Task<Message> {
-        let Some(mut page) = self.revisions.take() else {
+    /// Keeps the page in step with the room: closes it when the main page, the open task, the
+    /// text read or the suggestion went away (Ctrl+N, Ctrl+, , a room or project switch, a task
+    /// that vanished or lost its plan), reloads a history that a new version made stale and
+    /// recomputes a suggestion's diff after its part changed.
+    pub(super) fn settle_task_page(&mut self) -> Task<Message> {
+        let Some(mut page) = self.task_page.take() else {
             return Task::none();
         };
         let page_task = match &page {
-            RevisionPage::History { task, .. } | RevisionPage::Suggestion { task, .. } => *task,
+            TaskPage::Reading { task, .. }
+            | TaskPage::History { task, .. }
+            | TaskPage::Suggestion { task, .. } => *task,
         };
         let Some((_, open)) = self
             .open()
@@ -319,7 +326,12 @@ impl App {
         };
         let mut reload = None;
         match &mut page {
-            RevisionPage::History {
+            TaskPage::Reading { part, .. } => {
+                if !logic::has_text(open, *part) {
+                    return Task::none();
+                }
+            }
+            TaskPage::History {
                 task,
                 part,
                 versions,
@@ -333,7 +345,7 @@ impl App {
                     reload = Some((*task, *part));
                 }
             }
-            RevisionPage::Suggestion {
+            TaskPage::Suggestion {
                 id, loaded, busy, ..
             } => {
                 if !*busy && !open.suggestions.iter().any(|s| s.id == *id) {
@@ -347,7 +359,7 @@ impl App {
                 }
             }
         }
-        self.revisions = Some(page);
+        self.task_page = Some(page);
         match reload {
             Some((task, part)) => self.history_request(task, part),
             None => Task::none(),

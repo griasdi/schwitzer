@@ -7,7 +7,7 @@ use iced::{Alignment, Element, Length};
 use schwitzer_proto::{MemberId, Part, RoomState, Stage, Task};
 
 use super::logic::{self, DiffLine};
-use super::revisions::{LoadedSuggestion, RevisionPage};
+use super::revisions::{LoadedSuggestion, TaskPage};
 use super::widgets::{
     self, byline, chevron, heading, hrule, id_button, member_tag_of, muted, read_text, text_button,
 };
@@ -15,8 +15,8 @@ use super::{App, Message, list, pages};
 use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, TS_14};
 
 pub fn page<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
-    let (id, title, content) = match &app.revisions {
-        Some(RevisionPage::History {
+    let (id, title, content) = match &app.task_page {
+        Some(TaskPage::History {
             part,
             versions,
             selected,
@@ -34,7 +34,7 @@ pub fn page<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
             };
             ("history-page", title, content)
         }
-        Some(RevisionPage::Suggestion {
+        Some(TaskPage::Suggestion {
             id, loaded, busy, ..
         }) => {
             let part = loaded.as_ref().map(|l| l.suggestion.part).or_else(|| {
@@ -54,7 +54,7 @@ pub fn page<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
                 suggestion(app, state, task, *id, loaded.as_ref(), *busy),
             )
         }
-        None => ("history-page", "History", Space::new().into()),
+        _ => ("history-page", "History", Space::new().into()),
     };
     let lane = app.settings.lanes.task(&state.id, task.number);
     let body = pages::section(

@@ -646,6 +646,14 @@ pub fn part_text(part: Part, title: &str, text: &str) -> String {
     }
 }
 
+/// Whether `task` has text in `part` to read: details, or a plan besides whitespace.
+pub fn has_text(task: &Task, part: Part) -> bool {
+    match part {
+        Part::Details => !task.body.is_empty(),
+        Part::Plan => task.has_plan(),
+    }
+}
+
 /// Whether the part a suggestion rewrites has a newer version than the one it was written on.
 pub fn outdated(task: &Task, s: &Suggestion) -> bool {
     s.version != task.version(s.part)

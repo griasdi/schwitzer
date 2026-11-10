@@ -11,7 +11,7 @@ use schwitzer_proto::{Annotation, Part, RoomState, Stage, Task};
 use super::annotations::AnnotationDraft;
 use super::icons::{Icon, icon};
 use super::widgets::{byline, group_head, hrule, id_button, member_tag_of, text_button, with_tip};
-use super::{App, Message, Reading, list, logic, pages};
+use super::{App, Message, list, logic, pages};
 use crate::theme::{self, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, Tone};
 
 /// Task text as Markdown, set for reading; a click on a link opens it.
@@ -244,12 +244,12 @@ pub fn page<'a>(
     app: &'a App,
     state: &'a RoomState,
     task: &'a Task,
-    part: Reading,
+    part: Part,
 ) -> Element<'a, Message> {
-    let (title, part) = match part {
-        Reading::Proposal if task.stage == Stage::Idea => ("Idea", Part::Details),
-        Reading::Proposal => ("Proposal", Part::Details),
-        Reading::Plan => ("Plan", Part::Plan),
+    let title = match part {
+        Part::Details if task.stage == Stage::Idea => "Idea",
+        Part::Details => "Proposal",
+        Part::Plan => "Plan",
     };
     let body = pages::section(
         column![

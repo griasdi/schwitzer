@@ -3,11 +3,12 @@
 
 use iced::Task;
 use iced::widget::operation;
-use schwitzer_proto::RoomId;
+use schwitzer_proto::{Part, RoomId};
 
 use super::list::reveal;
 use super::logic::Group;
-use super::{App, Expanded, Message, Page, Reading, pages};
+use super::revisions::TaskPage;
+use super::{App, Expanded, Message, Page, pages};
 
 impl App {
     /// Opens the draft of a new task or idea, for Ctrl+N and the new-task buttons.
@@ -81,10 +82,7 @@ impl App {
         if self.annotating.take().is_some() {
             return Task::none();
         }
-        if self.revisions.take().is_some() {
-            return reveal("open-task");
-        }
-        if self.reading.take().is_some() {
+        if self.task_page.take().is_some() {
             return reveal("open-task");
         }
         if self.expanded.take().is_some() {
@@ -98,11 +96,11 @@ impl App {
     }
 
     /// Opens the reading page for `part` of the open task.
-    pub(super) fn read(&mut self, part: Reading) -> Task<Message> {
-        let Some(Expanded::Task(n)) = self.expanded else {
+    pub(super) fn read(&mut self, part: Part) -> Task<Message> {
+        let Some(Expanded::Task(task)) = self.expanded else {
             return Task::none();
         };
-        self.reading = Some((n, part));
+        self.task_page = Some(TaskPage::Reading { task, part });
         operation::snap_to(pages::BODY_ID, operation::RelativeOffset::START)
     }
 
@@ -116,27 +114,8 @@ impl App {
             self.page = Page::Main;
             self.reset_drafts();
         }
-        self.reading = None;
-        self.revisions = None;
+        self.task_page = None;
         true
-    }
-
-    /// Drops the reading page unless the main page shows it, its task is still the open one and
-    /// that task still has the text: Ctrl+N, Ctrl+, , a room or project switch, a task that
-    /// vanished or lost its plan all close it.
-    pub(super) fn settle_reading(&mut self) {
-        let Some((number, part)) = self.reading else {
-            return;
-        };
-        let keep = self.page == Page::Main
-            && self.expanded == Some(Expanded::Task(number))
-            && self.open().is_some_and(|(_, task)| match part {
-                Reading::Proposal => !task.body.is_empty(),
-                Reading::Plan => task.has_plan(),
-            });
-        if !keep {
-            self.reading = None;
-        }
     }
 
     /// Opens `page` at its top. Drafts and a pending confirmation stay only when it is open
@@ -192,7 +171,7 @@ impl App {
         self.proposal_folded = false;
         self.plan_folded = false;
         self.forms.note.clear();
-        self.revisions = None;
+        self.task_page = None;
         self.annotating = None;
         self.show_resolved = false;
     }

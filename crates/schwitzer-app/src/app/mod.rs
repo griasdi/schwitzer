@@ -49,6 +49,7 @@ use serde::{Deserialize, Serialize};
 use self::chrome::RoomChoice;
 use self::list::reveal_bottom;
 use self::logic::{Group, ServerStatus};
+use self::revisions::TaskPage;
 use self::rooms::Rooms;
 use crate::bridge::{self, ClientKey, call};
 use crate::debug;
@@ -128,7 +129,7 @@ pub enum Message {
     /// Folds or unfolds the Plan block of the open task.
     TogglePlan,
     /// Shows a text of the open task as the reading page.
-    Read(Reading),
+    Read(Part),
 
     SelectRoom(RoomId),
     ServerUrl(String),
@@ -306,13 +307,6 @@ pub enum Message {
     AutoRestartUpdates(bool),
     /// Whether the element to focus after a restart is laid out yet.
     ResumeFocus(bool),
-}
-
-/// A text of the open task shown across the window for reading.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Reading {
-    Proposal,
-    Plan,
 }
 
 /// Which page fills the window.
@@ -558,11 +552,9 @@ pub struct App {
     proposal_folded: bool,
     /// Whether the open task's Plan block is folded; every task opens unfolded.
     plan_folded: bool,
-    /// The text of open task `n` shown as the reading page, on the main page only; not kept
-    /// over a restart.
-    reading: Option<(u64, Reading)>,
-    /// The open task's history or a suggestion under review, on the main page only.
-    revisions: Option<revisions::RevisionPage>,
+    /// The sub-page of open task `n` that fills the main page: its text for reading, its
+    /// history or a suggestion under review; on the main page only, not kept over a restart.
+    task_page: Option<revisions::TaskPage>,
     /// The task whose pick is under way.
     picking: Option<u64>,
     /// The open proposal accepted last, until the list returned to its place.
@@ -715,8 +707,7 @@ impl App {
             members_open: false,
             proposal_folded: false,
             plan_folded: false,
-            reading: None,
-            revisions: None,
+            task_page: None,
             picking: None,
             accept_return: None,
             noting_idea: None,
@@ -833,11 +824,11 @@ impl App {
         }
         let body: Element<'_, Message> = match self.page {
             Page::FirstStart => settings_view::first_start(self),
-            Page::Main => match (self.reading, self.open()) {
-                (_, Some((state, task))) if self.revisions.is_some() => {
-                    revisions_view::page(self, state, task)
+            Page::Main => match (&self.task_page, self.open()) {
+                (Some(TaskPage::Reading { part, .. }), Some((state, task))) => {
+                    reading::page(self, state, task, *part)
                 }
-                (Some((_, part)), Some((state, task))) => reading::page(self, state, task, part),
+                (Some(_), Some((state, task))) => revisions_view::page(self, state, task),
                 _ => {
                     let mut main = column![chrome::header(self), widgets::hrule()];
                     if let Some(members) = chrome::members(self) {
@@ -883,8 +874,7 @@ impl App {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
-        self.settle_reading();
-        let settle = self.settle_revisions();
+        let settle = self.settle_task_page();
         self.refresh_markdown();
         Task::batch([task, settle])
     }
