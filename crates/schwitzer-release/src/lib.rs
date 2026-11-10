@@ -54,6 +54,23 @@ pub struct GitHubRelease {
     pub assets: Vec<Asset>,
 }
 
+impl GitHubRelease {
+    /// The release in the API's answer `json` for one release.
+    pub fn parse(json: &[u8]) -> Result<Self, String> {
+        serde_json::from_slice(json).map_err(|e| format!("unreadable release: {e}"))
+    }
+
+    /// The releases in the API's answer `json` for the release list.
+    pub fn parse_list(json: &[u8]) -> Result<Vec<Self>, String> {
+        serde_json::from_slice(json).map_err(|e| format!("unreadable release list: {e}"))
+    }
+}
+
+/// The rolling dev release in the API's answer `json`; `None` while it is a draft.
+pub fn parse_dev(json: &[u8]) -> Result<Option<GitHubRelease>, String> {
+    Ok(Some(GitHubRelease::parse(json)?).filter(|dev| !dev.draft))
+}
+
 /// An archive to download, and what it must be.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Download {

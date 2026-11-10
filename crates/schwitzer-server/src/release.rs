@@ -32,9 +32,7 @@ pub(crate) struct Published {
 /// The newest stable release in GitHub's release list `json`. Tags that are no version are
 /// skipped.
 pub(crate) fn newest_stable(json: &[u8]) -> Result<Option<Published>, String> {
-    let listed: Vec<GitHubRelease> =
-        serde_json::from_slice(json).map_err(|e| format!("unreadable release list: {e}"))?;
-    Ok(listed
+    Ok(GitHubRelease::parse_list(json)?
         .into_iter()
         .filter(|r| !r.draft && !r.prerelease)
         .filter_map(|r| {
@@ -51,11 +49,9 @@ pub(crate) fn newest_stable(json: &[u8]) -> Result<Option<Published>, String> {
 /// The newest server build for `platform` on the dev release `json` (one release), with all of
 /// the release's assets.
 pub(crate) fn newest_dev(json: &[u8], platform: &str) -> Result<Option<Published>, String> {
-    let dev: GitHubRelease =
-        serde_json::from_slice(json).map_err(|e| format!("unreadable release: {e}"))?;
-    if dev.draft {
+    let Some(dev) = schwitzer_release::parse_dev(json)? else {
         return Ok(None);
-    }
+    };
     let version = schwitzer_release::newest_asset(
         &dev.assets,
         "schwitzer-server-",

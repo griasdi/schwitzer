@@ -9,6 +9,7 @@ license.workspace = true
 ureq.workspace = true
 semver.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 hex.workspace = true
 # The gzip of the Unix archives; on Windows zip's deflate-flate2 picks no backend of its own.

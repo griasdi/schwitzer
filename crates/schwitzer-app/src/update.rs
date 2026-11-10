@@ -148,8 +148,7 @@ pub fn parse_release(
     platform: &str,
     package: Package,
 ) -> Result<Option<Release>, String> {
-    let latest: GitHubRelease =
-        serde_json::from_slice(json).map_err(|e| format!("unreadable release: {e}"))?;
+    let latest = GitHubRelease::parse(json)?;
     if latest.draft || latest.prerelease {
         return Ok(None);
     }
@@ -178,11 +177,9 @@ pub fn parse_dev(
     platform: &str,
     package: Package,
 ) -> Result<Option<Release>, String> {
-    let dev: GitHubRelease =
-        serde_json::from_slice(json).map_err(|e| format!("unreadable release: {e}"))?;
-    if dev.draft {
+    let Some(dev) = schwitzer_release::parse_dev(json)? else {
         return Ok(None);
-    }
+    };
     let ext = package_ext(package);
     let (version, asset) =
         schwitzer_release::newest_asset(&dev.assets, "schwitzer-", &format!("-{platform}.{ext}"))
