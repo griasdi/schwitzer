@@ -12,7 +12,7 @@ use super::icons::{Icon, icon};
 use super::logic::{self, Group, MissingSession};
 use super::task_view;
 use super::widgets::{
-    self, LAMP, icon_button, icon_text_button, id_button, lamp, lamp_kind, member_tag_of, muted,
+    self, LAMP, icon_button, icon_text_button, id_button, lamp, member_tag_of, muted,
     priority_pill, with_tip,
 };
 use super::{App, Expanded, Message};
@@ -236,7 +236,7 @@ pub fn summary<'a>(
     }
     column![
         row![
-            lamp(lamp_kind(task)),
+            lamp(logic::lamp(task)),
             text(&task.title)
                 .size(TS_14)
                 .font(MEDIUM)

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::mcp::McpStatus;
 use crate::omp_plugin::Coverage;
 use crate::sessions::{self, LocalSession};
-use crate::theme::Dot;
+use crate::theme::{Dot, Lamp};
 use crate::update::{Lookup, UpdateState};
 use crate::{settings, wsl};
 
@@ -304,6 +304,19 @@ pub fn stage_label(task: &Task) -> &'static str {
         (Stage::Ready, None) => "Approved",
         (Stage::Done, _) => "Done",
         (Stage::Rejected, _) => "Rejected",
+    }
+}
+
+/// The stage lamp of a task.
+pub fn lamp(task: &Task) -> Lamp {
+    match (task.stage, &task.claim) {
+        (Stage::Idea, _) => Lamp::Idea,
+        (Stage::Proposed, _) => Lamp::New,
+        (Stage::Accepted | Stage::Ready, Some(_)) => Lamp::Running,
+        (Stage::Done, _) => Lamp::Closed,
+        (Stage::Rejected, _) => Lamp::Rejected,
+        _ if Group::of(task) == Group::Pickable => Lamp::Pickable,
+        _ => Lamp::Planning,
     }
 }
 

@@ -7,7 +7,7 @@ use iced::widget::{
     Container, Space, button, container, pick_list, row, svg, text, text_input, tooltip,
 };
 use iced::{Alignment, Element, Length, Padding, Theme};
-use schwitzer_proto::{Member, MemberId, Priority, Stage, Task};
+use schwitzer_proto::{Member, MemberId, Priority};
 
 use super::Message;
 use super::icons::{Icon, icon};
@@ -285,19 +285,6 @@ fn tip_at<'a>(
     .gap(SP_1)
     .style(theme::tooltip)
     .into()
-}
-
-/// The lamp kind of a task.
-pub fn lamp_kind(task: &Task) -> Lamp {
-    match (task.stage, &task.claim) {
-        (Stage::Idea, _) => Lamp::Idea,
-        (Stage::Proposed, _) => Lamp::New,
-        (Stage::Accepted | Stage::Ready, Some(_)) => Lamp::Running,
-        (Stage::Done, _) => Lamp::Closed,
-        (Stage::Rejected, _) => Lamp::Rejected,
-        _ if logic::Group::of(task) == logic::Group::Pickable => Lamp::Pickable,
-        _ => Lamp::Planning,
-    }
 }
 
 /// Width of the stage lamp; the second line of a slab starts under the title.

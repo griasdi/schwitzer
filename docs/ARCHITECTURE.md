@@ -133,7 +133,7 @@ stateDiagram-v2
 
 **One stage, four names.** The server knows seven stages; the app and the MCP tools split some of them by claim and plan:
 
-|Stage + claim|App group (`logic::Group`)|App label (`stage_label`)|Lamp (`lamp_kind`)|MCP stage (`StageArg`)|
+|Stage + claim|App group (`logic::Group`)|App label (`stage_label`)|Lamp (`lamp`)|MCP stage (`StageArg`)|
 |---|---|---|---|---|
 |Idea|Ideas|Idea|Idea (hollow)|`idea`|
 |Proposed|Proposals|Proposed|New (hollow)|`proposed`|
@@ -146,7 +146,7 @@ stateDiagram-v2
 |Done|Done|Done|Closed|`done`|
 |Rejected|Done|Rejected|Rejected|`rejected`|
 
-Sources: `crates/schwitzer-app/src/app/logic.rs` (`Group::of`, `stage_label`), `crates/schwitzer-app/src/app/widgets.rs` (`lamp_kind`), `crates/schwitzer-app/src/mcp/tools.rs` (`StageArg`, `stage_of`).
+Sources: `crates/schwitzer-app/src/app/logic.rs` (`Group::of`, `stage_label`, `lamp`), `crates/schwitzer-app/src/mcp/tools.rs` (`StageArg`, `stage_of`).
 
 ## 5. Transport: weida
 
@@ -618,7 +618,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |---|---|
 |New request or event|`schwitzer-proto/src/rpc.rs` or `events.rs` (append the variant; bump `PROTOCOL_VERSION` when old peers would break), `schwitzer-server/src/rpc.rs` (`dispatch`, validation), `store.rs`, the caller in `app/tasks.rs` (task actions), `app/projects.rs` (rooms and projects) or `app/mod.rs`|
 |New debug request|`schwitzer-proto/src/rpc.rs` and `events.rs`, `schwitzer-server/src/debug.rs` (`DebugRuns`) and its handler in `rpc.rs`, a `Client::debug_*` method in `schwitzer-client/src/lib.rs`, `schwitzer-app/src/debug.rs` (the worker), `app/debug_session.rs` (the lifecycle in the app), `app/debug_view.rs` (the page), `mcp/tools.rs`, `omp-plugin/index.ts`|
-|New stage, decision or claim rule|`model.rs` (append; `Task::next_stage`, `Task::legal_decisions`), `store.rs` (`stage_to_int` …, `claim`), `app/logic.rs` (`Group::of`, `stage_label`), `app/widgets.rs` (`lamp_kind`), `mcp/tools.rs` (`StageArg`), the plugin (`STAGE`)|
+|New stage, decision or claim rule|`model.rs` (append; `Task::next_stage`, `Task::legal_decisions`), `store.rs` (`stage_to_int` …, `claim`), `app/logic.rs` (`Group::of`, `stage_label`, `lamp`), `mcp/tools.rs` (`StageArg`), the plugin (`STAGE`)|
 |Schema change|`store.rs` (`SCHEMA`, a new `MIGRATE_n`, `SCHEMA_VERSION`)|
 |New MCP tool or argument|`mcp/tools.rs`, `omp-plugin/index.ts` (`TOOLS`), `omp-plugin/README.md`|
 |New `/schwitzer` subcommand or prompt text|`omp-plugin/index.ts`, `omp-plugin/README.md`; a rebuilt app marks every installed plugin out of date and rewrites it|
