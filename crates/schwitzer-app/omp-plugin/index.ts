@@ -96,11 +96,16 @@ type OtherRepo = NonNullable<Config["other_repos"]>[number];
 interface Candidate extends JoinedProject {
   task: TaskRow;
 }
+/** A part of a tool's answer; only `text` parts carry text. */
+interface ContentPart {
+  type?: string;
+  text?: string;
+}
 /** A JSON-RPC message from the app's MCP server. */
 interface RpcMessage {
   id?: unknown;
   error?: { message?: unknown };
-  result?: { content?: Array<{ type?: string; text?: string }>; isError?: boolean };
+  result?: { content?: ContentPart[]; isError?: boolean };
 }
 /** A row of the app's `decisions` tool (`decision_rows` in src/mcp/tools.rs). */
 interface DecisionRow {
@@ -196,7 +201,7 @@ interface ToolCallEvent {
 interface ToolResultEvent {
   toolName: string;
   input: Record<string, unknown>;
-  content?: Array<{ type?: string; text?: string }>;
+  content?: ContentPart[];
   isError: boolean;
 }
 interface InjectedMessage {
@@ -593,12 +598,8 @@ async function callTool(
       2,
     );
     if (answer.error) throw new Error(String(answer.error.message ?? "MCP error"));
-    const content: Array<{ type?: string; text?: string }> = answer.result?.content ?? [];
     return {
-      text: content
-        .filter((c) => c.type === "text")
-        .map((c) => c.text ?? "")
-        .join("\n"),
+      text: textOf(answer.result?.content),
       isError: answer.result?.isError === true,
     };
   } finally {
@@ -608,6 +609,14 @@ async function callTool(
       );
     }
   }
+}
+
+/** The text parts of a tool's answer, one per line. */
+function textOf(content: ContentPart[] | undefined): string {
+  return (content ?? [])
+    .filter((c) => c.type === "text")
+    .map((c) => c.text ?? "")
+    .join("\n");
 }
 
 /** The JSON-RPC message with `id` in a JSON or SSE response body. */
@@ -1621,11 +1630,21 @@ async function suggestionMenu(ctx: Ctx, config: Config, row: DecisionRow, s: Dec
       await ctx.ui.editor?.(`Suggested ${s.part} for #${n} (changes here are not kept)`, text);
       continue;
     }
-    const apply = pick === "Apply";
-    await tool(config, "settle_suggestion", { room: row.room, task: n, suggestion: s.id, apply });
-    ctx.ui.notify(`Schwitzer: suggestion ${apply ? "applied to" : "discarded for"} #${n}.`, "info");
+    await settleSuggestion(ctx, config, row, s.id, pick === "Apply");
     return true;
   }
+}
+
+/** Applies or discards suggestion `suggestion` of `row`'s task and says so. */
+async function settleSuggestion(
+  ctx: Ctx,
+  config: Config,
+  row: DecisionRow,
+  suggestion: number,
+  apply: boolean,
+): Promise<void> {
+  await tool(config, "settle_suggestion", { room: row.room, task: row.number, suggestion, apply });
+  ctx.ui.notify(`Schwitzer: suggestion ${apply ? "applied to" : "discarded for"} #${row.number}.`, "info");
 }
 
 /** A proposal or suggestion of the main agent in this run, offered for a decision when it ends. */
@@ -1648,11 +1667,7 @@ let fastProposed: Candidate | undefined;
 /** The JSON object a successful tool call answered with; undefined for anything else. */
 function resultJson(event: ToolResultEvent): Record<string, unknown> | undefined {
   try {
-    const text = (event.content ?? [])
-      .filter((c) => c.type === "text")
-      .map((c) => c.text ?? "")
-      .join("\n");
-    const value: unknown = JSON.parse(text);
+    const value: unknown = JSON.parse(textOf(event.content));
     return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
   } catch {
     return undefined;
@@ -1706,8 +1721,7 @@ async function afterRun(pi: Pi, ctx: Ctx, taken: Offer[], fast: Candidate | unde
         const options = ["Apply", "Discard", "Leave it for the room"];
         const index = pickIndex(await ctx.ui.select(`Apply the suggested ${offer.part} to #${n} "${row.title}"?`, options), options);
         if (index !== 0 && index !== 1) continue;
-        await tool(config, "settle_suggestion", { room: row.room, task: n, suggestion: offer.suggestion, apply: index === 0 });
-        ctx.ui.notify(`Schwitzer: suggestion ${index === 0 ? "applied to" : "discarded for"} #${n}.`, "info");
+        await settleSuggestion(ctx, config, row, offer.suggestion!, index === 0);
       }
     }
   } catch (e) {
@@ -2396,11 +2410,8 @@ function restoreAwaits(pi: Pi, ctx: Ctx): void {
  *  of is remembered and watched. Never throws. */
 async function watchProposal(pi: Pi, ctx: Ctx, event: ToolResultEvent): Promise<void> {
   try {
-    const text = (event.content ?? [])
-      .filter((c) => c.type === "text")
-      .map((c) => c.text ?? "")
-      .join("\n");
-    const task = JSON.parse(text) as Record<string, unknown>;
+    const task = resultJson(event);
+    if (!task) return;
     const n = task.number;
     const { title, project } = task;
     if (typeof n !== "number" || typeof title !== "string" || typeof project !== "string") return;
