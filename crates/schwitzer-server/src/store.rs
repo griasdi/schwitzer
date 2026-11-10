@@ -848,7 +848,7 @@ fn require_task(conn: &Connection, room: &RoomId, number: u64) -> R<Task> {
 
 /// `WrongStage` once the task is `Done` or `Rejected`.
 fn require_open(task: &Task) -> R<()> {
-    if matches!(task.stage, Stage::Done | Stage::Rejected) {
+    if task.stage.is_closed() {
         return Err(ApiError::WrongStage(task.stage).into());
     }
     Ok(())

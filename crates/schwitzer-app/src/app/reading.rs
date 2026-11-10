@@ -43,7 +43,7 @@ pub fn annotated<'a>(
         .filter(|a| a.part == part && !a.resolved)
         .collect();
     let draft = app.annotating.as_ref().filter(|d| d.part == part);
-    let editable = logic::editable(task);
+    let editable = task.is_open();
     let mut placed = vec![false; shown.len()];
     let mut draft_placed = false;
 

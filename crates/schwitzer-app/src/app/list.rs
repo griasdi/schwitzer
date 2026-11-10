@@ -205,7 +205,7 @@ pub fn summary<'a>(
         ));
     }
     let open = task.open_waits(&state.tasks);
-    if logic::editable(task) && !open.is_empty() {
+    if task.is_open() && !open.is_empty() {
         meta = meta.push(muted(logic::waits_label(&open)));
     }
     if !task.suggestions.is_empty() {

@@ -138,7 +138,7 @@ fn history<'a>(
         if v.version > 1 && versions.get(i + 1).is_none() {
             detail = detail.push(muted("The version before is no longer kept."));
         }
-        if Some(v.version) != newest && logic::editable(task) {
+        if Some(v.version) != newest && task.is_open() {
             detail = detail.push(row![
                 Space::new().width(Length::Fill),
                 text_button(
@@ -210,7 +210,7 @@ fn suggestion<'a>(
                 text_button(
                     "apply-suggestion",
                     "Apply",
-                    (!busy && logic::editable(task)).then_some(Message::ApplySuggestion(id)),
+                    (!busy && task.is_open()).then_some(Message::ApplySuggestion(id)),
                     theme::button_primary,
                 ),
             ]

@@ -5,7 +5,7 @@ use iced::Task;
 use iced::widget::{operation, text_editor};
 use schwitzer_proto::{Part, Request, Response};
 
-use super::{App, Message, logic};
+use super::{App, Message};
 use crate::bridge::call;
 
 /// The comment being written on a block of the open task; not kept over a restart.
@@ -24,7 +24,7 @@ impl App {
         let Some((_, task)) = self.open() else {
             return Task::none();
         };
-        if !logic::editable(task) {
+        if !task.is_open() {
             return Task::none();
         }
         let Some(block) = self.open_md.part(part).blocks.get(index) else {

@@ -20,6 +20,13 @@ pub enum Stage {
     Idea,
 }
 
+impl Stage {
+    /// Whether the task is finished for good: `Done` or `Rejected`. Only `Reopen` moves it on.
+    pub fn is_closed(self) -> bool {
+        matches!(self, Self::Done | Self::Rejected)
+    }
+}
+
 /// Sort order: `High` first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Priority {
@@ -167,6 +174,12 @@ impl Task {
     /// Whether the plan has any text besides whitespace.
     pub fn has_plan(&self) -> bool {
         !self.plan.trim().is_empty()
+    }
+
+    /// Whether the task still takes changes: edits, comments, suggestions and waits.
+    /// `false` once it is `Done` or `Rejected`.
+    pub fn is_open(&self) -> bool {
+        !self.stage.is_closed()
     }
 
     /// The newest version of `part`.

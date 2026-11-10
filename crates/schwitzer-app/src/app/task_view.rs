@@ -30,7 +30,7 @@ pub fn view<'a>(
     list_height: f32,
 ) -> Element<'a, Message> {
     let n = task.number;
-    let editable = logic::editable(task);
+    let editable = task.is_open();
     let mut icons = row![];
     if app.task_draft.is_none() {
         icons = icons.push(icon_button(
@@ -760,9 +760,7 @@ fn waits<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     let mut choices: Vec<WaitChoice> = state
         .tasks
         .iter()
-        .filter(|t| {
-            t.number != task.number && logic::editable(t) && !task.waits_for.contains(&t.number)
-        })
+        .filter(|t| t.number != task.number && t.is_open() && !task.waits_for.contains(&t.number))
         .map(|t| {
             let mut title = caps::cut(&t.title, 40).to_owned();
             if title.len() < t.title.len() {

@@ -620,7 +620,7 @@ fn decision_rows(room: &RoomRef, lanes: &FastLane, task: Option<u64>) -> Vec<Val
             None => {
                 t.stage == Stage::Proposed
                     || logic::approvable(t)
-                    || (logic::editable(t) && !t.suggestions.is_empty())
+                    || (t.is_open() && !t.suggestions.is_empty())
             }
         })
         .collect();

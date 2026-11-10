@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use schwitzer_proto::{Project, RoomId, Stage, Task};
+use schwitzer_proto::{Project, RoomId, Task};
 use serde::{Deserialize, Serialize};
 
 /// The port of the MCP server unless `settings.toml` says otherwise.
@@ -424,7 +424,7 @@ impl Settings {
         let settled = |number: u64| {
             tasks
                 .iter()
-                .any(|t| t.number == number && matches!(t.stage, Stage::Done | Stage::Rejected))
+                .any(|t| t.number == number && t.stage.is_closed())
         };
         let before = self.fast_lane_tasks.len();
         self.fast_lane_tasks
@@ -536,6 +536,7 @@ fn default_sessions_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use schwitzer_proto::Stage;
 
     #[test]
     fn missing_file_gives_defaults_without_a_problem() {

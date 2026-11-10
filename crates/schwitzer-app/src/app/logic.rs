@@ -300,11 +300,6 @@ pub fn legal_decisions(task: &Task) -> Vec<Decision> {
     }
 }
 
-/// Whether `EditTask` is allowed for the task.
-pub fn editable(task: &Task) -> bool {
-    !matches!(task.stage, Stage::Done | Stage::Rejected)
-}
-
 /// "waits for #12, #14" for the slab.
 pub fn waits_label(open: &[u64]) -> String {
     let numbers: Vec<String> = open.iter().map(|n| format!("#{n}")).collect();
