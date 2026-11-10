@@ -407,6 +407,16 @@ impl RoomRef {
         self.state.as_ref().and_then(|s| s.task(number))
     }
 
+    /// `task` as one row of `list_tasks`.
+    fn task_row(&self, task: &Task) -> Value {
+        task_row(task, self.members(), self.projects(), self.tasks())
+    }
+
+    /// `task` in full, as `get_task` shows it.
+    fn task_json(&self, task: &Task) -> Value {
+        task_json(task, self.members(), self.projects(), self.tasks())
+    }
+
     /// The room's running debug session, if any.
     fn debug(&self) -> Option<&DebugSession> {
         self.state.as_ref().and_then(|s| s.debug.as_ref())
@@ -957,17 +967,26 @@ impl Tools {
         Ok(rooms.swap_remove(index))
     }
 
-    /// Sends `request` for `room` and returns the task the server answers with.
-    async fn task_request(&self, room: &RoomRef, request: Request) -> Result<Task, String> {
-        match self
-            .client
+    /// Sends `request` for `room` and returns the server's answer.
+    async fn call(&self, room: &RoomRef, request: Request) -> Result<Response, String> {
+        self.client
             .request(room.id, request)
             .await
-            .map_err(|e| e.to_string())?
-        {
+            .map_err(|e| e.to_string())
+    }
+
+    /// Sends `request` for `room` and returns the task the server answers with.
+    async fn task_request(&self, room: &RoomRef, request: Request) -> Result<Task, String> {
+        match self.call(room, request).await? {
             Response::Task(task) => Ok(task),
             _ => Err(unexpected()),
         }
+    }
+
+    /// Sends `request` for `room` and shows the task the server answers with.
+    async fn answer_task(&self, room: &RoomRef, request: Request) -> Result<String, String> {
+        let task = self.task_request(room, request).await?;
+        pretty(&room.task_json(&task))
     }
 
     /// Sends the request `request` builds for the room `arg` names and shows the updated task.
@@ -978,13 +997,7 @@ impl Tools {
     ) -> Result<String, String> {
         let room = self.room(arg.as_deref())?;
         let request = request(&room)?;
-        let task = self.task_request(&room, request).await?;
-        pretty(&task_json(
-            &task,
-            room.members(),
-            room.projects(),
-            room.tasks(),
-        ))
+        self.answer_task(&room, request).await
     }
 
     /// The status of the debug session of the room `arg` names, as `debug_status` shows it.
@@ -1030,7 +1043,7 @@ impl Tools {
                 .iter()
                 .filter(|t| args.stage.is_none_or(|s| stage_of(t) == s))
                 .filter(|t| project.is_none_or(|id| t.project == id))
-                .map(|t| task_row(t, &state.members, &state.projects, &state.tasks))
+                .map(|t| room.task_row(t))
                 .collect();
             pretty(&Value::Array(rows))
         })
@@ -1043,16 +1056,11 @@ impl Tools {
     async fn get_task(&self, Parameters(args): Parameters<GetTaskArgs>) -> CallToolResult {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
-            let state = room.loaded()?;
-            let task = state
+            room.loaded()?;
+            let task = room
                 .task(args.task)
                 .ok_or_else(|| ApiError::NoSuchTask.to_string())?;
-            pretty(&task_json(
-                task,
-                &state.members,
-                &state.projects,
-                &state.tasks,
-            ))
+            pretty(&room.task_json(task))
         })
         .await
     }
@@ -1090,7 +1098,7 @@ impl Tools {
                 },
             };
             let task = self.task_request(&room, request).await?;
-            let mut json = task_json(&task, room.members(), room.projects(), room.tasks());
+            let mut json = room.task_json(&task);
             if let Some(blocked) = blocked {
                 let mut waits_for = blocked.waits_for.clone();
                 waits_for.push(task.number);
@@ -1138,9 +1146,8 @@ impl Tools {
             let room = self.room(args.room.as_deref())?;
             let project = optional_project(&room, args.project.as_deref())?;
             let response = self
-                .client
-                .request(
-                    room.id,
+                .call(
+                    &room,
                     Request::Claim {
                         room: room.id,
                         work: args.work.into(),
@@ -1149,8 +1156,7 @@ impl Tools {
                         agent: args.agent,
                     },
                 )
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             match response {
                 Response::Claimed(Some(task)) => {
                     claim_text(&task, room.members(), room.projects(), room.tasks())
@@ -1387,22 +1393,15 @@ impl Tools {
             let room = self.room(args.room.as_deref())?;
             let decision = Decision::from(args.decision);
             require_decision_lane(&self.fast_lane, &room, args.task, decision)?;
-            let task = self
-                .task_request(
-                    &room,
-                    Request::Decide {
-                        room: room.id,
-                        task: args.task,
-                        decision,
-                    },
-                )
-                .await?;
-            pretty(&task_json(
-                &task,
-                room.members(),
-                room.projects(),
-                room.tasks(),
-            ))
+            self.answer_task(
+                &room,
+                Request::Decide {
+                    room: room.id,
+                    task: args.task,
+                    decision,
+                },
+            )
+            .await
         })
         .await
     }
@@ -1414,17 +1413,15 @@ impl Tools {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
             let response = self
-                .client
-                .request(
-                    room.id,
+                .call(
+                    &room,
                     Request::GetSuggestion {
                         room: room.id,
                         task: args.task,
                         suggestion: args.suggestion,
                     },
                 )
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             match response {
                 Response::Suggestion {
                     suggestion,
@@ -1466,13 +1463,7 @@ impl Tools {
                     suggestion: args.suggestion,
                 }
             };
-            let task = self.task_request(&room, request).await?;
-            pretty(&task_json(
-                &task,
-                room.members(),
-                room.projects(),
-                room.tasks(),
-            ))
+            self.answer_task(&room, request).await
         })
         .await
     }
