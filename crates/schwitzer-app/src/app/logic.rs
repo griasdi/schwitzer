@@ -285,6 +285,25 @@ fn name_key(s: &str) -> String {
         .collect()
 }
 
+/// The tasks `task` may still wait for, by number: the other open tasks it does not wait for
+/// yet, each labelled `#n title` with the title cut to 40 bytes.
+pub fn wait_candidates(state: &RoomState, task: &Task) -> Vec<(u64, String)> {
+    let mut candidates: Vec<(u64, String)> = state
+        .tasks
+        .iter()
+        .filter(|t| t.number != task.number && t.is_open() && !task.waits_for.contains(&t.number))
+        .map(|t| {
+            let mut title = caps::cut(&t.title, 40).to_owned();
+            if title.len() < t.title.len() {
+                title.push('…');
+            }
+            (t.number, format!("#{} {title}", t.number))
+        })
+        .collect();
+    candidates.sort_by_key(|(number, _)| *number);
+    candidates
+}
+
 /// "waits for #12, #14" for the slab.
 pub fn waits_label(open: &[u64]) -> String {
     let numbers: Vec<String> = open.iter().map(|n| format!("#{n}")).collect();

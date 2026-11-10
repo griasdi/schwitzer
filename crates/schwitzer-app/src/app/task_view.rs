@@ -4,7 +4,7 @@ use std::fmt;
 
 use iced::widget::{Row, Space, column, container, row, text, text_editor};
 use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{Decision, Part, Priority, RoomState, Stage, Task, caps};
+use schwitzer_proto::{Decision, Part, Priority, RoomState, Stage, Task};
 
 use super::chrome::ProjectChoice;
 use super::icons::{Icon, icon};
@@ -748,22 +748,10 @@ impl fmt::Display for WaitChoice {
 
 /// The tasks this one waits for, each with a button that drops it, and a picker that adds one.
 fn waits<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
-    let mut choices: Vec<WaitChoice> = state
-        .tasks
-        .iter()
-        .filter(|t| t.number != task.number && t.is_open() && !task.waits_for.contains(&t.number))
-        .map(|t| {
-            let mut title = caps::cut(&t.title, 40).to_owned();
-            if title.len() < t.title.len() {
-                title.push('…');
-            }
-            WaitChoice {
-                number: t.number,
-                label: format!("#{} {title}", t.number),
-            }
-        })
+    let choices: Vec<WaitChoice> = logic::wait_candidates(state, task)
+        .into_iter()
+        .map(|(number, label)| WaitChoice { number, label })
         .collect();
-    choices.sort_by_key(|c| c.number);
     let mut head = row![heading("Waits for").width(Length::Fill)]
         .spacing(SP_1)
         .align_y(Alignment::Center);
