@@ -35,7 +35,7 @@ macro_rules! byte_id {
 
             /// The first eight hex digits: enough to tell ids apart on screen.
             pub fn short(&self) -> String {
-                self.to_hex()[..8].to_owned()
+                hex::encode(&self.0[..4])
             }
         }
 
