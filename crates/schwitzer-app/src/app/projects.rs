@@ -32,15 +32,20 @@ impl App {
         )
     }
 
+    /// Lists the rooms anew and opens `room`, a room just created or joined, on the main page.
+    fn enter_room(&mut self, room: RoomId) -> Task<Message> {
+        self.sync_rooms();
+        self.select(Some(room));
+        self.save_settings();
+        Task::batch([self.publish(), self.open_page(Page::Main)])
+    }
+
     pub(super) fn on_created(&mut self, result: Result<RoomKey, String>) -> Task<Message> {
         match result {
             Ok(key) => {
                 self.settings.last_server = Some(key.server.to_string());
                 self.forms.room_name.clear();
-                self.sync_rooms();
-                self.select(Some(RoomId::of(&key.token)));
-                self.save_settings();
-                Task::batch([self.publish(), self.open_page(Page::Main)])
+                self.enter_room(RoomId::of(&key.token))
             }
             Err(e) => {
                 self.banner = Some(e);
@@ -65,10 +70,7 @@ impl App {
         match result {
             Ok(room) => {
                 self.forms.room_key.clear();
-                self.sync_rooms();
-                self.select(Some(room));
-                self.save_settings();
-                Task::batch([self.publish(), self.open_page(Page::Main)])
+                self.enter_room(room)
             }
             Err(e) => {
                 self.banner = Some(e);
