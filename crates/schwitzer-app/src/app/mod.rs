@@ -1484,14 +1484,13 @@ impl App {
             Message::Picked(result) => self.picked(result),
 
             Message::EditTask => {
-                self.proposal_folded = false;
-                if let Some((_, task)) = self.open() {
-                    self.task_draft = Some(TaskDraft {
-                        title: task.title.clone(),
-                        body: text_editor::Content::with_text(&task.body),
-                    });
+                match self.open().map(|(_, t)| (t.title.clone(), t.body.clone())) {
+                    Some((title, body)) => self.begin_task_edit(title, &body),
+                    None => {
+                        self.proposal_folded = false;
+                        tasks::reveal_task_editor()
+                    }
                 }
-                Task::batch([operation::focus("task-title"), reveal("open-task")])
             }
             Message::CancelEditTask => {
                 self.task_draft = None;
@@ -1532,13 +1531,13 @@ impl App {
             Message::SaveTask => self.save_task(),
             Message::ProposeIdea => self.propose_idea(),
             Message::TaskSaved(result) => self.task_saved(result),
-            Message::EditPlan => {
-                self.plan_folded = false;
-                if let Some((_, task)) = self.open() {
-                    self.plan_draft = Some(text_editor::Content::with_text(&task.plan));
+            Message::EditPlan => match self.open().map(|(_, t)| t.plan.clone()) {
+                Some(plan) => self.begin_plan_edit(&plan),
+                None => {
+                    self.plan_folded = false;
+                    reveal_bottom("plan")
                 }
-                reveal_bottom("plan")
-            }
+            },
             Message::CancelEditPlan => {
                 self.plan_draft = None;
                 Task::none()

@@ -5,21 +5,46 @@
 use std::path::PathBuf;
 
 use iced::Task;
-use iced::widget::text_editor;
+use iced::widget::{operation, text_editor};
 use schwitzer_client::ClientError;
 use schwitzer_proto::{
     Decision, Priority, Request, Response, RoomId, Stage, Task as RoomTask, Work,
 };
 
 use super::logic::{Group, OmpStart};
-use super::{AcceptReturn, App, Expanded, Message, Page, list_top_of, logic, return_to};
+use super::{
+    AcceptReturn, App, Expanded, Message, Page, TaskDraft, list_top_of, logic, return_to, reveal,
+    reveal_bottom,
+};
 use crate::bridge::{call, fire};
 use crate::theme::SP_2;
 
 /// The agent name a pick claims the build with; the picker's own agent finishes it.
 const PICK_AGENT: &str = "omp";
 
+/// Focuses the title of the task editor and scrolls the open task into view.
+pub(super) fn reveal_task_editor() -> Task<Message> {
+    Task::batch([operation::focus("task-title"), reveal("open-task")])
+}
+
 impl App {
+    /// Opens the editor of the open task's title and details with `title` and `body`.
+    pub(super) fn begin_task_edit(&mut self, title: String, body: &str) -> Task<Message> {
+        self.proposal_folded = false;
+        self.task_draft = Some(TaskDraft {
+            title,
+            body: text_editor::Content::with_text(body),
+        });
+        reveal_task_editor()
+    }
+
+    /// Opens the editor of the open task's plan with `text`.
+    pub(super) fn begin_plan_edit(&mut self, text: &str) -> Task<Message> {
+        self.plan_folded = false;
+        self.plan_draft = Some(text_editor::Content::with_text(text));
+        reveal_bottom("plan")
+    }
+
     pub(super) fn propose(&mut self) -> Task<Message> {
         let Some(Expanded::New { idea }) = self.expanded else {
             return Task::none();

@@ -3,11 +3,11 @@
 //! suggestion. The page itself is `revisions_view.rs`.
 
 use iced::Task;
-use iced::widget::{operation, text_editor};
+use iced::widget::operation;
 use schwitzer_proto::{Part, Request, Response, Revision, Suggestion, Task as RoomTask};
 
 use super::logic::{self, DiffLine};
-use super::{App, Message, Page, TaskDraft, pages, reveal, reveal_bottom};
+use super::{App, Message, Page, pages};
 use crate::bridge::call;
 
 /// The open task's history of one part, or one of its suggestions, shown as a page; not kept
@@ -179,19 +179,8 @@ impl App {
             "Version {version} is in the editor; Save makes it the newest version"
         ));
         match part {
-            Part::Details => {
-                self.task_draft = Some(TaskDraft {
-                    title,
-                    body: text_editor::Content::with_text(&text),
-                });
-                self.proposal_folded = false;
-                Task::batch([operation::focus("task-title"), reveal("open-task")])
-            }
-            Part::Plan => {
-                self.plan_draft = Some(text_editor::Content::with_text(&text));
-                self.plan_folded = false;
-                reveal_bottom("plan")
-            }
+            Part::Details => self.begin_task_edit(title, &text),
+            Part::Plan => self.begin_plan_edit(&text),
         }
     }
 
