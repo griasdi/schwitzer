@@ -307,7 +307,7 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |`plugins.rs`|no view: the omp plugin in the shared repos (`impl App`: install, update, remove, the periodic `check_plugins`, `sync_plugins`)|
 |`updates.rs`|no view: the self-update (`impl App`: which release to look for, the check, the install, the channel and what follows)|
 |`rooms.rs`|no view: `Rooms`, a copy of the client's room list with each room's last known state, looked up by room id|
-|`resume.rs`|no view: `Resume`, what the window showed when the app restarted for an update or a lost graphics device (page, room, open task or draft, unsaved text, focus, window place), written to `resume.json` and applied by the new process|
+|`resume.rs`|no view: the restart (`App::restart`, started by `restart_task`) and `Resume`, what the window showed when the app restarted for an update or a lost graphics device (page, room, open task or draft, unsaved text, focus, window place), written to `resume.json` and applied by the new process (`App::pending_focus`, `App::apply_pending_focus`)|
 |`gpu.rs`|no view: `Watch` and the `probe` element, which notice a lost graphics device so that the app restarts instead of showing an empty window|
 |`logic.rs`|no view: pure logic without iced: how tasks are grouped and sorted, which local sessions a room sees, how numbers are shown|
 |`sticky.rs`|`Sticky`: the open task's head, pinned to the list's top while its slab is scrolled past|
@@ -626,7 +626,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |New setting|`settings.rs`, the topic's page in `app/settings_view/` and, if it needs one, its status line on the overview (`settings_view/mod.rs`)|
 |Colours, sizes, widget looks|DESIGN.md first, then `theme.rs`|
 |Self-update|`update.rs`, `schwitzer-release/src/lib.rs` (lookup, download, check, swap shared with the server), `app/updates.rs` (`App::check_update`, `App::install_update`), `app/logic.rs` (`next_check`), `app/resume.rs`, `deploy/package.sh` (asset names)|
-|Graphics device lost|`app/gpu.rs` (a 1×1 shader layer that registers wgpu's device-lost callback), the `Message::Tick` arm in `app/mod.rs` (restart through `App::restart`)|
+|Graphics device lost|`app/gpu.rs` (a 1×1 shader layer that registers wgpu's device-lost callback), the `Message::Tick` arm in `app/mod.rs` (restart through `App::restart` in `app/resume.rs`)|
 |Server deployment|`deploy/deploy.sh`, `deploy/schwitzer-server.service`, `crates/schwitzer-server/src/update.rs`, `schwitzer-release/src/lib.rs`|
 
 ### Repository map

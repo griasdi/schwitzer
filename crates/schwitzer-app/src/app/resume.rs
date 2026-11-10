@@ -6,13 +6,16 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use iced::advanced::widget::Id;
+use iced::widget::operation;
+use iced::widget::selector;
 use iced::widget::text_editor::{self, Cursor, Position};
 use iced::{Task, window};
 use schwitzer_proto::{RoomId, now_ms};
 use serde::{Deserialize, Serialize};
 
 use super::logic::Group;
-use super::{App, Expanded, Forms, Page, PendingFocus, Placement, TaskDraft};
+use super::{App, Expanded, Forms, Message, Page, TaskDraft, reveal};
+use crate::update;
 
 /// The file in the data directory; written just before the restart, removed when read.
 const FILE: &str = "resume.json";
@@ -20,6 +23,21 @@ const FILE: &str = "resume.json";
 const MAX_AGE_MS: u64 = 120_000;
 /// How long the new process waits for the restored element to show before giving up.
 const FOCUS_WAIT_MS: u64 = 30_000;
+
+/// The element to focus or reveal once the restored page shows it.
+pub(super) struct PendingFocus {
+    focus: Option<&'static str>,
+    until_ms: u64,
+}
+
+/// Where the window was on screen, in logical pixels: outer position (`None` where the
+/// platform does not tell, as on Wayland), inner size and whether it was maximized.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Placement {
+    pub position: Option<(f32, f32)>,
+    pub size: (f32, f32),
+    pub maximized: bool,
+}
 
 /// The ids of the inputs whose focus survives a restart.
 pub const FOCUSABLE: [&str; 16] = [
@@ -212,6 +230,16 @@ pub(super) fn placement() -> Task<Option<Placement>> {
     })
 }
 
+/// Asks which widget has the focus and where the window is, then restarts (`Message::Restart`).
+pub(super) fn restart_task() -> Task<Message> {
+    iced::advanced::widget::operate(iced::advanced::widget::operation::focusable::find_focused())
+        .collect()
+        .then(|ids| {
+            let focus = ids.into_iter().next();
+            placement().map(move |placement| Message::Restart(focus.clone(), placement))
+        })
+}
+
 /// The resume file of a restart for an update, taken in `main` before the window opens: it
 /// places the window, then `App::boot` opens the page.
 pub struct Resumed(pub(super) Option<Resume>);
@@ -240,6 +268,76 @@ impl Resumed {
 }
 
 impl App {
+    /// Writes what the window shows for the new process, starts it and exits (for an installed
+    /// update or after the graphics device was lost). The exit skips every destructor, so
+    /// nothing of the old process removes what the new one already set up (the remote control
+    /// socket).
+    pub(super) fn restart(
+        &mut self,
+        focus: Option<&iced::advanced::widget::Id>,
+        placement: Option<Placement>,
+    ) {
+        let Some(program) = &self.program else {
+            tracing::error!("cannot restart: this program's file is unknown");
+            return;
+        };
+        let snapshot = self.snapshot(focus, placement);
+        if let Err(e) = write(&self.data_dir, &snapshot) {
+            self.banner = Some(format!("Cannot restart: {e}"));
+            return;
+        }
+        if let Err(e) = update::restart(&program.path) {
+            remove(&self.data_dir);
+            self.banner = Some(format!("Cannot restart: {e}"));
+            return;
+        }
+        self.client.shutdown();
+        std::process::exit(0);
+    }
+
+    /// After a restart for an update: looks whether the element to focus or reveal shows yet;
+    /// gives up after a while (a task page needs the room from the server first).
+    pub(super) fn pending_focus(&mut self) -> Task<Message> {
+        let Some(pending) = &self.resume_focus else {
+            return Task::none();
+        };
+        if self.now_ms > pending.until_ms {
+            self.resume_focus = None;
+            return Task::none();
+        }
+        let target = pending.focus.or(match self.expanded {
+            Some(Expanded::Task(_)) => Some("open-task"),
+            Some(Expanded::New { .. }) => Some("new-task"),
+            None => None,
+        });
+        let Some(target) = target else {
+            self.resume_focus = None;
+            return Task::none();
+        };
+        selector::find(selector::id(target)).map(|found| Message::ResumeFocus(found.is_some()))
+    }
+
+    /// Focuses and reveals what the window showed before the restart, now that it shows.
+    pub(super) fn apply_pending_focus(&mut self) -> Task<Message> {
+        let Some(pending) = self.resume_focus.take() else {
+            return Task::none();
+        };
+        let mut tasks = Vec::new();
+        if let Some(id) = pending.focus {
+            tasks.push(operation::focus(id));
+            // iced cannot read a text input's cursor: those resume at the end.
+            if !EDITORS.contains(&id) {
+                tasks.push(operation::move_cursor_to_end(id));
+            }
+        }
+        match self.expanded {
+            Some(Expanded::Task(_)) => tasks.push(reveal("open-task")),
+            Some(Expanded::New { .. }) => tasks.push(reveal("new-task")),
+            None => {}
+        }
+        Task::batch(tasks)
+    }
+
     /// What the window shows now; `focus` is the focused widget.
     pub(super) fn snapshot(&self, focus: Option<&Id>, placement: Option<Placement>) -> Resume {
         Resume {

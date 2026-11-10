@@ -295,7 +295,10 @@ pub enum Message {
     /// Restarts into the installed update; first asks which widget has the focus.
     RestartForUpdate,
     /// The focused widget and the window's place just before a restart.
-    Restart(Option<iced::advanced::widget::Id>, Option<Placement>),
+    Restart(
+        Option<iced::advanced::widget::Id>,
+        Option<resume::Placement>,
+    ),
     AutoInstallUpdates(bool),
     /// The member picked an update channel on the Updates page.
     UpdateChannel(schwitzer_release::Channel),
@@ -522,21 +525,6 @@ impl OpenMarkdown {
     }
 }
 
-/// The element to focus or reveal once the restored page shows it.
-struct PendingFocus {
-    focus: Option<&'static str>,
-    until_ms: u64,
-}
-
-/// Where the window was on screen, in logical pixels: outer position (`None` where the
-/// platform does not tell, as on Wayland), inner size and whether it was maximized.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Placement {
-    pub position: Option<(f32, f32)>,
-    pub size: (f32, f32),
-    pub maximized: bool,
-}
-
 pub struct App {
     client: Client,
     /// Client events from start-up until the subscription takes them.
@@ -629,7 +617,7 @@ pub struct App {
     /// The release each online server announced: the newest stable one on GitHub.
     releases: HashMap<ServerAddr, semver::Version>,
     /// What to focus or reveal after a restart for an update, once it shows.
-    resume_focus: Option<PendingFocus>,
+    resume_focus: Option<resume::PendingFocus>,
     now_ms: u64,
     /// The graphics device-lost rule: when the probe is shown and when to restart.
     gpu: gpu::Watch,
@@ -955,7 +943,7 @@ impl App {
                 let focus = self.pending_focus();
                 if self.gpu.restart_due(self.now_ms) {
                     tracing::warn!("restarting: the graphics device was lost");
-                    return Task::batch([focus, restart_task()]);
+                    return Task::batch([focus, resume::restart_task()]);
                 }
                 focus
             }
@@ -1029,7 +1017,7 @@ impl App {
                 if !matches!(self.updater, UpdateState::Installed(_)) {
                     return Task::none();
                 }
-                restart_task()
+                resume::restart_task()
             }
             Message::Restart(focus, placement) => {
                 self.restart(focus.as_ref(), placement);
@@ -1985,76 +1973,6 @@ impl App {
         self.show_resolved = false;
     }
 
-    /// Writes what the window shows for the new process, starts it and exits (for an installed
-    /// update or after the graphics device was lost). The exit skips every destructor, so
-    /// nothing of the old process removes what the new one already set up (the remote control
-    /// socket).
-    fn restart(
-        &mut self,
-        focus: Option<&iced::advanced::widget::Id>,
-        placement: Option<Placement>,
-    ) {
-        let Some(program) = &self.program else {
-            tracing::error!("cannot restart: this program's file is unknown");
-            return;
-        };
-        let snapshot = self.snapshot(focus, placement);
-        if let Err(e) = resume::write(&self.data_dir, &snapshot) {
-            self.banner = Some(format!("Cannot restart: {e}"));
-            return;
-        }
-        if let Err(e) = update::restart(&program.path) {
-            resume::remove(&self.data_dir);
-            self.banner = Some(format!("Cannot restart: {e}"));
-            return;
-        }
-        self.client.shutdown();
-        std::process::exit(0);
-    }
-
-    /// After a restart for an update: looks whether the element to focus or reveal shows yet;
-    /// gives up after a while (a task page needs the room from the server first).
-    fn pending_focus(&mut self) -> Task<Message> {
-        let Some(pending) = &self.resume_focus else {
-            return Task::none();
-        };
-        if self.now_ms > pending.until_ms {
-            self.resume_focus = None;
-            return Task::none();
-        }
-        let target = pending.focus.or(match self.expanded {
-            Some(Expanded::Task(_)) => Some("open-task"),
-            Some(Expanded::New { .. }) => Some("new-task"),
-            None => None,
-        });
-        let Some(target) = target else {
-            self.resume_focus = None;
-            return Task::none();
-        };
-        selector::find(selector::id(target)).map(|found| Message::ResumeFocus(found.is_some()))
-    }
-
-    /// Focuses and reveals what the window showed before the restart, now that it shows.
-    fn apply_pending_focus(&mut self) -> Task<Message> {
-        let Some(pending) = self.resume_focus.take() else {
-            return Task::none();
-        };
-        let mut tasks = Vec::new();
-        if let Some(id) = pending.focus {
-            tasks.push(operation::focus(id));
-            // iced cannot read a text input's cursor: those resume at the end.
-            if !resume::EDITORS.contains(&id) {
-                tasks.push(operation::move_cursor_to_end(id));
-            }
-        }
-        match self.expanded {
-            Some(Expanded::Task(_)) => tasks.push(reveal("open-task")),
-            Some(Expanded::New { .. }) => tasks.push(reveal("new-task")),
-            None => {}
-        }
-        Task::batch(tasks)
-    }
-
     /// Opens a web link from task text in the default browser. Other links are refused:
     /// the text comes from other members and their agents. A headless instance opens none.
     fn open_link(&mut self, url: &str) {
@@ -2147,16 +2065,6 @@ impl App {
         }
         Task::batch(calls)
     }
-}
-
-/// Asks which widget has the focus and where the window is, then restarts (`Message::Restart`).
-fn restart_task() -> Task<Message> {
-    iced::advanced::widget::operate(iced::advanced::widget::operation::focusable::find_focused())
-        .collect()
-        .then(|ids| {
-            let focus = ids.into_iter().next();
-            resume::placement().map(move |placement| Message::Restart(focus.clone(), placement))
-        })
 }
 
 /// The app's keyboard shortcuts, from key presses no widget took.
