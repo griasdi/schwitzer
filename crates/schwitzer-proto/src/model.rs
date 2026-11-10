@@ -309,6 +309,13 @@ pub struct RoomState {
     pub debug: Option<DebugSession>,
 }
 
+impl RoomState {
+    /// The task with this number.
+    pub fn task(&self, number: u64) -> Option<&Task> {
+        self.tasks.iter().find(|t| t.number == number)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

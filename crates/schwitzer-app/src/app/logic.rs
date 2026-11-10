@@ -131,7 +131,7 @@ pub fn hand_ins<'a>(
     new.tasks
         .iter()
         .filter_map(|t| {
-            let before = old.tasks.iter().find(|o| o.number == t.number)?;
+            let before = old.task(t.number)?;
             let claim = before.claim.as_ref().filter(|c| c.member == *member)?;
             match (claim.work, t.stage) {
                 (Work::Plan, Stage::Planned) => Some((Work::Plan, t)),

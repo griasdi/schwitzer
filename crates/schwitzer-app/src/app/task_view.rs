@@ -787,7 +787,7 @@ fn waits<'a>(state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     }
     let mut col = column![head].spacing(SP_2);
     for &n in &task.waits_for {
-        let prereq = state.tasks.iter().find(|t| t.number == n);
+        let prereq = state.task(n);
         let mut line = row![
             text(format!("#{n}"))
                 .size(TS_12)

@@ -404,6 +404,11 @@ impl RoomRef {
         self.state.as_ref().map_or(&[], |s| &s.tasks)
     }
 
+    /// The task with this number; `None` while the room is not loaded.
+    fn task(&self, number: u64) -> Option<&Task> {
+        self.state.as_ref().and_then(|s| s.task(number))
+    }
+
     /// The room's running debug session, if any.
     fn debug(&self) -> Option<&DebugSession> {
         self.state.as_ref().and_then(|s| s.debug.as_ref())
@@ -1084,10 +1089,8 @@ impl Tools {
             let room = self.room(args.room.as_deref())?;
             let state = room.loaded()?;
             let task = state
-                .tasks
-                .iter()
-                .find(|t| t.number == args.task)
-                .ok_or_else(|| schwitzer_proto::ApiError::NoSuchTask.to_string())?;
+                .task(args.task)
+                .ok_or_else(|| ApiError::NoSuchTask.to_string())?;
             pretty(&task_json(
                 task,
                 &state.members,
@@ -1108,9 +1111,7 @@ impl Tools {
             let blocked = match args.blocks {
                 Some(b) => Some(
                     room.loaded()?
-                        .tasks
-                        .iter()
-                        .find(|t| t.number == b)
+                        .task(b)
                         .cloned()
                         .ok_or_else(|| ApiError::NoSuchTask.to_string())?,
                 ),
@@ -1311,7 +1312,7 @@ impl Tools {
             let state = room.loaded()?;
             let session = room
                 .debug()
-                .ok_or_else(|| schwitzer_proto::ApiError::NoDebugSession.to_string())?;
+                .ok_or_else(|| ApiError::NoDebugSession.to_string())?;
             let to = debug_recipients(session, &state.members, &args.to.unwrap_or_default())?;
             let sent = self
                 .client
@@ -1429,7 +1430,7 @@ impl Tools {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
             let decision = Decision::from(args.decision);
-            let task = room.tasks().iter().find(|t| t.number == args.task);
+            let task = room.task(args.task);
             if !decision_allowed(&self.fast_lane, &room.id, args.task, task, decision) {
                 return Err(lane_closed(args.task, &room, task));
             }
@@ -1497,7 +1498,7 @@ impl Tools {
     ) -> CallToolResult {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
-            let task = room.tasks().iter().find(|t| t.number == args.task);
+            let task = room.task(args.task);
             // Applying or discarding is no approval: it needs the fast lane.
             if !decision_allowed(&self.fast_lane, &room.id, args.task, task, Decision::Accept) {
                 return Err(lane_closed(args.task, &room, task));

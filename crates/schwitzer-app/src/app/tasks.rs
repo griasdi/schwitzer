@@ -122,7 +122,7 @@ impl App {
         let Some(state) = self.selected_state() else {
             return Task::none();
         };
-        let Some(task) = state.tasks.iter().find(|t| t.number == number) else {
+        let Some(task) = state.task(number) else {
             return Task::none();
         };
         if !logic::pickable(task) || !task.open_waits(&state.tasks).is_empty() {
@@ -355,7 +355,7 @@ impl App {
     /// decision; once the task has moved, `return_after_accept` puts the list back.
     pub(super) fn accept_open(&mut self, number: u64) -> Task<Message> {
         let Some((room, project, anchor)) = self.selected_state().and_then(|state| {
-            let task = state.tasks.iter().find(|t| t.number == number)?;
+            let task = state.task(number)?;
             let proposals = logic::tasks_in(state, task.project, Group::Proposals);
             let anchor = logic::return_anchor(&proposals, number)?;
             Some((state.id, task.project, anchor))
@@ -410,10 +410,7 @@ impl App {
     /// command that plans it.
     pub(super) fn accept_and_copy(&mut self, number: u64) -> Task<Message> {
         let command = self.selected_state().and_then(|state| {
-            let task = state
-                .tasks
-                .iter()
-                .find(|t| t.number == number && t.stage == Stage::Proposed)?;
+            let task = state.task(number).filter(|t| t.stage == Stage::Proposed)?;
             self.omp_command(state.id, task.project, &OmpStart::Plan(number))
         });
         let Some(command) = command else {

@@ -426,11 +426,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
             .any(|t| t.number == urgent.number && t.stage == Stage::Done)
     })
     .await;
-    let finished = seen
-        .tasks
-        .iter()
-        .find(|t| t.number == urgent.number)
-        .unwrap();
+    let finished = seen.task(urgent.number).unwrap();
     assert!(finished.notes.iter().any(|n| n.text == "shipped"));
 
     // 9. The server restarts on its port with the same data: the key still joins and the
@@ -451,7 +447,7 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
     .await;
     assert_eq!(state.id, room);
     assert_eq!(state.projects, [app.clone(), web]);
-    let moved = state.tasks.iter().find(|t| t.number == site_task.number);
+    let moved = state.task(site_task.number);
     assert_eq!(moved.map(|t| t.project), Some(app.id));
     let kept: Vec<RoomKey> = b.rooms().into_iter().map(|(key, _)| key).collect();
     assert_eq!(kept, [key]);
@@ -631,7 +627,7 @@ async fn a_full_room_refuses_more_and_its_snapshot_still_arrives() {
 
     assert_eq!(b.join_room(key).await.unwrap(), room);
     let state = room_where(&mut rx_b, |s| s.tasks.len() == 16).await;
-    let last = state.tasks.iter().find(|t| t.number == number).unwrap();
+    let last = state.task(number).unwrap();
     assert!(last.plan.is_empty());
 
     a.shutdown();
@@ -959,12 +955,7 @@ async fn votes_reach_every_member() {
     };
     a.request(room, vote(true)).await.unwrap();
     b.request(room, vote(true)).await.unwrap();
-    let votes = |s: &RoomState, n: u64| {
-        s.tasks
-            .iter()
-            .find(|t| t.number == n)
-            .map(|t| t.votes.len())
-    };
+    let votes = |s: &RoomState, n: u64| s.task(n).map(|t| t.votes.len());
     let state = room_where(&mut rx_a, |s| votes(s, second) == Some(2)).await;
     assert_eq!(votes(&state, first), Some(0));
 
@@ -1177,7 +1168,7 @@ async fn a_task_that_waits_is_built_after_its_prerequisite() {
         s.tasks.len() == 3 && s.tasks.iter().all(|t| t.stage == Stage::Ready)
     })
     .await;
-    let seen = state.tasks.iter().find(|t| t.number == top.number).unwrap();
+    let seen = state.task(top.number).unwrap();
     assert_eq!(seen.waits_for, [base.number]);
 
     let build = |task: Option<u64>| Request::Claim {

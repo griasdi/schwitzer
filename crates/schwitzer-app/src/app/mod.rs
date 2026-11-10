@@ -1124,7 +1124,7 @@ impl App {
             }
             Message::OpenTask(number) => {
                 let Some((room, project, group)) = self.selected_state().and_then(|s| {
-                    let task = s.tasks.iter().find(|t| t.number == number)?;
+                    let task = s.task(number)?;
                     Some((s.id, task.project, Group::of(task)))
                 }) else {
                     return Task::none();
@@ -1787,7 +1787,7 @@ impl App {
             return None;
         };
         let state = self.selected_state()?;
-        let task = state.tasks.iter().find(|t| t.number == number)?;
+        let task = state.task(number)?;
         Some((state, task))
     }
 
