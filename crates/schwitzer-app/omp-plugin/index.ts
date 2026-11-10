@@ -656,6 +656,11 @@ async function tool(config: Config, name: string, args: Record<string, unknown>,
   return result.text;
 }
 
+/** A tool call whose answer is JSON of type `T`. */
+async function toolJson<T>(config: Config, name: string, args: Record<string, unknown>, timeoutMs = TIMEOUT_MS): Promise<T> {
+  return JSON.parse(await tool(config, name, args, timeoutMs)) as T;
+}
+
 /** The newest entry on the session's current branch that matches. */
 function lastEntry(ctx: Ctx, match: (entry: SessionEntry) => boolean): SessionEntry | undefined {
   const branch = ctx.sessionManager.getBranch();
@@ -675,7 +680,7 @@ async function choose<T>(ctx: Ctx, title: string, labels: string[], items: reado
 
 /** The rooms the app has joined, as list_rooms shows them. */
 async function listRooms(config: Config, timeoutMs = TIMEOUT_MS): Promise<RoomRow[]> {
-  return JSON.parse(await tool(config, "list_rooms", {}, timeoutMs)) as RoomRow[];
+  return toolJson<RoomRow[]>(config, "list_rooms", {}, timeoutMs);
 }
 
 /** The room id8 (as list_rooms shows it) a tool's `room` argument names: a full 64-hex id directly,
@@ -921,7 +926,7 @@ async function commitTrailerCheck(event: ToolCallEvent, ctx: Ctx): Promise<{ blo
 async function unclaimed(config: Config, stage: string): Promise<Candidate[]> {
   const found: Candidate[] = [];
   for (const { room, roomName, projectName } of await joinedProjects(config)) {
-    const tasks = JSON.parse(await tool(config, "list_tasks", { room, project: projectName, stage })) as TaskRow[];
+    const tasks = await toolJson<TaskRow[]>(config, "list_tasks", { room, project: projectName, stage });
     for (const task of tasks) {
       if (task.claim !== null || (stage === STAGE.build && task.waits_for.length > 0)) continue;
       found.push({ room, roomName, projectName, task });
@@ -954,7 +959,7 @@ function severalProjects(found: Candidate[]): boolean {
 async function tasksNumbered(config: Config, number: number): Promise<Candidate[]> {
   const found: Candidate[] = [];
   for (const p of await joinedProjects(config)) {
-    const tasks = JSON.parse(await tool(config, "list_tasks", { room: p.room, project: p.projectName })) as TaskRow[];
+    const tasks = await toolJson<TaskRow[]>(config, "list_tasks", { room: p.room, project: p.projectName });
     const task = tasks.find((t) => t.number === number);
     if (task) found.push({ ...p, task });
   }
@@ -1534,12 +1539,12 @@ async function decisionRows(config: Config, room?: string, task?: number): Promi
   const args: Record<string, unknown> = {};
   if (room !== undefined) args.room = room;
   if (task !== undefined) args.task = task;
-  return JSON.parse(await tool(config, "decisions", args)) as DecisionRow[];
+  return toolJson<DecisionRow[]>(config, "decisions", args);
 }
 
 /** Makes `decision` on `task`; the app allows approve always, the rest only in the fast lane. */
 async function decide(config: Config, room: string, task: number, decision: string): Promise<Record<string, unknown>> {
-  return JSON.parse(await tool(config, "decide", { room, task, decision })) as Record<string, unknown>;
+  return toolJson<Record<string, unknown>>(config, "decide", { room, task, decision });
 }
 
 /** Tells the human that `decision` on task `n` is made. */
@@ -1614,7 +1619,7 @@ async function decisionMenu(ctx: Ctx, config: Config, row: DecisionRow): Promise
       return;
     }
     if (item.kind === "read") {
-      const task = JSON.parse(await tool(config, "get_task", { room: row.room, task: n })) as Record<string, unknown>;
+      const task = await toolJson<Record<string, unknown>>(config, "get_task", { room: row.room, task: n });
       const what = item.part === "plan" ? "Plan" : "Details";
       await ctx.ui.editor?.(`${what} of #${n} (changes here are not kept)`, String(task[item.part] ?? ""));
       continue;
@@ -1632,10 +1637,11 @@ async function suggestionMenu(ctx: Ctx, config: Config, row: DecisionRow, s: Dec
     const pick = options[pickIndex(await ctx.ui.select(title, options), options)];
     if (pick === undefined || pick === "Back") return false;
     if (pick === "Read it") {
-      const got = JSON.parse(await tool(config, "get_suggestion", { room: row.room, task: n, suggestion: s.id })) as {
-        title: string;
-        text: string;
-      };
+      const got = await toolJson<{ title: string; text: string }>(config, "get_suggestion", {
+        room: row.room,
+        task: n,
+        suggestion: s.id,
+      });
       const text = s.part === "details" ? `# ${got.title}\n\n${got.text}` : got.text;
       await ctx.ui.editor?.(`Suggested ${s.part} for #${n} (changes here are not kept)`, text);
       continue;
@@ -2057,7 +2063,7 @@ async function awaitDecision(ctx: Ctx, config: Config, claim: TaskClaim, reviewI
       // The review is gone: the plan_review_resolved handler gives any notice.
       gate: () => (ctx.getPendingPlanReview?.()?.reviewId === reviewId ? undefined : "stop"),
       read: async () =>
-        JSON.parse(await tool(config, "get_task", { room: claim.room, task: claim.task }, POLL_TIMEOUT_MS)) as Record<string, unknown>,
+        toolJson<Record<string, unknown>>(config, "get_task", { room: claim.room, task: claim.task }, POLL_TIMEOUT_MS),
       handle: async (task) => {
         switch (task.stage) {
           case "planned":
@@ -2189,7 +2195,7 @@ function absoluteDirs(config: Config, status: DebugStatus): DebugStatus {
 }
 
 async function debugStatus(config: Config, room: string): Promise<DebugStatus> {
-  return absoluteDirs(config, JSON.parse(await tool(config, "debug_status", { room })) as DebugStatus);
+  return absoluteDirs(config, await toolJson<DebugStatus>(config, "debug_status", { room }));
 }
 
 /** `text` on one line, cut to `max` characters with `…`. */
@@ -2304,10 +2310,10 @@ async function awaitDebugInstructions(ctx: Ctx, config: Config, me: DebugWatch):
       unreachable: "Schwitzer app not reachable; still waiting for debug instructions.",
       gate: () => (ctx.isIdle() ? undefined : "skip"),
       read: async () =>
-        JSON.parse(await tool(config, "debug_inbox", { room: me.room }, POLL_TIMEOUT_MS)) as {
+        toolJson<{
           session: string | null;
           instruction: { id: number; from: string; text: string } | null;
-        },
+        }>(config, "debug_inbox", { room: me.room }, POLL_TIMEOUT_MS),
       handle: async (inbox) => {
         if (inbox.session !== me.session) {
           ctx.ui.notify(`The debug session in "${me.roomName}" ended.`, "info");
