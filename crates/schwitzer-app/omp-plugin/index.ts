@@ -630,6 +630,16 @@ async function reply(res: Response, id: number): Promise<RpcMessage> {
   throw new Error("the app answered without a result");
 }
 
+/** The message of a thrown value. */
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/** Tells the user that a plugin action failed. */
+function reportError(ctx: Ctx, e: unknown): void {
+  ctx.ui.notify(`Schwitzer: ${errorText(e)}`, "error");
+}
+
 /** A tool call whose failure is an error with the tool's text. */
 async function tool(config: Config, name: string, args: Record<string, unknown>, timeoutMs = TIMEOUT_MS): Promise<string> {
   const result = await callTool(config, name, args, timeoutMs);
@@ -1165,7 +1175,7 @@ async function openPlanSessions(ctx: Ctx, numbers: number[]): Promise<void> {
       if (result.warning) ctx.ui.notify(`Schwitzer: the session for #${n} opened, but ${result.warning}`, "info");
       opened.push(n);
     } catch (e) {
-      ctx.ui.notify(`Schwitzer: could not open a session for #${n}: ${e instanceof Error ? e.message : String(e)}`, "error");
+      ctx.ui.notify(`Schwitzer: could not open a session for #${n}: ${errorText(e)}`, "error");
     }
   }
   if (opened.length === 0) return;
@@ -1198,7 +1208,7 @@ async function offerNext(pi: Pi, ctx: Ctx): Promise<void> {
       await claimPicked(pi, ctx, config, next, "build", false, false);
     }
   } catch (e) {
-    ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
+    reportError(ctx, e);
   }
 }
 
@@ -1701,7 +1711,7 @@ async function afterRun(pi: Pi, ctx: Ctx, taken: Offer[], fast: Candidate | unde
       }
     }
   } catch (e) {
-    ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
+    reportError(ctx, e);
   }
   if (finished) await offerNext(pi, ctx);
 }
@@ -1808,7 +1818,7 @@ async function approveFromReview(pi: Pi, ctx: Ctx, claim: TaskClaim): Promise<vo
       await decide(config, claim.room, n, "approve");
     } catch (e) {
       ctx.ui.notify(
-        `Schwitzer did not approve task #${n}: ${e instanceof Error ? e.message : String(e)}. The plan runs here without a build claim; approve it in Schwitzer, then run /schwitzer build ${n}.`,
+        `Schwitzer did not approve task #${n}: ${errorText(e)}. The plan runs here without a build claim; approve it in Schwitzer, then run /schwitzer build ${n}.`,
         "error",
       );
       return;
@@ -1820,7 +1830,7 @@ async function approveFromReview(pi: Pi, ctx: Ctx, claim: TaskClaim): Promise<vo
     pi.sendUserMessage(buildHandoff(claim, got), { deliverAs: "aside" });
     ctx.ui.notify(`Task #${n} is approved in Schwitzer too; this session builds it under its build claim.`, "info");
   } catch (e) {
-    ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
+    reportError(ctx, e);
   }
 }
 
@@ -1971,7 +1981,7 @@ async function submitPlan(event: PlanReviewEvent, claim: TaskClaim, ctx: Ctx): P
     }
   } catch (e) {
     ctx.ui.notify(
-      `Schwitzer did not take the plan for task #${claim.task}: ${e instanceof Error ? e.message : String(e)}`,
+      `Schwitzer did not take the plan for task #${claim.task}: ${errorText(e)}`,
       "error",
     );
   }
@@ -2065,7 +2075,7 @@ async function unclaimTask(ctx: Ctx, config: Config, claim: TaskClaim, note: str
     await tool(config, "unclaim", { room: claim.room, task: claim.task, note });
     await forgetStart(config, claim.room, claim.task);
   } catch (e) {
-    ctx.ui.notify(e instanceof Error ? e.message : String(e), "error");
+    ctx.ui.notify(errorText(e), "error");
   }
 }
 
@@ -2296,7 +2306,7 @@ async function awaitDebugInstructions(ctx: Ctx, config: Config, me: DebugWatch):
             ctx.ui.notify(`Instruction #${got.id} dismissed. It stays listed in the Schwitzer app.`, "info");
           }
         } catch (e) {
-          ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
+          reportError(ctx, e);
         }
         return undefined;
       },
@@ -2457,7 +2467,7 @@ async function awaitProposals(pi: Pi, ctx: Ctx, me: AwaitWatch): Promise<void> {
     });
   } catch (e) {
     // A throw from a detached promise would kill the omp session.
-    ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
+    reportError(ctx, e);
   } finally {
     if (getAwaitWatch() === me) setAwaitWatch(undefined);
   }
@@ -2532,7 +2542,7 @@ export default function schwitzer(pi: Pi): void {
     try {
       await run(pi, ctx, args);
     } catch (e) {
-      ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
+      reportError(ctx, e);
     }
   };
   pi.registerCommand("schwitzer", { description: `Schwitzer tasks: /schwitzer ${COMMAND_ARGS}`, handler });
