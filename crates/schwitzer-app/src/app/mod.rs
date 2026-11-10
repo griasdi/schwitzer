@@ -275,7 +275,7 @@ pub enum Message {
     NoteAdded(Result<Response, String>),
     Published(RoomId, Result<(), String>),
     /// Puts a Markdown text of the open task on the clipboard.
-    CopyText(TaskText),
+    CopyText(logic::TaskText),
     /// Puts the omp command of the open task on the clipboard.
     CopyCommand,
     /// Accepts proposal n and puts the omp command that plans it on the clipboard.
@@ -303,16 +303,6 @@ pub enum Message {
     AutoRestartUpdates(bool),
     /// Whether the element to focus after a restart is laid out yet.
     ResumeFocus(bool),
-}
-
-/// A Markdown text of the open task that a copy button puts on the clipboard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TaskText {
-    /// Title as `# heading` over the details.
-    Details,
-    Plan,
-    /// Note `i` in note order.
-    Note(usize),
 }
 
 /// A text of the open task shown across the window for reading.
@@ -1500,16 +1490,8 @@ impl App {
                 let Some((_, task)) = self.open() else {
                     return Task::none();
                 };
-                let (text, notice) = match part {
-                    TaskText::Details => (
-                        logic::details_markdown(&task.title, &task.body),
-                        "Title and details copied",
-                    ),
-                    TaskText::Plan => (task.plan.clone(), "Plan copied"),
-                    TaskText::Note(i) => match task.notes.get(i) {
-                        Some(note) => (note.text.clone(), "Note copied"),
-                        None => return Task::none(),
-                    },
+                let Some((text, notice)) = logic::copy_text(task, part) else {
+                    return Task::none();
                 };
                 self.notify(notice);
                 iced::clipboard::write(text)

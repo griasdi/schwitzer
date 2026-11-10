@@ -556,6 +556,29 @@ pub fn details_markdown(title: &str, body: &str) -> String {
     }
 }
 
+/// A Markdown text of the open task that a copy button puts on the clipboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskText {
+    /// Title as `# heading` over the details.
+    Details,
+    Plan,
+    /// Note `i` in note order.
+    Note(usize),
+}
+
+/// The text of `part` of `task` for the clipboard and the notice that says it was copied; `None`
+/// for a note the task does not have.
+pub fn copy_text(task: &Task, part: TaskText) -> Option<(String, &'static str)> {
+    Some(match part {
+        TaskText::Details => (
+            details_markdown(&task.title, &task.body),
+            "Title and details copied",
+        ),
+        TaskText::Plan => (task.plan.clone(), "Plan copied"),
+        TaskText::Note(i) => (task.notes.get(i)?.text.clone(), "Note copied"),
+    })
+}
+
 /// The text of `part` a diff compares: the details as [`details_markdown`], so a new title
 /// shows as a changed `#` line, the plan as it is.
 pub fn part_text(part: Part, title: &str, text: &str) -> String {

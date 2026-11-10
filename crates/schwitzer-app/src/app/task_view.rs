@@ -10,12 +10,12 @@ use schwitzer_proto::{Decision, Part, Priority, RoomState, Stage, Task, caps};
 use super::chrome::ProjectChoice;
 use super::icons::{Icon, Tone, icon};
 use super::list;
-use super::logic::{self, OmpStart};
+use super::logic::{self, OmpStart, TaskText};
 use super::widgets::{
     self, LAMP, chevron, fold_button, heading, hrule, icon_button, icon_text_button, id_button,
     lamp, member_tag_of, muted, segment, text_button, with_tip,
 };
-use super::{App, Message, Reading, TaskText, reading, sticky};
+use super::{App, Message, Reading, reading, sticky};
 use crate::theme::{
     self, Lamp, MEDIUM, READ_LINE_HEIGHT, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, TS_16,
 };
