@@ -27,7 +27,7 @@ schwitzer-release = { path = "crates/schwitzer-release" }
 weida = "=0.1.0-alpha.9"
 iced = { version = "0.14", features = ["advanced", "tokio", "markdown", "svg", "selector"] }
 iced_impeccable = "0.3.0"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

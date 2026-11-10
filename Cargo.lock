@@ -4216,7 +4216,6 @@ dependencies = [
  "schwitzer-proto",
  "schwitzer-release",
  "semver",
- "serde",
  "serde_json",
  "tokio",
  "tracing",
