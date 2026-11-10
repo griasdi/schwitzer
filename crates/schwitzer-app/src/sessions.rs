@@ -230,7 +230,9 @@ impl FileState {
     fn apply_message(&mut self, message: &Value, main: bool) {
         match message["role"].as_str() {
             Some("assistant") => {
-                self.tokens += message["usage"]["totalTokens"].as_u64().unwrap_or(0);
+                self.tokens = self
+                    .tokens
+                    .saturating_add(message["usage"]["totalTokens"].as_u64().unwrap_or(0));
             }
             // A pasted pick prompt (user) or a `claim` result (toolResult) carries the marker.
             Some("user" | "toolResult") if main => {
@@ -321,7 +323,7 @@ impl Scanner {
             let mut tokens = self.files[&path].tokens;
             for sub in subagents {
                 self.refresh(&sub, false);
-                tokens += self.files[&sub].tokens;
+                tokens = tokens.saturating_add(self.files[&sub].tokens);
                 seen.insert(sub);
             }
             sessions.push(session(
@@ -628,6 +630,22 @@ mod tests {
         assert_eq!(s.title, "Third title");
         // Nothing was read twice.
         assert_eq!(s.markers.len(), 2);
+    }
+
+    #[test]
+    fn a_huge_token_count_saturates_instead_of_overflowing() {
+        let dir = Dir::new();
+        let mut scanner = Scanner::default();
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(dir.session_file())
+            .unwrap();
+        let line = format!(
+            "{{\"type\":\"message\",\"id\":\"a8\",\"message\":{{\"role\":\"assistant\",\"usage\":{{\"totalTokens\":{}}}}}}}\n",
+            u64::MAX
+        );
+        file.write_all(line.as_bytes()).unwrap();
+        assert_eq!(dir.scan(&mut scanner)[0].tokens, u64::MAX);
     }
 
     #[test]
