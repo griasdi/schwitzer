@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 use tokio::time::MissedTickBehavior;
 
 use crate::update::AutoUpdate;
-use crate::{State, user_agent};
+use crate::{PROGRAM, State};
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(120);
 const MAX_JSON: u64 = 4 << 20;
@@ -69,12 +69,12 @@ pub(crate) fn newest_dev(json: &[u8], platform: &str) -> Result<Option<Published
 }
 
 fn fetch(url: &str) -> Result<Option<Published>, String> {
-    let json = schwitzer_release::api_get(&user_agent(), url, &[("per_page", PER_PAGE)], MAX_JSON)?;
+    let json = schwitzer_release::api_get(PROGRAM, url, &[("per_page", PER_PAGE)], MAX_JSON)?;
     newest_stable(&json)
 }
 
 fn fetch_dev(url: &str, platform: &str) -> Result<Option<Published>, String> {
-    let json = schwitzer_release::api_get_dev(&user_agent(), url, MAX_JSON)?;
+    let json = schwitzer_release::api_get_dev(PROGRAM, url, MAX_JSON)?;
     newest_dev(&json, platform)
 }
 

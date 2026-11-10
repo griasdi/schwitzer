@@ -97,7 +97,7 @@ pub const VERSION: &str = match option_env!("SCHWITZER_VERSION") {
 };
 
 /// The user agent `program` sends to GitHub: `program/VERSION`.
-pub fn user_agent(program: &str) -> String {
+fn user_agent(program: &str) -> String {
     format!("{program}/{VERSION}")
 }
 
@@ -124,7 +124,7 @@ pub enum Channel {
 }
 
 /// The tag of the rolling dev prerelease.
-pub const DEV_TAG: &str = "dev";
+const DEV_TAG: &str = "dev";
 
 impl Channel {
     /// The channel of a build of `version`: dev for a pre-release version.
@@ -186,23 +186,23 @@ const API_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a download may take.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 
-fn agent(user_agent: &str, timeout: Duration) -> ureq::Agent {
+fn agent(program: &str, timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
-        .user_agent(user_agent)
+        .user_agent(user_agent(program))
         .build()
         .into()
 }
 
-/// GETs `url` from the GitHub API with `query` and reads at most `limit` bytes of the answer.
-/// Blocks.
+/// GETs `url` as `program` from the GitHub API with `query` and reads at most `limit` bytes of
+/// the answer. Blocks.
 pub fn api_get(
-    user_agent: &str,
+    program: &str,
     url: &str,
     query: &[(&str, &str)],
     limit: u64,
 ) -> Result<Vec<u8>, ApiError> {
-    let mut request = agent(user_agent, API_TIMEOUT).get(url);
+    let mut request = agent(program, API_TIMEOUT).get(url);
     for (key, value) in query {
         request = request.query(key, value);
     }
@@ -227,8 +227,8 @@ pub fn api_get(
 
 /// The answer for the rolling dev release, from the release list at `base` (a `{base}/tags/dev`
 /// request). Blocks.
-pub fn api_get_dev(user_agent: &str, base: &str, limit: u64) -> Result<Vec<u8>, String> {
-    api_get(user_agent, &format!("{base}/tags/{DEV_TAG}"), &[], limit).map_err(|e| match e {
+pub fn api_get_dev(program: &str, base: &str, limit: u64) -> Result<Vec<u8>, String> {
+    api_get(program, &format!("{base}/tags/{DEV_TAG}"), &[], limit).map_err(|e| match e {
         ApiError::NotFound(_) => "no dev release is on GitHub".to_owned(),
         ApiError::Failed(message) => message,
     })
@@ -236,14 +236,14 @@ pub fn api_get_dev(user_agent: &str, base: &str, limit: u64) -> Result<Vec<u8>, 
 
 /// Downloads `download` (at most `limit` bytes) and checks it has the size and sha256 digest
 /// the release lists. Blocks.
-pub fn fetch(user_agent: &str, download: &Download, limit: u64) -> Result<Vec<u8>, String> {
-    let bytes = get(user_agent, &download.url, limit)?;
+pub fn fetch(program: &str, download: &Download, limit: u64) -> Result<Vec<u8>, String> {
+    let bytes = get(program, &download.url, limit)?;
     verify(&bytes, download.size, &download.sha256)?;
     Ok(bytes)
 }
 
-fn get(user_agent: &str, url: &str, limit: u64) -> Result<Vec<u8>, String> {
-    let mut response = agent(user_agent, DOWNLOAD_TIMEOUT)
+fn get(program: &str, url: &str, limit: u64) -> Result<Vec<u8>, String> {
+    let mut response = agent(program, DOWNLOAD_TIMEOUT)
         .get(url)
         .call()
         .map_err(|e| format!("download failed: {e}"))?;
@@ -268,7 +268,7 @@ fn verify(bytes: &[u8], size: u64, sha256: &[u8; 32]) -> Result<(), String> {
 }
 
 /// The error text for an archive that cannot be read.
-pub fn unreadable(e: impl std::fmt::Display) -> String {
+fn unreadable(e: impl std::fmt::Display) -> String {
     format!("unreadable archive: {e}")
 }
 

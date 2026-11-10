@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use schwitzer_release::{Asset, Channel, Download, sibling};
 
-use crate::user_agent;
+use crate::PROGRAM;
 
 /// The platform name in the server's release assets; `None` where no server release is built.
 fn platform() -> Option<&'static str> {
@@ -94,7 +94,7 @@ impl AutoUpdate {
         assets: &[Asset],
     ) -> Result<(), String> {
         let download = pick(assets, version, self.platform)?;
-        let bytes = schwitzer_release::fetch(&user_agent(), &download, MAX_ARCHIVE)?;
+        let bytes = schwitzer_release::fetch(PROGRAM, &download, MAX_ARCHIVE)?;
         unpack_and_replace(&self.exe, &bytes)
     }
 

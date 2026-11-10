@@ -205,11 +205,7 @@ pub async fn check(lookup: Lookup, package: Package) -> Result<Option<Release>, 
 /// Downloads `release`, verifies it and puts it in place of `program`.
 pub async fn install(release: Release, program: Program) -> Result<semver::Version, String> {
     blocking(move || {
-        let bytes = schwitzer_release::fetch(
-            &schwitzer_release::user_agent(PROGRAM),
-            &release.download,
-            MAX_ARCHIVE,
-        )?;
+        let bytes = schwitzer_release::fetch(PROGRAM, &release.download, MAX_ARCHIVE)?;
         let binary = match program.package {
             Package::AppImage => bytes,
             Package::Archive => extract(&bytes)?,
@@ -257,7 +253,6 @@ fn fetch_release(
     package: Package,
 ) -> Result<Option<Release>, String> {
     let base = std::env::var(URL_ENV).unwrap_or_else(|_| RELEASES_URL.to_owned());
-    let user_agent = schwitzer_release::user_agent(PROGRAM);
     let current = schwitzer_release::version();
     let (url, missing) = match &lookup {
         Lookup::Latest => (
@@ -269,16 +264,15 @@ fn fetch_release(
             format!("release v{v} is not on GitHub"),
         ),
         Lookup::Dev => {
-            let json = schwitzer_release::api_get_dev(&user_agent, &base, MAX_RELEASE_JSON)?;
+            let json = schwitzer_release::api_get_dev(PROGRAM, &base, MAX_RELEASE_JSON)?;
             return parse_dev(&json, &current, platform, package);
         }
     };
-    let json = schwitzer_release::api_get(&user_agent, &url, &[], MAX_RELEASE_JSON).map_err(
-        |e| match e {
+    let json =
+        schwitzer_release::api_get(PROGRAM, &url, &[], MAX_RELEASE_JSON).map_err(|e| match e {
             ApiError::NotFound(_) => missing,
             ApiError::Failed(message) => message,
-        },
-    )?;
+        })?;
     parse_release(&json, &current, platform, package)
 }
 

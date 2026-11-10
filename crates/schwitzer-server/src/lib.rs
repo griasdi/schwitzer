@@ -32,10 +32,8 @@ use store::{R, Store};
 
 pub use update::AutoUpdate;
 
-/// The server's user agent towards GitHub.
-fn user_agent() -> String {
-    schwitzer_release::user_agent("schwitzer-server")
-}
+/// The program name the server sends to GitHub as its user agent.
+const PROGRAM: &str = "schwitzer-server";
 
 /// How the server is run.
 #[derive(Debug, Clone)]
