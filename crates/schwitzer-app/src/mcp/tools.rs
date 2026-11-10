@@ -751,7 +751,7 @@ fn room_row(room: &RoomRef, me: MemberId, lanes: &FastLane) -> Value {
         "room": room.id.short(),
         "name": state.name,
         "online": state.members.iter().any(|m| m.id == me && m.online),
-        "members": state.members.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
+        "members": state.members.iter().map(|m| logic::member_name(&state.members, &m.id)).collect::<Vec<_>>(),
         "projects": state
             .projects
             .iter()
@@ -809,7 +809,7 @@ fn debug_status_json(room: &RoomRef, me: MemberId, data_dir: &Path) -> Value {
                 .members
                 .iter()
                 .find(|m| dir_of(&m.id) == file.dir)
-                .map_or_else(|| file.dir.clone(), |m| m.name.clone());
+                .map_or_else(|| file.dir.clone(), |m| name(&m.id));
             json!({"from": from, "dir": file.dir, "stream": file.stream, "bytes": file.bytes})
         })
         .collect();
