@@ -11,11 +11,9 @@ use schwitzer_proto::{
     Decision, Priority, Request, Response, RoomId, Stage, Task as RoomTask, Work,
 };
 
+use super::list::{list_top_of, return_to, reveal, reveal_bottom};
 use super::logic::{Group, OmpStart};
-use super::{
-    AcceptReturn, App, Expanded, Message, Page, TaskDraft, list_top_of, logic, return_to, reveal,
-    reveal_bottom,
-};
+use super::{AcceptReturn, App, Expanded, Message, Page, TaskDraft, logic};
 use crate::bridge::{call, fire};
 use crate::theme::SP_2;
 

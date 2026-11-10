@@ -35,8 +35,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use iced::keyboard::{self, Key, key::Named};
-use iced::widget::operation::AbsoluteOffset;
-use iced::widget::selector::{self, Target};
 use iced::widget::{column, container, markdown, operation, stack, text_editor};
 use iced::{Element, Length, Subscription, Task, Theme};
 use schwitzer_client::{Client, ClientError, ClientEvent};
@@ -47,6 +45,7 @@ use schwitzer_proto::{
 use serde::{Deserialize, Serialize};
 
 use self::chrome::RoomChoice;
+use self::list::{reveal, reveal_bottom};
 use self::logic::{Group, ServerStatus};
 use self::rooms::Rooms;
 use crate::bridge::{self, ClientKey, call};
@@ -56,7 +55,7 @@ use crate::omp_plugin::PluginState;
 use crate::sessions::{self, LocalSession};
 use crate::settings::{self, Settings};
 use crate::system_notify;
-use crate::theme::{self, SP_1, SP_2};
+use crate::theme::{self, SP_2};
 use crate::update::{self, UpdateState};
 use crate::wsl;
 
@@ -2080,103 +2079,6 @@ fn key_message(event: keyboard::Event) -> Option<Message> {
         Key::Character("l") if modifiers.command() => Some(Message::FocusIdea),
         Key::Character(",") if modifiers.command() => Some(Message::OpenPage(Page::Settings)),
         _ => None,
-    }
-}
-
-/// Where the task list lies, as the selector found it.
-struct ListView {
-    bounds: iced::Rectangle,
-    content_bounds: iced::Rectangle,
-    translation: iced::Vector,
-}
-
-/// Scrolls the task list to the offset `offset` returns for the element with widget id `id`,
-/// given the list and the element's bounds; `None` leaves the list where it is. Runs after the
-/// next layout, so it finds an element the same update opened.
-fn reveal_by(
-    id: impl Into<String>,
-    offset: impl Fn(&ListView, iced::Rectangle) -> Option<f32> + Clone + Send + 'static,
-) -> Task<Message> {
-    let id = id.into();
-    selector::find(selector::id(list::LIST_ID)).then(move |list| {
-        let Some(Target::Scrollable {
-            bounds,
-            content_bounds,
-            translation,
-            ..
-        }) = list
-        else {
-            return Task::none();
-        };
-        let list = ListView {
-            bounds,
-            content_bounds,
-            translation,
-        };
-        let (id, offset) = (id.clone(), offset.clone());
-        selector::find(selector::id(id)).then(move |target| {
-            let Some(target) = target else {
-                return Task::none();
-            };
-            match offset(&list, target.bounds()) {
-                Some(y) => operation::scroll_to(list::LIST_ID, AbsoluteOffset { x: 0.0, y }),
-                None => Task::none(),
-            }
-        })
-    })
-}
-
-/// Scrolls the task list so the element with widget id `id` shows: when its top is above the
-/// list, or its first list-height is below it, its top goes to the top of the list.
-fn reveal(id: &'static str) -> Task<Message> {
-    reveal_by(id, |list, el| {
-        let top = el.y - list.translation.y;
-        let bottom = top + el.height.min(list.bounds.height);
-        if top >= list.bounds.y && bottom <= list.bounds.y + list.bounds.height {
-            return None;
-        }
-        Some((el.y - list.content_bounds.y - SP_2).max(0.0))
-    })
-}
-
-/// Scrolls the task list so the bottom of element `id` lies inside it, when the element ends
-/// below the list's bottom edge.
-fn reveal_bottom(id: &'static str) -> Task<Message> {
-    reveal_by(id, |list, el| {
-        if el.y + el.height - list.translation.y <= list.bounds.y + list.bounds.height {
-            return None;
-        }
-        Some((el.y + el.height + SP_2 - list.content_bounds.y - list.bounds.height).max(0.0))
-    })
-}
-
-/// The distance from the top of the task list to the top of element `id`, after the next
-/// layout; `None` when either is not shown.
-pub(super) fn list_top_of(id: String) -> Task<Option<f32>> {
-    selector::find(selector::id(list::LIST_ID)).then(move |list| {
-        let Some(Target::Scrollable {
-            bounds,
-            translation,
-            ..
-        }) = list
-        else {
-            return Task::done(None);
-        };
-        selector::find(selector::id(id.clone()))
-            .map(move |t| t.map(|t| t.bounds().y - translation.y - bounds.y))
-    })
-}
-
-/// Scrolls the task list so `anchor` stands where the accepted slab stood, `dy` below the
-/// list's top.
-pub(super) fn return_to(anchor: logic::ReturnAnchor, dy: f32) -> Task<Message> {
-    match anchor {
-        logic::ReturnAnchor::Next(id) => reveal_by(id, move |list, el| {
-            Some((el.y - list.content_bounds.y - dy).max(0.0))
-        }),
-        logic::ReturnAnchor::Above(id) => reveal_by(id, move |list, el| {
-            Some((el.y + el.height + SP_1 - list.content_bounds.y - dy).max(0.0))
-        }),
     }
 }
 

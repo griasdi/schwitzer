@@ -13,8 +13,9 @@ use iced::{Task, window};
 use schwitzer_proto::{RoomId, now_ms};
 use serde::{Deserialize, Serialize};
 
+use super::list::reveal;
 use super::logic::Group;
-use super::{App, Expanded, Forms, Message, Page, TaskDraft, reveal};
+use super::{App, Expanded, Forms, Message, Page, TaskDraft};
 use crate::update;
 
 /// The file in the data directory; written just before the restart, removed when read.

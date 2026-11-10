@@ -2,9 +2,11 @@
 //! worker's name tag and its next-step button; the open task or draft sits in place among them.
 
 use iced::keyboard::{Key, key::Named};
+use iced::widget::operation::{self, AbsoluteOffset};
+use iced::widget::selector::{self, Target};
 use iced::widget::{Space, column, container, responsive, row, scrollable, text, text_editor};
-use iced::{Alignment, Element, Length, Padding};
-use schwitzer_proto::{Decision, MemberId, Project, RoomState, Stage, Task};
+use iced::{Alignment, Element, Length, Padding, Task};
+use schwitzer_proto::{Decision, MemberId, Project, RoomState, Stage, Task as RoomTask};
 
 use super::icons::{Icon, Tone, icon};
 use super::logic::{self, Group, MissingSession};
@@ -163,7 +165,7 @@ fn group_header<'a>(group: Group, count: usize, open: bool) -> Element<'a, Messa
 /// tag.
 pub fn summary<'a>(
     state: &'a RoomState,
-    task: &'a Task,
+    task: &'a RoomTask,
     me: MemberId,
     hint: Option<(&'static str, String)>,
     fast_lane: bool,
@@ -253,7 +255,11 @@ pub fn summary<'a>(
 }
 
 /// The hint a claim no omp session carries shows, and the sentence that explains it.
-pub fn session_hint(app: &App, state: &RoomState, task: &Task) -> Option<(&'static str, String)> {
+pub fn session_hint(
+    app: &App,
+    state: &RoomState,
+    task: &RoomTask,
+) -> Option<(&'static str, String)> {
     let claim = task.claim.as_ref()?;
     let missing = logic::missing_session(
         state,
@@ -281,7 +287,7 @@ pub fn session_hint(app: &App, state: &RoomState, task: &Task) -> Option<(&'stat
     })
 }
 
-fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
+fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a RoomTask) -> Element<'a, Message> {
     let n = task.number;
     let mut line = row![summary(
         state,
@@ -310,7 +316,7 @@ fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'
 fn next_step<'a>(
     app: &'a App,
     state: &'a RoomState,
-    task: &'a Task,
+    task: &'a RoomTask,
 ) -> Option<Element<'a, Message>> {
     let n = task.number;
     if logic::approvable(task) {
@@ -390,5 +396,102 @@ fn next_step<'a>(
             "Give the claim back; someone else can take it",
         )),
         _ => None,
+    }
+}
+
+/// Where the task list lies, as the selector found it.
+struct ListView {
+    bounds: iced::Rectangle,
+    content_bounds: iced::Rectangle,
+    translation: iced::Vector,
+}
+
+/// Scrolls the task list to the offset `offset` returns for the element with widget id `id`,
+/// given the list and the element's bounds; `None` leaves the list where it is. Runs after the
+/// next layout, so it finds an element the same update opened.
+fn reveal_by(
+    id: impl Into<String>,
+    offset: impl Fn(&ListView, iced::Rectangle) -> Option<f32> + Clone + Send + 'static,
+) -> Task<Message> {
+    let id = id.into();
+    selector::find(selector::id(LIST_ID)).then(move |list| {
+        let Some(Target::Scrollable {
+            bounds,
+            content_bounds,
+            translation,
+            ..
+        }) = list
+        else {
+            return Task::none();
+        };
+        let list = ListView {
+            bounds,
+            content_bounds,
+            translation,
+        };
+        let (id, offset) = (id.clone(), offset.clone());
+        selector::find(selector::id(id)).then(move |target| {
+            let Some(target) = target else {
+                return Task::none();
+            };
+            match offset(&list, target.bounds()) {
+                Some(y) => operation::scroll_to(LIST_ID, AbsoluteOffset { x: 0.0, y }),
+                None => Task::none(),
+            }
+        })
+    })
+}
+
+/// Scrolls the task list so the element with widget id `id` shows: when its top is above the
+/// list, or its first list-height is below it, its top goes to the top of the list.
+pub(super) fn reveal(id: &'static str) -> Task<Message> {
+    reveal_by(id, |list, el| {
+        let top = el.y - list.translation.y;
+        let bottom = top + el.height.min(list.bounds.height);
+        if top >= list.bounds.y && bottom <= list.bounds.y + list.bounds.height {
+            return None;
+        }
+        Some((el.y - list.content_bounds.y - SP_2).max(0.0))
+    })
+}
+
+/// Scrolls the task list so the bottom of element `id` lies inside it, when the element ends
+/// below the list's bottom edge.
+pub(super) fn reveal_bottom(id: &'static str) -> Task<Message> {
+    reveal_by(id, |list, el| {
+        if el.y + el.height - list.translation.y <= list.bounds.y + list.bounds.height {
+            return None;
+        }
+        Some((el.y + el.height + SP_2 - list.content_bounds.y - list.bounds.height).max(0.0))
+    })
+}
+
+/// The distance from the top of the task list to the top of element `id`, after the next
+/// layout; `None` when either is not shown.
+pub(super) fn list_top_of(id: String) -> Task<Option<f32>> {
+    selector::find(selector::id(LIST_ID)).then(move |list| {
+        let Some(Target::Scrollable {
+            bounds,
+            translation,
+            ..
+        }) = list
+        else {
+            return Task::done(None);
+        };
+        selector::find(selector::id(id.clone()))
+            .map(move |t| t.map(|t| t.bounds().y - translation.y - bounds.y))
+    })
+}
+
+/// Scrolls the task list so `anchor` stands where the accepted slab stood, `dy` below the
+/// list's top.
+pub(super) fn return_to(anchor: logic::ReturnAnchor, dy: f32) -> Task<Message> {
+    match anchor {
+        logic::ReturnAnchor::Next(id) => reveal_by(id, move |list, el| {
+            Some((el.y - list.content_bounds.y - dy).max(0.0))
+        }),
+        logic::ReturnAnchor::Above(id) => reveal_by(id, move |list, el| {
+            Some((el.y + el.height + SP_1 - list.content_bounds.y - dy).max(0.0))
+        }),
     }
 }
