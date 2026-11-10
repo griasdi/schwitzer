@@ -89,6 +89,14 @@ fn text(field: &str, value: &str, cap: usize, required: bool) -> Result<String, 
     Ok(value.to_owned())
 }
 
+/// The title (required) and the body of a task, each checked by [`text`].
+fn headline(title: &str, body: &str) -> Result<(String, String), ApiError> {
+    Ok((
+        text("title", title, caps::TITLE, true)?,
+        text("body", body, caps::BODY, false)?,
+    ))
+}
+
 /// Task numbers to wait for: ascending, without duplicates, at most `caps::WAITS_FOR`.
 fn waits(mut list: Vec<u64>) -> Result<Vec<u64>, ApiError> {
     list.sort_unstable();
@@ -162,8 +170,7 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             body,
             waits_for,
         } => {
-            let title = text("title", &title, caps::TITLE, true)?;
-            let body = text("body", &body, caps::BODY, false)?;
+            let (title, body) = headline(&title, &body)?;
             let waits_for = waits(waits_for)?;
             mutate(state, caller, room, move |conn, now| {
                 let task = store::create_task(
@@ -189,8 +196,7 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             title,
             body,
         } => {
-            let title = text("title", &title, caps::TITLE, true)?;
-            let body = text("body", &body, caps::BODY, false)?;
+            let (title, body) = headline(&title, &body)?;
             mutate(state, caller, room, move |conn, now| {
                 store::create_task(
                     conn,
@@ -212,8 +218,7 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             body,
             waits_for,
         } => {
-            let title = text("title", &title, caps::TITLE, true)?;
-            let body = text("body", &body, caps::BODY, false)?;
+            let (title, body) = headline(&title, &body)?;
             let waits_for = waits(waits_for)?;
             mutate(state, caller, room, move |conn, now| {
                 store::propose_idea(conn, &room, &caller, task, &title, &body, &waits_for, now)
@@ -227,8 +232,7 @@ async fn dispatch(state: &State, caller: MemberId, req: Request) -> Reply {
             body,
             plan,
         } => {
-            let title = text("title", &title, caps::TITLE, true)?;
-            let body = text("body", &body, caps::BODY, false)?;
+            let (title, body) = headline(&title, &body)?;
             let plan = text("plan", &plan, caps::PLAN, false)?;
             mutate(state, caller, room, move |conn, now| {
                 store::edit_task(conn, &room, &caller, task, &title, &body, &plan, now)
@@ -550,6 +554,23 @@ where
         .await
 }
 
+/// Refuses a `task` above its size cap, or a `room` that `task` makes too big.
+fn require_fits(st: &Shared, conn: &Connection, room: &RoomId, task: &Task) -> R<()> {
+    crate::require_task_fits(task)?;
+    st.require_room_fits(conn, room)
+}
+
+/// Tells the room's members about `task`.
+fn publish_task(hub: &Hub, members: &[MemberId], room: RoomId, task: &Task) {
+    hub.publish(
+        members,
+        &Event::Task {
+            room,
+            task: task.clone(),
+        },
+    );
+}
+
 /// Runs a task mutation as a member of `room`, publishes the resulting task to
 /// the room's members and replies with it.
 async fn mutate<F>(state: &State, caller: MemberId, room: RoomId, f: F) -> Reply
@@ -562,19 +583,10 @@ where
         room,
         move |st, conn, now| {
             let task = f(conn, now)?;
-            crate::require_task_fits(&task)?;
-            st.require_room_fits(conn, &room)?;
+            require_fits(st, conn, &room, &task)?;
             Ok(task)
         },
-        move |hub, members, task| {
-            hub.publish(
-                members,
-                &Event::Task {
-                    room,
-                    task: task.clone(),
-                },
-            );
-        },
+        move |hub, members, task| publish_task(hub, members, room, task),
     )
     .await?;
     Ok(Response::Task(task))
@@ -593,20 +605,13 @@ where
         move |st, conn, now| {
             let task = f(conn, now)?;
             if let Some(task) = &task {
-                crate::require_task_fits(task)?;
-                st.require_room_fits(conn, &room)?;
+                require_fits(st, conn, &room, task)?;
             }
             Ok(task)
         },
         move |hub, members, task| {
             if let Some(task) = task {
-                hub.publish(
-                    members,
-                    &Event::Task {
-                        room,
-                        task: task.clone(),
-                    },
-                );
+                publish_task(hub, members, room, task);
             }
         },
     )
