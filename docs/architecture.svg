@@ -74,22 +74,22 @@
   <rect x="60" y="180" width="780" height="130" rx="10" fill="#f0a630" stroke="#f0a630" stroke-width="1.5" fill-opacity="0.10"/>
   <text x="76" y="200" class="crate agent">omp · coding agent sessions</text>
   <text x="76" y="217" class="desc">the harness, started in a repo that is linked to a room's project</text>
-  <rect x="76" y="228" width="331" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
-  <text x="241.5" y="244.0" class="chip mid">/schwitzer plan · build · propose · idea · debug</text>
-  <rect x="415" y="228" width="164" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
-  <text x="497.0" y="244.0" class="chip mid">schwitzer_* tools (12)</text>
-  <rect x="587" y="228" width="183" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
-  <text x="678.5" y="244.0" class="chip mid">plan review → submit_plan</text>
+  <rect x="76" y="228" width="420" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="286.0" y="244.0" class="chip mid">/schwitzer plan · build · propose · idea · debug · revise · decide · fast</text>
+  <rect x="504" y="228" width="128" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="568.0" y="244.0" class="chip mid">schwitzer_* tools</text>
   <rect x="76" y="258" width="106" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
   <text x="129.0" y="274.0" class="chip mid">projects hint</text>
   <rect x="190" y="258" width="177" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
   <text x="278.5" y="274.0" class="chip mid">cross-project edit guard</text>
+  <rect x="375" y="258" width="183" height="24" rx="12.0" fill="#0d1310" stroke="#2a3a30"/>
+  <text x="466.5" y="274.0" class="chip mid">plan review → submit_plan</text>
   <text x="76" y="294" class="small mono">.omp/plugins/node_modules/schwitzer/ · index.ts · package.json · schwitzer.json (no token)</text>
 
   <!-- A2 app -->
   <rect x="60" y="350" width="780" height="220" rx="10" fill="#3dcb5c" stroke="#3dcb5c" stroke-width="1.5" fill-opacity="0.10"/>
   <text x="76" y="370" class="crate app">schwitzer · desktop app</text>
-  <text x="76" y="387" class="desc">iced 0.14 · App / Message / update / view · 400×780 beside the editor</text>
+  <text x="76" y="387" class="desc">iced 0.14 · App / Message / update / view · 480×780 beside the editor</text>
   <rect x="76" y="400" width="179" height="122" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
   <text x="90" y="420" class="head">UI</text>
   <text x="90" y="440" class="desc">list · task view · settings</text>
@@ -136,7 +136,7 @@
   <text x="76" y="622" class="crate proto">schwitzer-proto</text>
   <text x="76" y="643" class="desc">Request · Event · Task · Stage</text>
   <text x="76" y="661" class="desc">postcard · u32 LE frames · caps</text>
-  <text x="76" y="679" class="desc mono">PROTOCOL_VERSION 8</text>
+  <text x="76" y="679" class="desc mono">PROTOCOL_VERSION</text>
   <rect x="340" y="600" width="500" height="104" rx="10" fill="#5aa6f5" stroke="#5aa6f5" stroke-width="1.5" fill-opacity="0.10"/>
   <text x="356" y="622" class="crate client">schwitzer-client</text>
   <text x="356" y="639" class="desc">own tokio runtime schwitzer-net (2 workers) + weida runtime</text>
@@ -187,7 +187,7 @@
   <text x="1102" y="411" class="head">store</text>
   <text x="1102" y="430" class="desc mono">schwitzer.db</text>
   <text x="1102" y="446" class="desc">SQLite · WAL</text>
-  <text x="1102" y="462" class="desc">schema version 3</text>
+  <text x="1102" y="462" class="desc">schema version</text>
   <rect x="1088" y="494" width="131" height="96" rx="10" fill="#222d26" stroke="#2a3a30" stroke-width="1.5"/>
   <text x="1102" y="513" class="head">sessions</text>
   <text x="1102" y="532" class="desc">memory only</text>

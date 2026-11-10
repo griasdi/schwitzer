@@ -195,7 +195,7 @@
   <rect x="60" y="773" width="530" height="46" rx="10" fill="#222d26" stroke="#3dcb5c" stroke-width="1.5"/>
   <text x="74" y="792" class="head">app MCP server</text>
   <text x="576" y="792" class="small end mono">127.0.0.1:13339/mcp</text>
-  <text x="74" y="809" class="desc">Origin → 403 · wrong token → 401 · 30 s per tool · no decide tools</text>
+  <text x="74" y="809" class="desc">Origin → 403 · wrong token → 401 · 30 s per tool · no decide tools for agents</text>
   <path d="M140 819 L140 837" fill="none" stroke="#627568" stroke-width="1.5" marker-end="url(#m-https)"/>
   <text x="152" y="832" class="small">Client::request</text>
   <rect x="60" y="837" width="530" height="46" rx="10" fill="#222d26" stroke="#5aa6f5" stroke-width="1.5"/>
