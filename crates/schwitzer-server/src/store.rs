@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, ToSql, params};
 use schwitzer_proto::{
     Annotation, ApiError, Claim, ClaimToken, Decision, Member, MemberId, Note, Part, Priority,
     Project, Revision, RoomId, RoomState, Stage, Suggestion, Task, Work, caps,
@@ -695,141 +695,133 @@ fn annotation_from_row(row: &Row<'_>) -> rusqlite::Result<Annotation> {
     })
 }
 
-/// Fills in the newest versions, the pending suggestions, the comments and the votes of
-/// `tasks`, all of the room, or only task `number` when given.
-fn fill_revisions(
+/// The rows of `select` (`SELECT ... FROM table`) of `room`, or only of its task `number`
+/// when given, followed by `tail` (`ORDER BY ...`). The statement for one task names the
+/// number in its `WHERE`, so it seeks the table's index instead of scanning the room.
+fn scoped_rows<T>(
     conn: &Connection,
+    select: &str,
+    tail: &str,
     room: &RoomId,
     number: Option<u64>,
-    tasks: &mut [Task],
-) -> R<()> {
+    map: impl FnMut(&Row<'_>) -> rusqlite::Result<T>,
+) -> R<Vec<T>> {
+    let filter = if number.is_some() {
+        " AND number = ?2"
+    } else {
+        ""
+    };
+    let mut stmt = conn.prepare(&format!("{select} WHERE room = ?1{filter} {tail}"))?;
+    let room = room.as_bytes().as_slice();
     let only = number.map(int);
-    let mut stmt = conn.prepare(
-        "SELECT number, part, MAX(version) FROM versions
-         WHERE room = ?1 AND (?2 IS NULL OR number = ?2) GROUP BY number, part",
-    )?;
-    let mut versions: HashMap<(u64, Part), u64> = HashMap::new();
-    for row in stmt.query_map(params![room.as_bytes().as_slice(), only], |r| {
-        Ok((
-            uns(r.get(0)?),
-            mapped(1, "part", r.get(1)?, part_from_int)?,
-            uns(r.get(2)?),
-        ))
-    })? {
-        let (n, part, version) = row?;
-        versions.insert((n, part), version);
+    let all: [&dyn ToSql; 2] = [&room, &only];
+    let params = &all[..if number.is_some() { 2 } else { 1 }];
+    Ok(stmt
+        .query_map(params, map)?
+        .collect::<rusqlite::Result<Vec<T>>>()?)
+}
+
+/// `rows` grouped by task number, each group in row order.
+fn by_number<T>(rows: Vec<(u64, T)>) -> HashMap<u64, Vec<T>> {
+    let mut grouped: HashMap<u64, Vec<T>> = HashMap::new();
+    for (number, row) in rows {
+        grouped.entry(number).or_default().push(row);
     }
-    let mut stmt = conn.prepare(
-        "SELECT id, part, version, at_ms, author, agent, note, number FROM suggestions
-         WHERE room = ?1 AND (?2 IS NULL OR number = ?2) ORDER BY id",
+    grouped
+}
+
+/// Every task of a room by number, or only task `number` when given: with notes, waits,
+/// versions, suggestions, comments and votes.
+fn load_tasks(conn: &Connection, room: &RoomId, number: Option<u64>) -> R<Vec<Task>> {
+    let mut tasks = scoped_rows(
+        conn,
+        &format!("SELECT {TASK_COLUMNS} FROM tasks"),
+        "ORDER BY number",
+        room,
+        number,
+        task_from_row,
     )?;
-    let mut suggestions: HashMap<u64, Vec<Suggestion>> = HashMap::new();
-    for row in stmt.query_map(params![room.as_bytes().as_slice(), only], |r| {
-        Ok((uns(r.get(7)?), suggestion_from_row(r)?))
-    })? {
-        let (n, s) = row?;
-        suggestions.entry(n).or_default().push(s);
+    if tasks.is_empty() {
+        return Ok(tasks);
     }
-    let mut stmt = conn.prepare(
-        "SELECT id, part, version, quote, at_ms, author, text, resolved, number FROM annotations
-         WHERE room = ?1 AND (?2 IS NULL OR number = ?2) ORDER BY id",
-    )?;
-    let mut annotations: HashMap<u64, Vec<Annotation>> = HashMap::new();
-    for row in stmt.query_map(params![room.as_bytes().as_slice(), only], |r| {
-        Ok((uns(r.get(8)?), annotation_from_row(r)?))
-    })? {
-        let (n, a) = row?;
-        annotations.entry(n).or_default().push(a);
-    }
-    let mut stmt = conn.prepare(
-        "SELECT number, member FROM votes
-         WHERE room = ?1 AND (?2 IS NULL OR number = ?2) ORDER BY number, member",
-    )?;
-    let mut votes: HashMap<u64, Vec<MemberId>> = HashMap::new();
-    for row in stmt.query_map(params![room.as_bytes().as_slice(), only], |r| {
-        Ok((uns(r.get(0)?), blob(r, 1)?))
-    })? {
-        let (n, m) = row?;
-        votes.entry(n).or_default().push(m);
-    }
-    for task in tasks {
+    let mut notes = by_number(scoped_rows(
+        conn,
+        "SELECT at_ms, author, agent, text, number FROM notes",
+        "ORDER BY rowid",
+        room,
+        number,
+        |r| Ok((uns(r.get(4)?), note_from_row(r)?)),
+    )?);
+    let mut waits = by_number(scoped_rows(
+        conn,
+        "SELECT number, after FROM waits",
+        "ORDER BY number, after",
+        room,
+        number,
+        |r| Ok((uns(r.get(0)?), uns(r.get(1)?))),
+    )?);
+    let versions: HashMap<(u64, Part), u64> = scoped_rows(
+        conn,
+        "SELECT number, part, MAX(version) FROM versions",
+        "GROUP BY number, part",
+        room,
+        number,
+        |r| {
+            Ok((
+                (uns(r.get(0)?), mapped(1, "part", r.get(1)?, part_from_int)?),
+                uns(r.get(2)?),
+            ))
+        },
+    )?
+    .into_iter()
+    .collect();
+    let mut suggestions = by_number(scoped_rows(
+        conn,
+        "SELECT id, part, version, at_ms, author, agent, note, number FROM suggestions",
+        "ORDER BY id",
+        room,
+        number,
+        |r| Ok((uns(r.get(7)?), suggestion_from_row(r)?)),
+    )?);
+    let mut annotations = by_number(scoped_rows(
+        conn,
+        "SELECT id, part, version, quote, at_ms, author, text, resolved, number FROM annotations",
+        "ORDER BY id",
+        room,
+        number,
+        |r| Ok((uns(r.get(8)?), annotation_from_row(r)?)),
+    )?);
+    let mut votes = by_number(scoped_rows(
+        conn,
+        "SELECT number, member FROM votes",
+        "ORDER BY number, member",
+        room,
+        number,
+        |r| Ok((uns(r.get(0)?), blob(r, 1)?)),
+    )?);
+    for task in &mut tasks {
         let n = task.number;
+        task.notes = notes.remove(&n).unwrap_or_default();
+        task.waits_for = waits.remove(&n).unwrap_or_default();
         task.details_version = versions.get(&(n, Part::Details)).copied().unwrap_or(0);
         task.plan_version = versions.get(&(n, Part::Plan)).copied().unwrap_or(0);
         task.suggestions = suggestions.remove(&n).unwrap_or_default();
         task.annotations = annotations.remove(&n).unwrap_or_default();
         task.votes = votes.remove(&n).unwrap_or_default();
     }
-    Ok(())
+    Ok(tasks)
 }
 
-/// One task with its notes and waits, `None` if the room has no such number.
+/// One task with its notes, waits, versions, suggestions, comments and votes, `None` if the
+/// room has no such number.
 pub fn read_task(conn: &Connection, room: &RoomId, number: u64) -> R<Option<Task>> {
-    let task = conn
-        .query_row(
-            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE room = ?1 AND number = ?2"),
-            params![room.as_bytes().as_slice(), int(number)],
-            task_from_row,
-        )
-        .optional()?;
-    let Some(mut task) = task else {
-        return Ok(None);
-    };
-    let mut stmt = conn.prepare(
-        "SELECT at_ms, author, agent, text FROM notes
-         WHERE room = ?1 AND number = ?2 ORDER BY rowid",
-    )?;
-    task.notes = stmt
-        .query_map(
-            params![room.as_bytes().as_slice(), int(number)],
-            note_from_row,
-        )?
-        .collect::<rusqlite::Result<Vec<Note>>>()?;
-    let mut stmt =
-        conn.prepare("SELECT after FROM waits WHERE room = ?1 AND number = ?2 ORDER BY after")?;
-    task.waits_for = stmt
-        .query_map(params![room.as_bytes().as_slice(), int(number)], |r| {
-            Ok(uns(r.get(0)?))
-        })?
-        .collect::<rusqlite::Result<Vec<u64>>>()?;
-    fill_revisions(conn, room, Some(number), std::slice::from_mut(&mut task))?;
-    Ok(Some(task))
+    Ok(load_tasks(conn, room, Some(number))?.pop())
 }
 
 /// Every task of a room by number, notes, waits, versions, suggestions, comments and votes
 /// included.
 pub fn read_tasks(conn: &Connection, room: &RoomId) -> R<Vec<Task>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {TASK_COLUMNS} FROM tasks WHERE room = ?1 ORDER BY number"
-    ))?;
-    let mut tasks = stmt
-        .query_map([room.as_bytes().as_slice()], task_from_row)?
-        .collect::<rusqlite::Result<Vec<Task>>>()?;
-    let mut stmt = conn.prepare(
-        "SELECT at_ms, author, agent, text, number FROM notes WHERE room = ?1 ORDER BY rowid",
-    )?;
-    let mut notes: HashMap<u64, Vec<Note>> = HashMap::new();
-    for row in stmt.query_map([room.as_bytes().as_slice()], |r| {
-        Ok((uns(r.get(4)?), note_from_row(r)?))
-    })? {
-        let (number, note) = row?;
-        notes.entry(number).or_default().push(note);
-    }
-    let mut stmt =
-        conn.prepare("SELECT number, after FROM waits WHERE room = ?1 ORDER BY number, after")?;
-    let mut waits: HashMap<u64, Vec<u64>> = HashMap::new();
-    for row in stmt.query_map([room.as_bytes().as_slice()], |r| {
-        Ok((uns(r.get(0)?), uns(r.get(1)?)))
-    })? {
-        let (number, after) = row?;
-        waits.entry(number).or_default().push(after);
-    }
-    for task in &mut tasks {
-        task.notes = notes.remove(&task.number).unwrap_or_default();
-        task.waits_for = waits.remove(&task.number).unwrap_or_default();
-    }
-    fill_revisions(conn, room, None, &mut tasks)?;
-    Ok(tasks)
+    load_tasks(conn, room, None)
 }
 
 /// The task, or `NoSuchTask`.
