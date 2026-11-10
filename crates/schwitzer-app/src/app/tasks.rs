@@ -49,13 +49,10 @@ impl App {
         let Some(Expanded::New { idea }) = self.expanded else {
             return Task::none();
         };
-        let (Some(room), Some(project), title) = (
-            self.selected,
-            self.selected_project().map(|p| p.id),
-            self.forms.proposal_title.trim(),
-        ) else {
+        let Some((room, project)) = self.selected_ids() else {
             return Task::none();
         };
+        let title = self.forms.proposal_title.trim();
         if title.is_empty() {
             return Task::none();
         }
@@ -105,8 +102,7 @@ impl App {
         let Some((title, body)) = logic::split_idea(&text) else {
             return Task::none();
         };
-        let (Some(room), Some(project)) = (self.selected, self.selected_project().map(|p| p.id))
-        else {
+        let Some((room, project)) = self.selected_ids() else {
             return Task::none();
         };
         let req = Request::AddIdea {

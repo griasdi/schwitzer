@@ -1369,9 +1369,7 @@ impl App {
                 Task::none()
             }
             Message::CommitTrailers(on) => {
-                if let (Some(room), Some(project)) =
-                    (self.selected, self.selected_project().map(|p| p.id))
-                {
+                if let Some((room, project)) = self.selected_ids() {
                     self.settings.set_commit_trailer(&room, project, on);
                     self.save_settings();
                     self.write_plugin_configs(&room, project);
@@ -1379,9 +1377,7 @@ impl App {
                 Task::none()
             }
             Message::FastLane(on) => {
-                if let (Some(room), Some(project)) =
-                    (self.selected, self.selected_project().map(|p| p.id))
-                {
+                if let Some((room, project)) = self.selected_ids() {
                     self.settings.set_fast_lane(&room, project, on);
                     self.save_settings();
                 }
@@ -1637,6 +1633,11 @@ impl App {
                     .find(|p| !self.settings.project_repos(&state.id, p.id).is_empty())
             })
             .or_else(|| state.projects.first())
+    }
+
+    /// The selected room's id and the id of the project shown for it.
+    fn selected_ids(&self) -> Option<(RoomId, u64)> {
+        Some((self.selected_state()?.id, self.selected_project()?.id))
     }
 
     /// Remembers `project` as the one shown for `room` and saves the settings; `true` when that
