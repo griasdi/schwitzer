@@ -49,7 +49,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |---|---|---|
 |`schwitzer-proto`|wire types: `rpc.rs` (`Request`, `Response`, `ApiError`), `events.rs` (`Subscribe`, `Event`), `model.rs` (`Stage`, `Task`, `Part`, `Revision`, `Suggestion`, `Annotation`, `RoomState`, `DebugSession`, …), `ids.rs`, `addr.rs` (`ServerAddr`, `RoomKey`), `frame.rs`; `PROTOCOL_VERSION` (11), `caps`, `RPC_TIMEOUT`|tokio runtime choices, SQLite, iced|
 |`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `debug.rs`, `limit.rs` (the request budget and the debug log `ByteBudget`), `release.rs`, `update.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
-|`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
+|`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), the debug session API with its instruction inbox (`debug.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
 |`schwitzer-release`|what both updaters share: `RELEASES_URL`, `PLATFORM`, `GitHubRelease` (with `parse`/`parse_list` for the API's JSON), `parse_dev` (the dev release, `None` while a draft), `Asset`/`Download` with the `sha256:` digest parsing, `parse_tag`/`is_stable`, `VERSION`/`version()` (this build's version: `SCHWITZER_VERSION` at build time, else the workspace version), `is_update` (newer always, older only across stable/dev), `Channel` (`release`/`dev`), `newest_asset`, `api_get`, `api_get_dev` and `fetch` (bounded HTTPS download, then the size and sha256 check), `ARCHIVE_EXT`, `extract_archive` (the member of this platform's archive), `extract_tar_gz` (Unix), `sibling`, `replace` (Unix swap; Windows swap through `.old`), `clean_leftovers`|iced, SQLite, weida, tokio|
 |`schwitzer-app`|the `schwitzer` binary: UI, MCP server, plugin writer, session scanner, debug session worker (`debug.rs`), updater, WSL support|SQLite, weida: it talks to room servers only through `schwitzer-client`; the self-update reaches GitHub only through `schwitzer-release` (`api_get`, `fetch`; §10)|
 
@@ -277,7 +277,7 @@ stateDiagram-v2
     Offline --> Dialing: backoff 1 s to 30 s
 ```
 
-- API: `add_room`, `create_room`, `join_room`, `leave_room`, `forget_room`, `request`, `rooms`, `subscribe`, `set_name`, `shutdown`; for debug sessions `debug_start`, `debug_join`, `debug_leave`, `debug_log`, `debug_instruct`, `debug_inbox`, `take_debug_instruction`.
+- API: `add_room`, `create_room`, `join_room`, `leave_room`, `forget_room`, `request`, `rooms`, `subscribe`, `set_name`, `shutdown`; for debug sessions (`debug.rs`) `debug_start`, `debug_join`, `debug_leave`, `debug_log`, `debug_instruct`, `debug_inbox`, `take_debug_instruction`.
 - `ClientEvent::{Status, Room, RoomRemoved, Release, DebugLog, DebugInbox}` go out on a `broadcast` channel; `apply` folds each `Event` into the cached `RoomState` and emits `ClientEvent::Room`. An `Event::DebugLog` becomes `ClientEvent::DebugLog`; a change of the debug inbox (an `Event::DebugInstruction` arriving, `take_debug_instruction`) emits `ClientEvent::DebugInbox { room, fresh }`, where `fresh` is the instruction that just arrived (`None` for a take or a dropped inbox); the app reads the inbox itself from `Client::debug_inbox`.
 - `ClientError::{Offline, Timeout, Api, Net, Proto}`. A request waits up to `SESSION_WAIT` (10 s) for its server to come online.
 
@@ -617,7 +617,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |Task|Touch|
 |---|---|
 |New request or event|`schwitzer-proto/src/rpc.rs` or `events.rs` (append the variant; bump `PROTOCOL_VERSION` when old peers would break), `schwitzer-server/src/rpc.rs` (`dispatch`, validation), `store.rs`, the caller in `app/tasks.rs` (task actions), `app/projects.rs` (rooms and projects) or `app/mod.rs`|
-|New debug request|`schwitzer-proto/src/rpc.rs` and `events.rs`, `schwitzer-server/src/debug.rs` (`DebugRuns`) and its handler in `rpc.rs`, a `Client::debug_*` method in `schwitzer-client/src/lib.rs`, `schwitzer-app/src/debug.rs` (the worker), `app/debug_session.rs` (the lifecycle in the app), `app/debug_view.rs` (the page), `mcp/tools.rs`, `omp-plugin/index.ts`|
+|New debug request|`schwitzer-proto/src/rpc.rs` and `events.rs`, `schwitzer-server/src/debug.rs` (`DebugRuns`) and its handler in `rpc.rs`, a `Client::debug_*` method in `schwitzer-client/src/debug.rs`, `schwitzer-app/src/debug.rs` (the worker), `app/debug_session.rs` (the lifecycle in the app), `app/debug_view.rs` (the page), `mcp/tools.rs`, `omp-plugin/index.ts`|
 |New stage, decision or claim rule|`model.rs` (append; `Task::next_stage`, `Task::legal_decisions`), `store.rs` (`stage_to_int` …, `claim`), `app/logic.rs` (`Group::of`, `stage_label`, `lamp`), `mcp/tools.rs` (`StageArg`), the plugin (`STAGE`)|
 |Schema change|`store.rs` (`SCHEMA`, a new `MIGRATE_n` and its entry at the end of `MIGRATIONS`, `SCHEMA_VERSION`; a compile-time check ties the two)|
 |New MCP tool or argument|`mcp/tools.rs`, `omp-plugin/index.ts` (`TOOLS`), `omp-plugin/README.md`|

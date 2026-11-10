@@ -6,14 +6,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use schwitzer_proto::{
-    ApiError, DebugId, Event, MAX_EVENT_FRAME, Member, PROTOCOL_VERSION, Project, Request,
-    Response, RoomId, RoomKey, RoomState, ServerAddr, Subscribe, Task, read_frame, to_bytes,
+    ApiError, Event, MAX_EVENT_FRAME, Member, PROTOCOL_VERSION, Project, Request, Response, RoomId,
+    RoomKey, RoomState, ServerAddr, Subscribe, Task, read_frame, to_bytes,
 };
 use weida::TransferMeta;
 
 use crate::backoff::Backoff;
 use crate::conn::{ServerConn, Session};
-use crate::{Client, ClientError, ClientEvent, Entry, INBOX_CAP, InboxEntry, lock};
+use crate::{Client, ClientError, ClientEvent, Entry, lock};
 
 const FIRST_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
@@ -238,27 +238,7 @@ impl Client {
                 session,
                 instruction,
             } => {
-                let entry = InboxEntry {
-                    for_me: instruction.to.contains(&self.member()),
-                    taken: false,
-                    instruction,
-                };
-                {
-                    let mut inboxes = lock(&self.0.debug_inbox);
-                    let inbox = inboxes.entry(room).or_insert((session, Vec::new()));
-                    if inbox.0 != session {
-                        *inbox = (session, Vec::new());
-                    }
-                    inbox.1.push(entry.clone());
-                    if inbox.1.len() > INBOX_CAP {
-                        let excess = inbox.1.len() - INBOX_CAP;
-                        inbox.1.drain(..excess);
-                    }
-                }
-                self.emit(ClientEvent::DebugInbox {
-                    room,
-                    fresh: Some(entry),
-                });
+                self.receive_instruction(room, session, instruction);
                 return;
             }
             Event::Debug { room, session } => {
@@ -338,61 +318,6 @@ impl Client {
                 true
             }
             None => false,
-        }
-    }
-
-    /// Drops the inbox and the rejoin wish of `room` when they belong to a session that is
-    /// not the room's current one.
-    fn sync_debug(&self, room: RoomId) {
-        let current = self.current_debug(room);
-        let dropped = {
-            let mut inboxes = lock(&self.0.debug_inbox);
-            match inboxes.get(&room) {
-                Some((id, entries)) if Some(*id) != current => {
-                    let had = !entries.is_empty();
-                    inboxes.remove(&room);
-                    had
-                }
-                _ => false,
-            }
-        };
-        {
-            let mut rejoin = lock(&self.0.debug_rejoin);
-            if rejoin.get(&room).is_some_and(|id| Some(*id) != current) {
-                rejoin.remove(&room);
-            }
-        }
-        if dropped {
-            self.emit(ClientEvent::DebugInbox { room, fresh: None });
-        }
-    }
-
-    /// Joins again the debug sessions of `server`'s rooms that this member had joined and
-    /// lost through a disconnect: their human already agreed to them.
-    fn rejoin_debug(&self, server: &ServerAddr) {
-        let me = self.member();
-        let pending: Vec<(RoomId, DebugId)> = {
-            let rejoin = lock(&self.0.debug_rejoin);
-            lock(&self.0.rooms)
-                .iter()
-                .filter(|(_, entry)| entry.server == *server)
-                .filter_map(|(room, entry)| {
-                    let session = entry.state.debug.as_ref()?;
-                    (rejoin.get(room) == Some(&session.id) && !session.members.contains(&me))
-                        .then_some((*room, session.id))
-                })
-                .collect()
-        };
-        for (room, session) in pending {
-            let client = self.clone();
-            self.0.handle.spawn(async move {
-                if let Err(e) = client
-                    .request(room, Request::DebugJoin { room, session })
-                    .await
-                {
-                    tracing::warn!("rejoining the debug session failed: {e}");
-                }
-            });
         }
     }
 

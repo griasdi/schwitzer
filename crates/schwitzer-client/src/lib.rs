@@ -4,6 +4,7 @@
 
 mod backoff;
 mod conn;
+mod debug;
 mod sync;
 
 use std::collections::HashMap;
@@ -12,18 +13,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use schwitzer_proto::{
-    ApiError, DebugId, DebugInstruction, DebugSession, MemberId, Request, Response, RoomId,
-    RoomKey, RoomState, ServerAddr,
+    ApiError, DebugId, MemberId, Request, Response, RoomId, RoomKey, RoomState, ServerAddr,
 };
 use tokio::sync::broadcast;
 use weida::{FilesOptions, IdentitySource};
 
 use crate::conn::ServerConn;
 
+pub use crate::debug::InboxEntry;
+
 /// Capacity of the event channel.
 const EVENT_CAPACITY: usize = 1024;
-/// Debug instructions kept per room; the oldest go first.
-pub(crate) const INBOX_CAP: usize = 100;
 
 /// Errors of the client library.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -107,16 +107,6 @@ pub enum ClientEvent {
         room: RoomId,
         fresh: Option<InboxEntry>,
     },
-}
-
-/// A debug instruction this client received: as an addressee, or as the master who sent it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InboxEntry {
-    pub instruction: DebugInstruction,
-    /// This member is an addressee.
-    pub for_me: bool,
-    /// An omp session took it ([`Client::take_debug_instruction`]).
-    pub taken: bool,
 }
 
 /// The state of a room and the server it lives on.
@@ -285,112 +275,6 @@ impl Client {
         }
     }
 
-    /// Starts a debug session in `room` with this member as master.
-    pub async fn debug_start(&self, room: RoomId) -> Result<DebugSession, ClientError> {
-        self.enter_debug(room, Request::DebugStart { room }).await
-    }
-
-    /// Joins the running debug session of `room`.
-    pub async fn debug_join(&self, room: RoomId) -> Result<DebugSession, ClientError> {
-        let session = self.debug_id(room)?;
-        self.enter_debug(room, Request::DebugJoin { room, session })
-            .await
-    }
-
-    /// Sends `req`, which puts this member into the debug session of `room`, and remembers
-    /// the session to rejoin after a reconnect.
-    async fn enter_debug(&self, room: RoomId, req: Request) -> Result<DebugSession, ClientError> {
-        match self.request(room, req).await? {
-            Response::Debug(session) => {
-                lock(&self.0.debug_rejoin).insert(room, session.id);
-                Ok(session)
-            }
-            other => Err(ClientError::unexpected(&other)),
-        }
-    }
-
-    /// Leaves the debug session of `room`; as its master, ends it.
-    pub async fn debug_leave(&self, room: RoomId) -> Result<(), ClientError> {
-        lock(&self.0.debug_rejoin).remove(&room);
-        let session = self.debug_id(room)?;
-        self.request(room, Request::DebugLeave { room, session })
-            .await
-            .map(drop)
-    }
-
-    /// Sends bytes of this member's file `stream`, starting at byte `offset` of it.
-    pub async fn debug_log(
-        &self,
-        room: RoomId,
-        session: DebugId,
-        stream: String,
-        offset: u64,
-        data: Vec<u8>,
-    ) -> Result<(), ClientError> {
-        let req = Request::DebugLog {
-            room,
-            session,
-            stream,
-            offset,
-            data,
-        };
-        self.request(room, req).await.map(drop)
-    }
-
-    /// As master, sends an instruction to `to` (empty: every other participant).
-    pub async fn debug_instruct(
-        &self,
-        room: RoomId,
-        to: Vec<MemberId>,
-        text: String,
-    ) -> Result<DebugInstruction, ClientError> {
-        let session = self.debug_id(room)?;
-        let req = Request::DebugInstruct {
-            room,
-            session,
-            to,
-            text,
-        };
-        match self.request(room, req).await? {
-            Response::DebugInstruction(instruction) => Ok(instruction),
-            other => Err(ClientError::unexpected(&other)),
-        }
-    }
-
-    /// The debug instructions received in `room`'s current session, oldest first.
-    pub fn debug_inbox(&self, room: RoomId) -> Vec<InboxEntry> {
-        lock(&self.0.debug_inbox)
-            .get(&room)
-            .map(|(_, entries)| entries.clone())
-            .unwrap_or_default()
-    }
-
-    /// Takes the oldest instruction for this member that nobody took yet.
-    pub fn take_debug_instruction(&self, room: RoomId) -> Option<DebugInstruction> {
-        let taken = {
-            let mut inboxes = lock(&self.0.debug_inbox);
-            let (_, entries) = inboxes.get_mut(&room)?;
-            let entry = entries.iter_mut().find(|e| e.for_me && !e.taken)?;
-            entry.taken = true;
-            entry.instruction.clone()
-        };
-        self.emit(ClientEvent::DebugInbox { room, fresh: None });
-        Some(taken)
-    }
-
-    /// The id of `room`'s running debug session, if any.
-    fn current_debug(&self, room: RoomId) -> Option<DebugId> {
-        lock(&self.0.rooms)
-            .get(&room)
-            .and_then(|entry| entry.state.debug.as_ref().map(|s| s.id))
-    }
-
-    /// The id of `room`'s running debug session.
-    fn debug_id(&self, room: RoomId) -> Result<DebugId, ClientError> {
-        self.current_debug(room)
-            .ok_or(ClientError::Api(ApiError::NoDebugSession))
-    }
-
     /// Stops every connection and the runtime. The client is unusable afterwards.
     pub fn shutdown(&self) {
         if self.0.closed.swap(true, Ordering::SeqCst) {
@@ -431,12 +315,6 @@ impl Client {
             return Err(ClientError::Offline);
         }
         Ok(self.ensure_server(server))
-    }
-
-    /// Drops the debug inbox and the rejoin wish of a room that is gone from this machine.
-    fn forget_debug(&self, room: RoomId) {
-        lock(&self.0.debug_inbox).remove(&room);
-        lock(&self.0.debug_rejoin).remove(&room);
     }
 
     /// Forgets the room on this machine without telling its server: its key and its state.
