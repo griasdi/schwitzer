@@ -5,6 +5,7 @@
 use iced::font::Weight;
 use iced::theme::Palette;
 use iced::theme::palette::{Extended, Pair};
+use iced::widget::text::LineHeight;
 use iced::widget::{
     button, checkbox, container, markdown, overlay::menu, pick_list, scrollable, svg, text_editor,
     text_input, toggler,
@@ -34,7 +35,12 @@ pub const TS_18: f32 = 18.0;
 /// Headings in task Markdown.
 pub const TS_24: f32 = 24.0;
 /// Line height of task text read in full, relative to its size.
-pub const READ_LINE_HEIGHT: f32 = 1.5;
+const READ_LINE_HEIGHT: f32 = 1.5;
+
+/// The line height of task text read in full.
+pub fn read_line_height() -> LineHeight {
+    LineHeight::Relative(READ_LINE_HEIGHT)
+}
 
 /// Corner radius of rows, inputs and buttons.
 pub const RADIUS: f32 = 8.0;

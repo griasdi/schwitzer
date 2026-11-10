@@ -2,7 +2,6 @@
 //! each a full-window page under the task's summary line. State and requests are
 //! `revisions.rs`.
 
-use iced::widget::text::LineHeight;
 use iced::widget::{Column, Space, column, container, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::{MemberId, Part, RoomState, Stage, Task};
@@ -10,10 +9,10 @@ use schwitzer_proto::{MemberId, Part, RoomState, Stage, Task};
 use super::logic::{self, DiffLine};
 use super::revisions::{LoadedSuggestion, RevisionPage};
 use super::widgets::{
-    self, byline, chevron, heading, hrule, id_button, member_tag_of, muted, text_button,
+    self, byline, chevron, heading, hrule, id_button, member_tag_of, muted, read_text, text_button,
 };
 use super::{App, Message, list, pages};
-use crate::theme::{self, MEDIUM, READ_LINE_HEIGHT, SP_1, SP_2, SP_3, TS_14, TS_16};
+use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, TS_14};
 
 pub fn page<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     let (id, title, content) = match &app.revisions {
@@ -169,11 +168,7 @@ fn suggestion<'a>(
     )]
     .spacing(SP_3);
     if !s.note.is_empty() {
-        col = col.push(
-            text(&s.note)
-                .size(TS_16)
-                .line_height(LineHeight::Relative(READ_LINE_HEIGHT)),
-        );
+        col = col.push(read_text(&s.note));
     }
     if logic::outdated(task, s) {
         let part = match s.part {

@@ -12,7 +12,16 @@ use schwitzer_proto::{Member, MemberId, Priority};
 use super::Message;
 use super::icons::{Icon, icon};
 use super::logic;
-use crate::theme::{self, Dot, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, Tone};
+use crate::theme::{
+    self, Dot, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, TS_16, Tone,
+};
+
+/// Task text read in full: 16 px with the reading line height.
+pub fn read_text<'a>(content: impl text::IntoFragment<'a>) -> text::Text<'a, Theme> {
+    text(content)
+        .size(TS_16)
+        .line_height(theme::read_line_height())
+}
 
 /// A text input with a widget id that submits with Enter.
 pub fn input<'a>(

@@ -2,7 +2,6 @@
 //! page.
 
 use iced::widget::markdown as md;
-use iced::widget::text::LineHeight;
 use iced::widget::{
     Space, checkbox, column, container, hover, rich_text, row, scrollable, text, text_editor,
 };
@@ -13,7 +12,7 @@ use super::annotations::AnnotationDraft;
 use super::icons::{Icon, icon};
 use super::widgets::{byline, group_head, hrule, id_button, member_tag_of, text_button, with_tip};
 use super::{App, Message, Reading, list, logic, pages};
-use crate::theme::{self, READ_LINE_HEIGHT, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, Tone};
+use crate::theme::{self, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, Tone};
 
 /// Task text as Markdown, set for reading; a click on a link opens it.
 pub fn markdown<'a>(app: &'a App, parsed: &'a super::ParsedMarkdown) -> Element<'a, Message> {
@@ -269,11 +268,6 @@ pub fn page<'a>(
     pages::reading_frame("reading-page", title, body)
 }
 
-/// The line height of reading text.
-fn line_height() -> LineHeight {
-    LineHeight::Relative(READ_LINE_HEIGHT)
-}
-
 /// iced's Markdown look with the reading line height on paragraphs and list markers, and code
 /// blocks on the well's tone that scroll sideways instead of wrapping.
 ///
@@ -296,7 +290,7 @@ impl<'a> md::Viewer<'a, md::Uri> for Reader {
     fn paragraph(&self, settings: md::Settings, text: &md::Text) -> Element<'a, md::Uri> {
         rich_text(text.spans(settings.style))
             .size(settings.text_size)
-            .line_height(line_height())
+            .line_height(theme::read_line_height())
             .on_link_click(Self::on_link_click)
             .into()
     }
@@ -346,7 +340,7 @@ impl<'a> md::Viewer<'a, md::Uri> for Reader {
                 md::Bullet::Point { items } => (
                     text("•")
                         .size(settings.text_size)
-                        .line_height(line_height())
+                        .line_height(theme::read_line_height())
                         .into(),
                     items,
                 ),
@@ -356,7 +350,7 @@ impl<'a> md::Viewer<'a, md::Uri> for Reader {
                             .size(settings.text_size)
                             .style(theme::task_check),
                     )
-                    .center_y(line_height().to_absolute(settings.text_size))
+                    .center_y(theme::read_line_height().to_absolute(settings.text_size))
                     .into(),
                     items,
                 ),
@@ -387,7 +381,7 @@ impl<'a> md::Viewer<'a, md::Uri> for Reader {
             row![
                 text!("{}.", i as u64 + first)
                     .size(settings.text_size)
-                    .line_height(line_height())
+                    .line_height(theme::read_line_height())
                     .align_x(alignment::Horizontal::Right)
                     .width(settings.text_size * ((digits / 2.0).ceil() + 1.0)),
                 nested(settings, items),

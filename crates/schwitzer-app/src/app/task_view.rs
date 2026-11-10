@@ -2,7 +2,6 @@
 
 use std::fmt;
 
-use iced::widget::text::LineHeight;
 use iced::widget::{Row, Space, column, container, row, text, text_editor};
 use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::{Decision, Part, Priority, RoomState, Stage, Task, caps};
@@ -13,12 +12,10 @@ use super::list;
 use super::logic::{self, OmpStart, TaskText};
 use super::widgets::{
     self, LAMP, byline, chevron, fold_button, heading, hrule, icon_button, icon_text_button,
-    id_button, lamp, member_tag_of, muted, segment, text_button, with_tip,
+    id_button, lamp, member_tag_of, muted, read_text, segment, text_button, with_tip,
 };
 use super::{App, Message, Reading, reading, sticky};
-use crate::theme::{
-    self, Lamp, MEDIUM, READ_LINE_HEIGHT, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, TS_16, Tone,
-};
+use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, TS_16, Tone};
 
 /// Task `task` open in place: the slab's two lines and the decisions the task allows now as a
 /// head that pins while scrolled past (a press on the lines closes it again), then the
@@ -837,10 +834,7 @@ fn notes<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, 
         ));
         let body = match app.open_md.notes.get(i) {
             Some(md) => reading::markdown(app, md),
-            None => text(&note.text)
-                .size(TS_16)
-                .line_height(LineHeight::Relative(READ_LINE_HEIGHT))
-                .into(),
+            None => read_text(&note.text).into(),
         };
         col = col.push(column![who, body].spacing(SP_1));
     }
