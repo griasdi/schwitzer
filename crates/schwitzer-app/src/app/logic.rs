@@ -683,7 +683,7 @@ pub fn md_blocks(src: &str) -> MdBlocks {
 /// The quote that anchors a comment on `block`, a block's Markdown source: trimmed and cut to
 /// [`caps::ANNOTATION_QUOTE`] bytes.
 pub fn annotation_quote(block: &str) -> String {
-    caps::cut(block.trim(), caps::ANNOTATION_QUOTE)
+    caps::clamp(block, caps::ANNOTATION_QUOTE)
         .trim_end()
         .to_owned()
 }

@@ -75,6 +75,11 @@ pub mod caps {
         &text[..end]
     }
 
+    /// `text` trimmed, then cut to at most `max` bytes at a character boundary.
+    pub fn clamp(text: &str, max: usize) -> &str {
+        cut(text.trim(), max)
+    }
+
     #[cfg(test)]
     mod tests {
         use super::cut;

@@ -110,11 +110,6 @@ fn waits(mut list: Vec<u64>) -> Result<Vec<u64>, ApiError> {
     Ok(list)
 }
 
-/// Display metadata: trimmed and cut to `cap` bytes at a character boundary.
-fn clamp(value: &str, cap: usize) -> String {
-    caps::cut(value.trim(), cap).to_owned()
-}
-
 /// Rooms one member may belong to.
 const MAX_ROOMS_PER_MEMBER: u64 = 50;
 
@@ -811,10 +806,10 @@ async fn publish_sessions(
     let sessions: Vec<SessionInfo> = sessions
         .into_iter()
         .map(|s| SessionInfo {
-            id: clamp(&s.id, caps::SESSION_TITLE),
-            title: clamp(&s.title, caps::SESSION_TITLE),
-            project: clamp(&s.project, caps::SESSION_TITLE),
-            model: clamp(&s.model, caps::SESSION_TITLE),
+            id: caps::clamp(&s.id, caps::SESSION_TITLE).to_owned(),
+            title: caps::clamp(&s.title, caps::SESSION_TITLE).to_owned(),
+            project: caps::clamp(&s.project, caps::SESSION_TITLE).to_owned(),
+            model: caps::clamp(&s.model, caps::SESSION_TITLE).to_owned(),
             ..s
         })
         .collect();

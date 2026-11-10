@@ -1812,7 +1812,7 @@ impl App {
     }
 
     fn submit_name(&mut self) -> Task<Message> {
-        let name = caps::cut(self.forms.name.trim(), caps::MEMBER_NAME).to_owned();
+        let name = caps::clamp(&self.forms.name, caps::MEMBER_NAME).to_owned();
         if name.is_empty() {
             self.banner = Some("Name is empty".to_owned());
             return Task::none();

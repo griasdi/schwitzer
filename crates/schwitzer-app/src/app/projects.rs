@@ -78,7 +78,7 @@ impl App {
     }
 
     pub(super) fn create_project(&self) -> Task<Message> {
-        let name = caps::cut(self.forms.new_project.trim(), caps::PROJECT_NAME).to_owned();
+        let name = caps::clamp(&self.forms.new_project, caps::PROJECT_NAME).to_owned();
         let Some(room) = self.selected.filter(|_| !name.is_empty()) else {
             return Task::none();
         };
@@ -113,7 +113,7 @@ impl App {
     }
 
     pub(super) fn rename_project(&self) -> Task<Message> {
-        let name = caps::cut(self.forms.project_name.trim(), caps::PROJECT_NAME).to_owned();
+        let name = caps::clamp(&self.forms.project_name, caps::PROJECT_NAME).to_owned();
         let (Some(room), Some(project)) = (self.selected, self.selected_project()) else {
             return Task::none();
         };
