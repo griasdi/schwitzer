@@ -46,7 +46,13 @@ async fn handle(state: State, mut request: IncomingRequest) {
         Ok(Err(weida::Error::TooLarge { .. })) => {
             Err(ApiError::Invalid("request too large".into()))
         }
-        Ok(Err(_)) | Err(_) => {
+        Ok(Err(e)) => {
+            tracing::debug!("request body not read: {e}");
+            request.refuse(ErrorCode::Rejected).await;
+            return;
+        }
+        Err(_) => {
+            tracing::debug!("request body timed out");
             request.refuse(ErrorCode::Rejected).await;
             return;
         }

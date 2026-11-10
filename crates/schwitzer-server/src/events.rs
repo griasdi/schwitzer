@@ -22,10 +22,12 @@ pub async fn serve(state: State, replier: Replier) {
     }
 }
 
-async fn write(out: &mut OutgoingTransfer, frame: &Frame) -> Result<(), ()> {
+/// Writes `frame`; the reason when the stream is to be dropped: the write stalled or failed.
+async fn write(out: &mut OutgoingTransfer, frame: &Frame) -> Result<(), String> {
     match timeout(STALL, out.write_all(frame)).await {
         Ok(Ok(())) => Ok(()),
-        _ => Err(()),
+        Ok(Err(e)) => Err(format!("write failed: {e}")),
+        Err(_) => Err("write stalled".to_owned()),
     }
 }
 
@@ -58,7 +60,7 @@ async fn handle(state: State, mut request: IncomingRequest) {
     let gone = request.canceled();
     let run = async {
         let Ok(mut out) = request.reply(TransferMeta::default()).await else {
-            return;
+            return Ok(());
         };
         let st = state.clone();
         let rooms = state
@@ -74,20 +76,16 @@ async fn handle(state: State, mut request: IncomingRequest) {
             Ok(rooms) => rooms,
             Err(e) => {
                 tracing::error!("event backlog failed: {e}");
-                return;
+                return Ok(());
             }
         };
         for room in rooms {
-            if let Some(frame) = frame_of(&Event::Room(room))
-                && write(&mut out, &frame).await.is_err()
-            {
-                return;
+            if let Some(frame) = frame_of(&Event::Room(room)) {
+                write(&mut out, &frame).await?;
             }
         }
-        if let Some(frame) = frame_of(&Event::Ready)
-            && write(&mut out, &frame).await.is_err()
-        {
-            return;
+        if let Some(frame) = frame_of(&Event::Ready) {
+            write(&mut out, &frame).await?;
         }
         // Read after subscribing; the release check stores before it publishes, so a change
         // meanwhile arrives at least once.
@@ -100,9 +98,8 @@ async fn handle(state: State, mut request: IncomingRequest) {
             && let Some(frame) = frame_of(&Event::Release {
                 version: version.to_string(),
             })
-            && write(&mut out, &frame).await.is_err()
         {
-            return;
+            write(&mut out, &frame).await?;
         }
         tokio::pin!(gone);
         loop {
@@ -110,13 +107,16 @@ async fn handle(state: State, mut request: IncomingRequest) {
                 frame = sub.rx.recv() => frame,
                 () = &mut gone => None,
             };
-            let Some(frame) = frame else { return };
-            if write(&mut out, &frame).await.is_err() {
-                return;
-            }
+            let Some(frame) = frame else {
+                return Ok(());
+            };
+            write(&mut out, &frame).await?;
         }
     };
-    run.await;
+    let ended: Result<(), String> = run.await;
+    if let Err(reason) = ended {
+        tracing::debug!("event stream dropped: {reason}");
+    }
 
     if state.hub.unsubscribe(&member, sub.id) {
         let st = state.clone();
