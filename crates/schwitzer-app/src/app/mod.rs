@@ -93,7 +93,6 @@ pub enum Message {
     OpenNewTask {
         idea: bool,
     },
-    OpenSettings,
     /// Opens a page of Settings, or Settings itself, at its top.
     OpenPage(Page),
     /// Selects room `id` and opens its settings page.
@@ -1085,7 +1084,6 @@ impl App {
                 }
                 operation::focus("quick-idea")
             }
-            Message::OpenSettings => self.open_page(Page::Settings),
             Message::OpenPage(page) => self.open_page(page),
             Message::OpenRoom(id) => {
                 self.select(Some(id));
@@ -2166,7 +2164,7 @@ fn key_message(event: keyboard::Event) -> Option<Message> {
         Key::Named(Named::Tab) => Some(Message::FocusNext),
         Key::Character("n") if modifiers.command() => Some(Message::OpenNewTask { idea: false }),
         Key::Character("l") if modifiers.command() => Some(Message::FocusIdea),
-        Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
+        Key::Character(",") if modifiers.command() => Some(Message::OpenPage(Page::Settings)),
         _ => None,
     }
 }

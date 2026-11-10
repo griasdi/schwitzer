@@ -193,7 +193,7 @@ pub fn header(app: &App) -> Element<'_, Message> {
             Icon::Settings,
             Tone::Text,
             "Settings  (Ctrl+,)",
-            Some(Message::OpenSettings),
+            Some(Message::OpenPage(Page::Settings)),
             theme::button_ghost,
         ))
         .spacing(SP_1)
