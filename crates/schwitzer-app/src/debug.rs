@@ -41,6 +41,14 @@ pub struct SessionDirs {
     short: String,
 }
 
+/// One file in `in/`: the member folder it is in, its stream name and its size.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Received {
+    pub dir: String,
+    pub stream: String,
+    pub bytes: u64,
+}
+
 impl SessionDirs {
     pub fn new(data_dir: &Path, session: DebugId) -> Self {
         Self {
@@ -72,6 +80,32 @@ impl SessionDirs {
     /// [`Self::inbox`] relative to the data directory, with `/` separators.
     pub fn in_rel(&self) -> String {
         format!("{SESSIONS_DIR}/{}/{IN_DIR}", self.short)
+    }
+
+    /// The files received so far: the regular files of every member folder in `in/`, ordered by
+    /// folder and file name; empty while nothing arrived.
+    pub fn received(&self) -> Vec<Received> {
+        let inbox = self.inbox();
+        let Ok(entries) = fs::read_dir(&inbox) else {
+            return Vec::new();
+        };
+        let mut dirs: Vec<String> = entries
+            .flatten()
+            .filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .collect();
+        dirs.sort();
+        let mut received = Vec::new();
+        for dir in dirs {
+            for (stream, bytes) in files_in(&inbox.join(&dir), |_| true).unwrap_or_default() {
+                received.push(Received {
+                    dir: dir.clone(),
+                    stream,
+                    bytes,
+                });
+            }
+        }
+        received
     }
 }
 
@@ -117,10 +151,10 @@ pub struct Outbox {
     offsets: HashMap<String, u64>,
 }
 
-/// The regular files in `out` whose names can be sent as a stream, with their sizes, ordered
-/// by name; empty when the folder is missing.
-pub fn out_files(out: &Path) -> io::Result<Vec<(String, u64)>> {
-    let entries = match fs::read_dir(out) {
+/// The regular files directly in `dir` whose names `keep` accepts, with their sizes, ordered by
+/// name; empty when the folder is missing.
+fn files_in(dir: &Path, keep: impl Fn(&str) -> bool) -> io::Result<Vec<(String, u64)>> {
+    let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
@@ -131,7 +165,7 @@ pub fn out_files(out: &Path) -> io::Result<Vec<(String, u64)>> {
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
-        if !valid_stream_name(&name) {
+        if !keep(&name) {
             continue;
         }
         let meta = entry.metadata()?;
@@ -141,6 +175,12 @@ pub fn out_files(out: &Path) -> io::Result<Vec<(String, u64)>> {
     }
     files.sort();
     Ok(files)
+}
+
+/// The regular files in `out` whose names can be sent as a stream, with their sizes, ordered
+/// by name; empty when the folder is missing.
+pub fn out_files(out: &Path) -> io::Result<Vec<(String, u64)>> {
+    files_in(out, valid_stream_name)
 }
 
 impl Outbox {

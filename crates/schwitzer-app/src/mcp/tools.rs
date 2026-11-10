@@ -767,36 +767,6 @@ fn room_row(room: &RoomRef, me: MemberId, lanes: &FastLane) -> Value {
     })
 }
 
-/// The files directly in `dir` with their sizes, ordered by name; empty when it is missing.
-fn file_sizes(dir: &Path) -> Vec<(String, u64)> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut files: Vec<(String, u64)> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let meta = entry.metadata().ok().filter(std::fs::Metadata::is_file)?;
-            Some((entry.file_name().into_string().ok()?, meta.len()))
-        })
-        .collect();
-    files.sort();
-    files
-}
-
-/// The subfolders directly in `dir`, ordered by name.
-fn subdirs(dir: &Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut dirs: Vec<String> = entries
-        .flatten()
-        .filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir()))
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .collect();
-    dirs.sort();
-    dirs
-}
-
 /// The status of `room`'s debug session as `debug_status` shows it, with the folders relative
 /// to `data_dir` and the sizes of the files there.
 fn debug_status_json(room: &RoomRef, me: MemberId, data_dir: &Path) -> Value {
@@ -830,18 +800,18 @@ fn debug_status_json(room: &RoomRef, me: MemberId, data_dir: &Path) -> Value {
         .into_iter()
         .map(|(stream, bytes)| json!({"stream": stream, "bytes": bytes}))
         .collect();
-    let mut received = Vec::new();
-    let inbox = dirs.inbox();
-    for sub in subdirs(&inbox) {
-        let from = state
-            .members
-            .iter()
-            .find(|m| dir_of(&m.id) == sub)
-            .map_or_else(|| sub.clone(), |m| m.name.clone());
-        for (stream, bytes) in file_sizes(&inbox.join(&sub)) {
-            received.push(json!({"from": from, "dir": sub, "stream": stream, "bytes": bytes}));
-        }
-    }
+    let received: Vec<Value> = dirs
+        .received()
+        .into_iter()
+        .map(|file| {
+            let from = state
+                .members
+                .iter()
+                .find(|m| dir_of(&m.id) == file.dir)
+                .map_or_else(|| file.dir.clone(), |m| m.name.clone());
+            json!({"from": from, "dir": file.dir, "stream": file.stream, "bytes": file.bytes})
+        })
+        .collect();
     json!({
         "room": room.label(),
         "session": session.id.short(),
