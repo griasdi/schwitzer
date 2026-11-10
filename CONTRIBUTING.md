@@ -23,7 +23,7 @@ The server prints its URL (`server url: weida://sha256:…@host:port`) on stdout
 
 ## Before pushing
 
-GitHub Actions (`.github/workflows/ci.yml`) runs these checks on every push to `main` and every pull request, and app clippy and the updater tests on macOS and Windows. Run them before every commit that touches code all the same:
+GitHub Actions (`.github/workflows/ci.yml`) runs these checks on every push to `main` and every pull request, and app and release clippy, the updater tests and the `schwitzer-release` tests on macOS and Windows. Run them before every commit that touches code all the same:
 
 ```sh
 cargo fmt --all --check

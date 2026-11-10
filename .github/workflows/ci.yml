@@ -49,5 +49,6 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy -p schwitzer-app --all-targets --features self-update -- -D warnings
+      - run: cargo clippy -p schwitzer-app -p schwitzer-release --all-targets --features schwitzer-app/self-update -- -D warnings
       - run: 'cargo test -p schwitzer-app --bin schwitzer --features self-update update::'
+      - run: cargo test -p schwitzer-release
