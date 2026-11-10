@@ -603,7 +603,7 @@ pub fn delete_project(conn: &Connection, room: &RoomId, id: u64) -> R<()> {
 
 /// Moves a task into another project; any stage may move, so mixed rooms can be sorted out.
 pub fn move_task(conn: &Connection, room: &RoomId, number: u64, project: u64, now: u64) -> R<Task> {
-    require_task(conn, room, number)?;
+    require_task_exists(conn, room, number)?;
     require_project(conn, room, project)?;
     conn.execute(
         "UPDATE tasks SET project = ?3, updated_ms = ?4 WHERE room = ?1 AND number = ?2",
@@ -844,6 +844,19 @@ pub fn read_tasks(conn: &Connection, room: &RoomId) -> R<Vec<Task>> {
 /// The task, or `NoSuchTask`.
 fn require_task(conn: &Connection, room: &RoomId, number: u64) -> R<Task> {
     Ok(read_task(conn, room, number)?.ok_or(ApiError::NoSuchTask)?)
+}
+
+/// `NoSuchTask` unless the room has the task; loads nothing of it.
+fn require_task_exists(conn: &Connection, room: &RoomId, number: u64) -> R<()> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tasks WHERE room = ?1 AND number = ?2)",
+        params![room.as_bytes().as_slice(), int(number)],
+        |r| r.get(0),
+    )?;
+    if !exists {
+        return Err(ApiError::NoSuchTask.into());
+    }
+    Ok(())
 }
 
 /// `WrongStage` once the task is `Done` or `Rejected`.
@@ -1229,7 +1242,7 @@ pub fn set_priority(
     priority: Priority,
     now: u64,
 ) -> R<Task> {
-    require_task(conn, room, number)?;
+    require_task_exists(conn, room, number)?;
     conn.execute(
         "UPDATE tasks SET priority = ?3, updated_ms = ?4 WHERE room = ?1 AND number = ?2",
         params![
@@ -1461,7 +1474,7 @@ pub fn add_note(
     agent: Option<&str>,
     now: u64,
 ) -> R<Task> {
-    require_task(conn, room, number)?;
+    require_task_exists(conn, room, number)?;
     append_note(conn, room, number, member, agent, text, now)?;
     touch(conn, room, number, now)?;
     require_task(conn, room, number)
@@ -1469,7 +1482,7 @@ pub fn add_note(
 
 /// The stored versions of `part` of a task, newest first.
 pub fn history(conn: &Connection, room: &RoomId, number: u64, part: Part) -> R<Vec<Revision>> {
-    require_task(conn, room, number)?;
+    require_task_exists(conn, room, number)?;
     let mut stmt = conn.prepare(
         "SELECT version, author, agent, at_ms, title, text FROM versions
          WHERE room = ?1 AND number = ?2 AND part = ?3 ORDER BY version DESC",
@@ -1627,7 +1640,7 @@ pub fn discard_suggestion(
     id: u64,
     now: u64,
 ) -> R<Task> {
-    require_task(conn, room, number)?;
+    require_task_exists(conn, room, number)?;
     suggestion(conn, room, number, id)?;
     delete_suggestion(conn, id)?;
     touch(conn, room, number, now)?;
@@ -1684,7 +1697,7 @@ pub fn resolve_annotation(
     resolved: bool,
     now: u64,
 ) -> R<Task> {
-    require_task(conn, room, number)?;
+    require_task_exists(conn, room, number)?;
     let changed = conn.execute(
         "UPDATE annotations SET resolved = ?4 WHERE id = ?1 AND room = ?2 AND number = ?3",
         params![int(id), room.as_bytes().as_slice(), int(number), resolved],
