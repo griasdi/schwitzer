@@ -302,7 +302,8 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |`revisions.rs`|no view: loading the history and a suggestion, selecting and restoring a version, applying or discarding (`impl App`), and `settle_revisions`, which closes the page when its task or suggestion goes, reloads a history a new version made stale and recomputes a suggestion's diff|
 |`reading.rs`|task text set for reading: the Markdown viewer of the open task with its blocks and their comments, and the full-window reading page|
 |`annotations.rs`|no view: comments on blocks of the open task (`impl App`: open the editor under a block, save, resolve, reopen); `reading.rs` draws the blocks with their comments|
-|`projects.rs`|no view: creating and joining a room, creating, renaming and deleting a project, the projects folders and the repos linked to a project (`impl App`)|
+|`projects.rs`|no view: creating, joining, leaving and removing a room, creating, renaming and deleting a project, the projects folders and the folder dialog, the repos linked to a project, the commit trailer switch (`impl App`)|
+|`fast_lane.rs`|no view: the fast lane switches of a project and a task, the plugin's switch of a task, and `change_lanes`, the one place that changes the lanes in the settings and in the copy the MCP tools read (`impl App`)|
 |`widgets.rs`|lamps, pills, buttons and other shared widgets: the `bar` strip of headers and footers, `segment`, `group_head` and `fold_button`, `member_tag_of`, `byline`, `confirm_row`|
 |`plugins.rs`|no view: the omp plugin in the shared repos (`impl App`: install, update, remove, the periodic `check_plugins`, `sync_plugins`)|
 |`updates.rs`|no view: the self-update (`impl App`: which release to look for, the check, the install, the channel and what follows)|

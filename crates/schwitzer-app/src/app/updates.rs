@@ -179,4 +179,27 @@ impl App {
         }
         Task::none()
     }
+
+    /// Turns the automatic install of a found update on or off.
+    pub(super) fn set_auto_install_updates(&mut self, on: bool) -> Task<Message> {
+        self.settings.auto_install_updates = on;
+        self.save_settings();
+        match &self.updater {
+            UpdateState::Available {
+                release,
+                error: None,
+            } if on => {
+                let release = release.clone();
+                self.install_update(release)
+            }
+            _ => Task::none(),
+        }
+    }
+
+    /// Turns the automatic restart after an install on or off.
+    pub(super) fn set_auto_restart_updates(&mut self, on: bool) -> Task<Message> {
+        self.settings.auto_restart_updates = on;
+        self.save_settings();
+        Task::none()
+    }
 }

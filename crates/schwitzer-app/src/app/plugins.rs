@@ -4,9 +4,10 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use iced::Task;
 use schwitzer_proto::{RoomId, now_ms};
 
-use super::App;
+use super::{App, Message};
 use crate::omp_plugin::{self, PluginState};
 use crate::{mcp, wsl};
 
@@ -211,5 +212,30 @@ impl App {
                 self.banner = Some(format!("omp plugin in {}: {e}", repo.display()));
             }
         }
+    }
+
+    /// Installs the plugin into repo `index`.
+    pub(super) fn install_plugin(&mut self, index: usize) -> Task<Message> {
+        self.write_plugin(index, Write::Install);
+        // Installed: the prompt is done for good, also once the plugin is removed again.
+        if self
+            .plugin_prompt
+            .as_ref()
+            .is_some_and(|repo| self.plugins.contains_key(repo))
+        {
+            self.plugin_prompt = None;
+        }
+        Task::none()
+    }
+
+    /// Turns the automatic plugin update on or off.
+    pub(super) fn set_auto_update_plugins(&mut self, on: bool) -> Task<Message> {
+        self.settings.auto_update_plugins = on;
+        self.save_settings();
+        if on {
+            self.auto_failed.clear();
+            self.check_plugins();
+        }
+        Task::none()
     }
 }

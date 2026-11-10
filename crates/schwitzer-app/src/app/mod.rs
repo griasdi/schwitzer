@@ -4,6 +4,7 @@ mod annotations;
 mod chrome;
 mod debug_session;
 mod debug_view;
+mod fast_lane;
 mod gpu;
 mod icons;
 mod licenses_view;
@@ -53,7 +54,7 @@ use crate::debug;
 use crate::mcp::{self, McpStatus};
 use crate::omp_plugin::PluginState;
 use crate::sessions::{self, LocalSession};
-use crate::settings::{self, Lanes, Settings};
+use crate::settings::{self, Settings};
 use crate::system_notify;
 use crate::theme::{self, SP_2};
 use crate::update::{self, UpdateState};
@@ -969,9 +970,7 @@ impl App {
                 Task::none()
             }
             Message::Mcp(mcp::McpEvent::FastLaneTask { room, task, on }) => {
-                self.change_lanes(|lanes| lanes.set_task(&room, task, on));
-                self.save_settings();
-                Task::none()
+                self.plugin_fast_lane_task(room, task, on)
             }
             Message::Noop => Task::none(),
             Message::OpenLink(url) => {
@@ -1021,26 +1020,9 @@ impl App {
                 self.restart(focus.as_ref(), placement);
                 Task::none()
             }
-            Message::AutoInstallUpdates(on) => {
-                self.settings.auto_install_updates = on;
-                self.save_settings();
-                match &self.updater {
-                    UpdateState::Available {
-                        release,
-                        error: None,
-                    } if on => {
-                        let release = release.clone();
-                        self.install_update(release)
-                    }
-                    _ => Task::none(),
-                }
-            }
+            Message::AutoInstallUpdates(on) => self.set_auto_install_updates(on),
             Message::UpdateChannel(channel) => self.set_update_channel(channel),
-            Message::AutoRestartUpdates(on) => {
-                self.settings.auto_restart_updates = on;
-                self.save_settings();
-                Task::none()
-            }
+            Message::AutoRestartUpdates(on) => self.set_auto_restart_updates(on),
             Message::ResumeFocus(shown) => {
                 if shown {
                     self.apply_pending_focus()
@@ -1209,37 +1191,9 @@ impl App {
                 }
                 None => Task::none(),
             },
-            Message::LeaveRoom => {
-                self.confirm = None;
-                match self.selected {
-                    Some(room) => {
-                        let client = self.client.clone();
-                        call(async move { client.leave_room(room).await }, Message::Left)
-                    }
-                    None => Task::none(),
-                }
-            }
-            Message::Left(result) => match result {
-                Ok(()) => {
-                    self.sync_rooms();
-                    self.notify("Room left");
-                    self.leave_room_page()
-                }
-                Err(e) => {
-                    self.banner = Some(e);
-                    Task::none()
-                }
-            },
-            Message::RemoveRoom => {
-                self.confirm = None;
-                let Some(room) = self.selected else {
-                    return Task::none();
-                };
-                self.client.forget_room(room);
-                self.sync_rooms();
-                self.notify("Room removed from this app");
-                self.leave_room_page()
-            }
+            Message::LeaveRoom => self.leave_room(),
+            Message::Left(result) => self.room_left(result),
+            Message::RemoveRoom => self.remove_room(),
             Message::DebugStart => self.debug_start(),
             Message::DebugJoin => self.debug_join(),
             Message::DebugLeave => self.debug_leave(),
@@ -1267,57 +1221,10 @@ impl App {
             }
             Message::AddRepo => self.add_repo(),
             Message::LinkRepo(path) => self.link_repo(path).unwrap_or_else(Task::none),
-            Message::ChooseFolder(for_) => {
-                if self.folder_dialog {
-                    return Task::none();
-                }
-                self.folder_dialog = true;
-                let (title, typed) = match for_ {
-                    FolderFor::Repo => ("Choose a repo", self.forms.repo.trim()),
-                    FolderFor::ProjectsDir => (
-                        "Choose a projects folder",
-                        self.forms.new_projects_dir.trim(),
-                    ),
-                };
-                let typed = settings::expand_home(typed);
-                let start = if typed.is_dir() {
-                    Some(typed)
-                } else {
-                    match for_ {
-                        FolderFor::Repo => self.searched_dirs().first().map(|p| p.to_path_buf()),
-                        FolderFor::ProjectsDir => settings::home_dir(),
-                    }
-                };
-                Task::perform(choose_folder(title, start), move |path| {
-                    Message::FolderChosen(for_, path)
-                })
-            }
-            Message::FolderChosen(for_, path) => {
-                self.folder_dialog = false;
-                let Some(path) = path else {
-                    return Task::none();
-                };
-                match for_ {
-                    FolderFor::Repo => self.link_repo(path).unwrap_or_else(Task::none),
-                    FolderFor::ProjectsDir => {
-                        self.add_projects_dir(path);
-                        Task::none()
-                    }
-                }
-            }
+            Message::ChooseFolder(for_) => self.open_folder_dialog(for_),
+            Message::FolderChosen(for_, path) => self.folder_chosen(for_, path),
             Message::RemoveRepo(index) => self.remove_repo(index),
-            Message::InstallPlugin(index) => {
-                self.write_plugin(index, plugins::Write::Install);
-                // Installed: the prompt is done for good, also once the plugin is removed again.
-                if self
-                    .plugin_prompt
-                    .as_ref()
-                    .is_some_and(|repo| self.plugins.contains_key(repo))
-                {
-                    self.plugin_prompt = None;
-                }
-                Task::none()
-            }
+            Message::InstallPlugin(index) => self.install_plugin(index),
             Message::SkipPluginPrompt => {
                 self.plugin_prompt = None;
                 Task::none()
@@ -1334,15 +1241,7 @@ impl App {
                 self.update_all_plugins();
                 Task::none()
             }
-            Message::AutoUpdatePlugins(on) => {
-                self.settings.auto_update_plugins = on;
-                self.save_settings();
-                if on {
-                    self.auto_failed.clear();
-                    self.check_plugins();
-                }
-                Task::none()
-            }
+            Message::AutoUpdatePlugins(on) => self.set_auto_update_plugins(on),
             Message::NotifyHandIns(on) => {
                 self.settings.notify_hand_ins = on;
                 self.save_settings();
@@ -1353,40 +1252,9 @@ impl App {
                 self.save_settings();
                 Task::none()
             }
-            Message::CommitTrailers(on) => {
-                if let Some((room, project)) = self.selected_ids() {
-                    self.settings.set_commit_trailer(&room, project, on);
-                    self.save_settings();
-                    self.write_plugin_configs(&room, project);
-                }
-                Task::none()
-            }
-            Message::FastLane(on) => {
-                if let Some((room, project)) = self.selected_ids() {
-                    self.change_lanes(|lanes| lanes.set_project(&room, project, on));
-                    self.save_settings();
-                }
-                Task::none()
-            }
-            Message::FastLaneTask(number) => {
-                let Some(room) = self.selected else {
-                    return Task::none();
-                };
-                let on = !self.settings.lanes.task(&room, number);
-                self.change_lanes(|lanes| lanes.set_task(&room, number, on));
-                self.save_settings();
-                let proposed = self.selected_state().is_some_and(|state| {
-                    state
-                        .tasks
-                        .iter()
-                        .any(|t| t.number == number && t.stage == schwitzer_proto::Stage::Proposed)
-                });
-                if on && proposed {
-                    Task::done(Message::Decide(number, Decision::Accept))
-                } else {
-                    Task::none()
-                }
-            }
+            Message::CommitTrailers(on) => self.set_commit_trailers(on),
+            Message::FastLane(on) => self.set_project_fast_lane(on),
+            Message::FastLaneTask(number) => self.toggle_task_fast_lane(number),
 
             Message::SelectProject(id) => {
                 self.show_project(id);
@@ -2002,15 +1870,6 @@ impl App {
         });
     }
 
-    /// Applies `change` to this member's fast lanes in the settings and in the copy the MCP
-    /// tools read, and returns what it returns for the settings. Every change of the lanes goes
-    /// through here, so the two never differ for longer than a flag the plugin set a moment ago.
-    /// The caller saves the settings.
-    fn change_lanes<R>(&mut self, change: impl Fn(&mut Lanes) -> R) -> R {
-        self.fast_lane.change(&change);
-        change(&mut self.settings.lanes)
-    }
-
     /// Writes `settings.toml` when something changed since it was last read or written.
     /// Changed repos or a changed MCP port also rewrite the omp plugins. On the first-start page
     /// the projects folders and the entered WSL distros are held back.
@@ -2091,26 +1950,6 @@ fn key_message(event: keyboard::Event) -> Option<Message> {
         Key::Character(",") if modifiers.command() => Some(Message::OpenPage(Page::Settings)),
         _ => None,
     }
-}
-
-/// Env var a headless instance answers the folder dialog with (it never opens one).
-#[cfg(feature = "remote")]
-const PICK_FOLDER_ENV: &str = "SCHWITZER_PICK_FOLDER";
-
-/// Asks the user for a folder, starting in `start`; `None` when cancelled. A headless
-/// instance opens no dialog: it answers with `$SCHWITZER_PICK_FOLDER`, or `None` when unset.
-async fn choose_folder(title: &'static str, start: Option<PathBuf>) -> Option<PathBuf> {
-    #[cfg(feature = "remote")]
-    if iced_impeccable::is_headless() {
-        return std::env::var_os(PICK_FOLDER_ENV)
-            .filter(|p| !p.is_empty())
-            .map(PathBuf::from);
-    }
-    let mut dialog = rfd::AsyncFileDialog::new().set_title(title);
-    if let Some(start) = start {
-        dialog = dialog.set_directory(start);
-    }
-    dialog.pick_folder().await.map(|f| f.path().to_path_buf())
 }
 
 /// A start that cannot continue: no data directory, no identity.
