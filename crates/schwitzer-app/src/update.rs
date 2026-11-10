@@ -27,7 +27,6 @@ const MAX_RELEASE_JSON: u64 = 1 << 20;
 const MAX_ARCHIVE: u64 = 256 << 20;
 /// The program name in the user agent sent to GitHub.
 const PROGRAM: &str = "schwitzer";
-const ARCHIVE_EXT: &str = if cfg!(windows) { "zip" } else { "tar.gz" };
 /// The file the updater takes out of the archive, at any depth.
 const BINARY: &str = if cfg!(windows) {
     "schwitzer.exe"
@@ -130,7 +129,7 @@ pub enum UpdateState {
 fn package_ext(package: Package) -> &'static str {
     match package {
         Package::AppImage => "AppImage",
-        Package::Archive => ARCHIVE_EXT,
+        Package::Archive => schwitzer_release::ARCHIVE_EXT,
     }
 }
 
@@ -205,7 +204,7 @@ pub async fn install(release: Release, program: Program) -> Result<semver::Versi
         let bytes = schwitzer_release::fetch(PROGRAM, &release.download, MAX_ARCHIVE)?;
         let binary = match program.package {
             Package::AppImage => bytes,
-            Package::Archive => extract(&bytes)?,
+            Package::Archive => schwitzer_release::extract_archive(&bytes, BINARY, MAX_ARCHIVE)?,
         };
         replace(&program.path, &binary)
             .map_err(|e| format!("cannot replace {}: {e}", program.path.display()))?;
@@ -271,14 +270,6 @@ fn fetch_release(
             ApiError::Failed(message) => message,
         })?;
     parse_release(&json, &current, platform, package)
-}
-
-/// The program file in the release archive `bytes`.
-fn extract(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    #[cfg(unix)]
-    return schwitzer_release::extract_tar_gz(bytes, BINARY, MAX_ARCHIVE);
-    #[cfg(windows)]
-    return schwitzer_release::extract_zip(bytes, BINARY, MAX_ARCHIVE);
 }
 
 #[cfg(test)]

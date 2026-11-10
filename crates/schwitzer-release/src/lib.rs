@@ -312,7 +312,7 @@ pub fn extract_tar_gz(bytes: &[u8], name: &str, limit: u64) -> Result<Vec<u8>, S
 
 /// The regular file named `name` at any depth of the `.zip` `bytes`, at most `limit` bytes of it.
 #[cfg(windows)]
-pub fn extract_zip(bytes: &[u8], name: &str, limit: u64) -> Result<Vec<u8>, String> {
+fn extract_zip(bytes: &[u8], name: &str, limit: u64) -> Result<Vec<u8>, String> {
     let mut archive = zip::ZipArchive::new(io::Cursor::new(bytes)).map_err(unreadable)?;
     for index in 0..archive.len() {
         let file = archive.by_index(index).map_err(unreadable)?;
@@ -329,6 +329,18 @@ pub fn extract_zip(bytes: &[u8], name: &str, limit: u64) -> Result<Vec<u8>, Stri
         }
     }
     Err(format!("the archive holds no {name}"))
+}
+
+/// The file extension of the archive release assets of this platform.
+pub const ARCHIVE_EXT: &str = if cfg!(windows) { "zip" } else { "tar.gz" };
+
+/// The regular file named `name` at any depth of the archive `bytes` of this platform
+/// ([`ARCHIVE_EXT`]), at most `limit` bytes of it.
+pub fn extract_archive(bytes: &[u8], name: &str, limit: u64) -> Result<Vec<u8>, String> {
+    #[cfg(unix)]
+    return extract_tar_gz(bytes, name, limit);
+    #[cfg(windows)]
+    return extract_zip(bytes, name, limit);
 }
 
 /// `exe` with `suffix` appended to its file name.
