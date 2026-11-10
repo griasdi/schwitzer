@@ -201,18 +201,16 @@ impl Coverage {
 /// Whether everything [`install`] would write into `repo` is already there.
 fn matches(repo: &Path, config: &PluginConfig) -> bool {
     let dir = plugin_dir(repo);
-    let holds =
-        |name: &str, bytes: &[u8]| std::fs::read(dir.join(name)).is_ok_and(|old| old == bytes);
-    let (Ok(package), Ok(config_json)) = (pretty(&package()), pretty(config)) else {
+    let Ok(files) = files(config) else {
         return false;
     };
-    if !holds("index.ts", INDEX_TS.as_bytes())
-        || !holds("package.json", package.as_bytes())
-        || !holds(CONFIG_FILE, config_json.as_bytes())
+    if !files
+        .iter()
+        .all(|(name, bytes)| std::fs::read(dir.join(name)).is_ok_and(|old| old == *bytes))
     {
         return false;
     }
-    match read_json(&lock_path(repo), "plugins", "an omp plugin lock file") {
+    match read_lock(repo) {
         Ok(Some(lock)) => {
             lock.get("plugins")
                 .and_then(|plugins| plugins.get(NAME))
@@ -221,6 +219,15 @@ fn matches(repo: &Path, config: &PluginConfig) -> bool {
         }
         _ => false,
     }
+}
+
+/// The files [`install`] writes into the plugin's directory, by name.
+fn files(config: &PluginConfig) -> io::Result<[(&'static str, Vec<u8>); 3]> {
+    Ok([
+        ("index.ts", INDEX_TS.as_bytes().to_vec()),
+        ("package.json", pretty(&package())?.into_bytes()),
+        (CONFIG_FILE, pretty(config)?.into_bytes()),
+    ])
 }
 
 /// The plugin's `package.json`.
@@ -237,9 +244,8 @@ fn package() -> Value {
 /// Writes the plugin into `repo` and enables it in the lock file. A lock file that is not an
 /// omp lock file is an error, and then nothing is written.
 pub fn install(repo: &Path, config: &PluginConfig) -> io::Result<()> {
-    let lock_path = lock_path(repo);
-    let mut lock = read_json(&lock_path, "plugins", "an omp plugin lock file")?.unwrap_or_default();
-    // `read_json` accepts only an object as `plugins`.
+    let mut lock = read_lock(repo)?.unwrap_or_default();
+    // `read_lock` accepts only an object as `plugins`.
     if let Some(plugins) = lock
         .entry("plugins")
         .or_insert_with(|| Value::Object(Map::new()))
@@ -256,12 +262,13 @@ pub fn install(repo: &Path, config: &PluginConfig) -> io::Result<()> {
     lock.entry("settings")
         .or_insert_with(|| Value::Object(Map::new()));
 
+    let files = files(config)?;
     let dir = plugin_dir(repo);
     std::fs::create_dir_all(&dir)?;
-    write_if_changed(&dir.join("index.ts"), INDEX_TS.as_bytes())?;
-    write_if_changed(&dir.join("package.json"), pretty(&package())?.as_bytes())?;
-    write_if_changed(&dir.join(CONFIG_FILE), pretty(config)?.as_bytes())?;
-    write_json(&lock_path, lock)?;
+    for (name, bytes) in &files {
+        write_if_changed(&dir.join(name), bytes)?;
+    }
+    write_json(&lock_path(repo), lock)?;
     Ok(())
 }
 
@@ -281,16 +288,21 @@ pub fn uninstall(repo: &Path) -> io::Result<()> {
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;
     }
-    let lock_path = lock_path(repo);
-    if let Ok(Some(mut lock)) = read_json(&lock_path, "plugins", "an omp plugin lock file") {
+    if let Ok(Some(mut lock)) = read_lock(repo) {
         for section in ["plugins", "settings"] {
             if let Some(Value::Object(entries)) = lock.get_mut(section) {
                 entries.remove(NAME);
             }
         }
-        write_json(&lock_path, lock)?;
+        write_json(&lock_path(repo), lock)?;
     }
     Ok(())
+}
+
+/// The omp lock file of `repo`; `None` when it does not exist, an error when it is not an omp
+/// plugin lock file.
+fn read_lock(repo: &Path) -> io::Result<Option<Map<String, Value>>> {
+    read_json(&lock_path(repo), "plugins", "an omp plugin lock file")
 }
 
 /// The JSON file at `path` as an object whose `section` is missing or an object; `None` when
