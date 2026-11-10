@@ -1015,8 +1015,7 @@ function planMode(ctx: Ctx): boolean {
  *  is none; puts the prompt in the editor, or with `now` starts the work at once. Several tasks to
  *  plan each get their own omp session in a new tab (`openPlanSessions`). */
 async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, numbers: number[], now: boolean): Promise<void> {
-  const planning = planMode(ctx);
-  if (work === "build" && planning) {
+  if (work === "build" && planMode(ctx)) {
     ctx.ui.notify(LEAVE_PLAN_MODE, "info");
     return;
   }
@@ -1035,7 +1034,7 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, numbers: 
       return;
     }
     const numbered = await pickNumbered(ctx, free, title);
-    if (numbered) await claimPicked(pi, ctx, config, numbered, work, planning, now);
+    if (numbered) await claimPicked(pi, ctx, config, numbered, work, now);
     return;
   }
   const open = await unclaimed(config, STAGE[work]);
@@ -1065,13 +1064,13 @@ async function claimTask(pi: Pi, ctx: Ctx, config: Config, work: Work, numbers: 
       .map((label) => labels.indexOf(label))
       .filter((i) => i >= 0)
       .map((i) => open[i]);
-    if (picked.length === 1) await claimPicked(pi, ctx, config, picked[0], "plan", planning, now);
+    if (picked.length === 1) await claimPicked(pi, ctx, config, picked[0], "plan", now);
     else if (picked.length >= 2) await openPlanSessions(ctx, picked.map((c) => c.task.number));
     return;
   }
   const picked = await choose(ctx, title, labels, open);
   if (!picked) return;
-  await claimPicked(pi, ctx, config, picked, work, planning, now);
+  await claimPicked(pi, ctx, config, picked, work, now);
 }
 
 /** Why none of `found` (the tasks of one number) can be claimed for `work`. */
@@ -1097,15 +1096,7 @@ async function planNumbered(ctx: Ctx, config: Config, numbers: number[]): Promis
 
 /** Claims `picked` for `work`, sends the task as the next turn's message and puts the prompt in
  *  the editor, or with `now` sends it at once. */
-async function claimPicked(
-  pi: Pi,
-  ctx: Ctx,
-  config: Config,
-  picked: Candidate,
-  work: Work,
-  planning: boolean,
-  now: boolean,
-): Promise<void> {
+async function claimPicked(pi: Pi, ctx: Ctx, config: Config, picked: Candidate, work: Work, now: boolean): Promise<void> {
   const got = await claimFor(config, picked.room, picked.projectName, picked.task.number, work);
   if ("refused" in got) {
     ctx.ui.notify(`Schwitzer: ${got.refused}`, "info");
@@ -1128,8 +1119,8 @@ async function claimPicked(
   // The marker must sit in a user message: that is where the app's session scanner looks.
   const verb = work === "plan" ? "Plan" : "Build";
   const prompt = `${verb} Schwitzer task #${claim.task} "${claim.title}" from project "${claim.projectName}" in room "${claim.roomName}". schwitzer-claim: ${marker}`;
-  if (now && (await startNow(pi, ctx, work, planning, prompt, claim.task))) return;
-  ctx.ui.setEditorText(work === "build" || planning ? prompt : `/plan ${prompt}`);
+  if (now && (await startNow(pi, ctx, work, prompt, claim.task))) return;
+  ctx.ui.setEditorText(work === "plan" && !planMode(ctx) ? `/plan ${prompt}` : prompt);
   ctx.ui.notify(
     `Task #${claim.task} is claimed for ${work === "plan" ? "planning" : "building"}. Press Enter to start.`,
     "info",
@@ -1139,8 +1130,8 @@ async function claimPicked(
 /** `now`: starts the claimed work at once (plan mode on for a plan, the prompt sent) instead of
  *  leaving it in the editor. False when omp cannot enter plan mode here (no TUI, setting off,
  *  busy); the caller then puts the prompt in the editor. */
-async function startNow(pi: Pi, ctx: Ctx, work: Work, planning: boolean, prompt: string, task: number): Promise<boolean> {
-  if (work === "plan" && !planning) {
+async function startNow(pi: Pi, ctx: Ctx, work: Work, prompt: string, task: number): Promise<boolean> {
+  if (work === "plan" && !planMode(ctx)) {
     const entered = await ctx.sessionModes?.set({ mode: "plan", action: "enter" });
     if (!entered?.ok) return false;
   }
@@ -1232,7 +1223,7 @@ async function offerNext(pi: Pi, ctx: Ctx): Promise<void> {
         ctx.ui.notify(LEAVE_PLAN_MODE, "info");
         return;
       }
-      await claimPicked(pi, ctx, config, next, "build", false, false);
+      await claimPicked(pi, ctx, config, next, "build", false);
     }
   } catch (e) {
     reportError(ctx, e);
@@ -1811,13 +1802,13 @@ async function fastTask(pi: Pi, ctx: Ctx, config: Config, c: Candidate): Promise
       return;
     case "proposed": {
       const task = (await decide(config, c.room, n, "accept")) as unknown as TaskRow;
-      await claimPicked(pi, ctx, config, { ...c, task }, "plan", planMode(ctx), true);
+      await claimPicked(pi, ctx, config, { ...c, task }, "plan", true);
       return;
     }
     case "accepted": {
       const why = notClaimable(c.task, "plan");
       if (why) ctx.ui.notify(`Schwitzer: #${n} is in the fast lane. ${why}`, "info");
-      else await claimPicked(pi, ctx, config, c, "plan", planMode(ctx), true);
+      else await claimPicked(pi, ctx, config, c, "plan", true);
       return;
     }
     case "planned":
@@ -1828,7 +1819,7 @@ async function fastTask(pi: Pi, ctx: Ctx, config: Config, c: Candidate): Promise
       return;
     case "ready":
       if (planMode(ctx)) ctx.ui.notify(LEAVE_PLAN_MODE, "info");
-      else await claimPicked(pi, ctx, config, c, "build", false, true);
+      else await claimPicked(pi, ctx, config, c, "build", true);
       return;
     default:
       ctx.ui.notify(`#${n} is in the fast lane; it is already being built.`, "info");
