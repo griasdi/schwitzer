@@ -24,7 +24,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 
 ## 1. Principles
 
-- **Humans decide, agents work.** `Decision::{Accept, Reject, Approve, Replan, Reopen, MarkPlanned, MarkDone}` are buttons in the app (`crates/schwitzer-app/src/app/task_view.rs`, `actions`); the MCP tools never build a `Request::Decide` (`crates/schwitzer-app/src/mcp/tools.rs`). The server itself has no roles: any member may send any request (`store::require_member` only checks membership). The rule lives in the app.
+- **Humans decide, agents work.** `Decision::{Accept, Reject, Approve, Replan, Reopen, MarkPlanned, MarkDone}` are buttons in the app (`crates/schwitzer-app/src/app/task_view.rs`, `actions`; the request is built in `app/tasks.rs`) or the omp plugin's dialogs for the human, which reach the app through plugin-only tools (`decide`, `settle_suggestion`, `crates/schwitzer-app/src/mcp/tools.rs`); agents get no tool that decides. From omp, approve is always allowed and every other decision only in the fast lane (§12). The server itself has no roles: any member may send any request (`store::require_member` only checks membership). The rule lives in the app.
 - **A key is a member.** There are no accounts. A `MemberId` is the SHA-256 fingerprint of the app's weida key (`crates/schwitzer-server/src/auth.rs`, `caller`). A room is joined by holding its `RoomToken`; the server knows the room only as `RoomId = blake3(token)` (`crates/schwitzer-proto/src/ids.rs`).
 - **One mutation, one transaction, events in commit order.** `crates/schwitzer-server/src/rpc.rs` (`in_room`, under `mutate` and the other room mutations) runs the change in one SQLite transaction, commits, and publishes the events to the hub while it still holds the store lock.
 - **Nothing leaves the machine unless the member set it up.** Agent sessions are shared only from repos linked to a project; the MCP server listens on loopback only, behind a bearer token, and refuses any request with an `Origin` header.
@@ -36,7 +36,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |Component|Runs where|Role|Talks to|
 |---|---|---|---|
 |`schwitzer` desktop app|each member's machine (Linux, Windows, macOS)|task list, decisions, settings; MCP server for the member's agents; session scanner; plugin keeper; self-update|room servers over weida/QUIC; omp through the plugin files and the MCP server; GitHub over HTTPS|
-|omp + the Schwitzer plugin|the member's machine, in every repo linked to a project|the coding agent; `/schwitzer plan · build · propose · idea · debug · revise` (short `/sw`) and the `schwitzer_*` tools|the app's MCP server on `127.0.0.1`|
+|omp + the Schwitzer plugin|the member's machine, in every repo linked to a project|the coding agent; `/schwitzer plan · build · propose · idea · debug · revise · decide · fast` (short `/sw`) and the `schwitzer_*` tools|the app's MCP server on `127.0.0.1`|
 |`schwitzer-server`|anyone's host, UDP (default `0.0.0.0:7444`)|rooms, projects, tasks, claims, notes; fans out events; holds live sessions in memory; announces the newest stable release|apps over weida/QUIC; the GitHub releases API|
 |stkn.org|the shared server, `weida://…@stkn.org:7444`|`schwitzer-server --auto-update` as the systemd user unit `schwitzer-server`, set up once by the maintainer with `deploy/deploy.sh stkn`; it installs every published release itself (release channel); other people use it, so a protocol break cuts off their older apps until they update|apps|
 |GitHub Releases + releases API|github.com|release assets with sha256 digests; the server polls `RELEASES_URL` every 120 s, the app downloads from it|apps, servers|
@@ -51,7 +51,7 @@ Related: [README.md](../README.md) (using it), [PRODUCT.md](../PRODUCT.md) (what
 |`schwitzer-server`|the `schwitzer-server` binary and `start(Options)`; `rpc.rs`, `events.rs`, `hub.rs`, `debug.rs`, `limit.rs` (the request budget and the debug log `ByteBudget`), `release.rs`, `update.rs`, `store.rs`, `auth.rs`|the app, MCP, omp|
 |`schwitzer-client`|`Client` with its own runtimes, the per-server sync loop (`sync.rs`), `ClientEvent`, `ClientError`|iced, settings, MCP|
 |`schwitzer-release`|what both updaters share: `RELEASES_URL`, `PLATFORM`, `GitHubRelease`, `Asset`/`Download` with the `sha256:` digest parsing, `parse_tag`/`is_stable`, `VERSION`/`version()`/`user_agent(program)` (this build's version: `SCHWITZER_VERSION` at build time, else the workspace version), `is_update` (newer always, older only across stable/dev), `Channel` (`release`/`dev`), `DEV_TAG`, `newest_asset`, `api_get`, `api_get_dev` and `fetch` (bounded HTTPS download, then the size and sha256 check), `extract_tar_gz`/`extract_zip` (Windows), `sibling`, `replace` (Unix swap; Windows swap through `.old`), `clean_leftovers`|iced, SQLite, weida, tokio|
-|`schwitzer-app`|the `schwitzer` binary: UI, MCP server, plugin writer, session scanner, debug session worker (`debug.rs`), updater, WSL support|SQLite, weida: it talks to room servers only through `schwitzer-client`; the self-update speaks HTTPS to GitHub itself (§10)|
+|`schwitzer-app`|the `schwitzer` binary: UI, MCP server, plugin writer, session scanner, debug session worker (`debug.rs`), updater, WSL support|SQLite, weida: it talks to room servers only through `schwitzer-client`; the self-update reaches GitHub only through `schwitzer-release` (`api_get`, `fetch`; §10)|
 
 ```mermaid
 flowchart LR
@@ -159,7 +159,7 @@ weida is a QUIC framework with mutual TLS; Schwitzer pins it to an exact version
 
 The client holds one `Requester` per endpoint, so two QUIC connections per server (`conn.rs`).
 
-`Request` has 32 variants:
+`Request` has 35 variants:
 
 |Group|Variants|
 |---|---|
@@ -169,6 +169,7 @@ The client holds one `Requester` per endpoint, so two QUIC connections per serve
 |revisions|`SuggestRevision` (an agent's whole new text of the details or the plan, written on a version; changes nothing), `ApplySuggestion`, `DiscardSuggestion` (UI only), `History` and `GetSuggestion` (read only, no event)|
 |comments|`Annotate` (a member's comment on one block of the details or the plan; not once the task is Done or Rejected), `ResolveAnnotation` (resolve or reopen, in every stage); both UI only|
 |decisions|`Decide`|
+|votes|`Vote` (an upvote on an idea or taking it back; only while the task is an Idea; UI only)|
 |work|`Claim`, `SubmitPlan`, `Finish`, `Unclaim`|
 |projects|`CreateProject`, `RenameProject`, `DeleteProject` (only a project without tasks in any stage; its id is never given again)|
 |live|`PublishSessions`|
@@ -370,17 +371,17 @@ A bad `settings.toml` loads as defaults with a notice and is not overwritten unt
 
 |Piece|Where|Job|
 |---|---|---|
-|omp plugin|`.omp/plugins/node_modules/schwitzer/` in each linked repo; source `crates/schwitzer-app/omp-plugin/index.ts`|`/schwitzer` command (`plan · build · propose · idea · debug · revise`, short `/sw`), `schwitzer_*` tools, plan review hook, projects hint, cross-project edit guard|
-|MCP server|`crates/schwitzer-app/src/mcp/serve.rs`, `mcp/tools.rs`|the thirteen agent tools and four plugin-only debug tools (§9.4), on `127.0.0.1:<mcp_port>/mcp`|
+|omp plugin|`.omp/plugins/node_modules/schwitzer/` in each linked repo; source `crates/schwitzer-app/omp-plugin/index.ts`|`/schwitzer` command (`plan · build · propose · idea · debug · revise · decide · fast`, short `/sw`), `schwitzer_*` tools, plan review hook, projects hint, cross-project edit guard|
+|MCP server|`crates/schwitzer-app/src/mcp/serve.rs`, `mcp/tools.rs`|the thirteen agent tools and nine plugin-only tools (§9.4), on `127.0.0.1:<mcp_port>/mcp`|
 |plugin keeper|`crates/schwitzer-app/src/omp_plugin.rs`, `app/plugins.rs` (`App::check_plugins`, `App::sync_plugins`)|installs, compares, updates and removes the plugin|
 |session scanner|`crates/schwitzer-app/src/sessions.rs`, `logic::shared_sessions`, `App::publish`|reads omp session logs, shares the ones in linked repos|
 |pick prompt|`logic::pick_prompt`, `App::pick`|the prompt a human pastes into their own agent|
 |claim marker|`schwitzer-claim: <32 hex>` (`sessions::MARKER`)|ties an agent session to a claimed task|
 
-### 9.2 Linking a repo installs the plugin
+### 9.2 The app writes the plugin into a linked repo
 
-1. In Settings, a project gets a linked repo (`settings.repos`).
-2. The app writes four files into the repo:
+1. In Settings, a project gets a linked repo (`settings.repos`). Linking only offers the plugin: a prompt (`plugin_prompt`) with an "Install plugin" button, and the same button on the project's page.
+2. When the member presses it, `App::write_plugin` (`app/plugins.rs`) writes four files into the repo:
 
    |Path in the repo|Content|
    |---|---|
@@ -411,7 +412,7 @@ The plugin turns failures into one line: "no MCP token in <dir>; start the Schwi
 |`list_rooms`|none|joined rooms with members, projects and task counts, from the cached state; no request|
 |`list_tasks`|`room?`, `stage?`, `project?`|the tasks, from the cached state|
 |`get_task`|`room?`, `task`|one task in full, from the cached state|
-|`propose`|`room?`, `project?`, `title`, `body`, `idea?`, `waits_for?`|`Propose`, or `ProposeIdea` with `idea`|
+|`propose`|`room?`, `project?`, `title`, `body`, `idea?`, `waits_for?`, `blocks?`|`Propose`, or `ProposeIdea` with `idea`|
 |`add_idea`|`room?`, `project?`, `title`, `body?`|`AddIdea`|
 |`claim`|`room?`, `work: plan\|build`, `task?`, `project?`, `agent`|`Claim`; answers `schwitzer-claim: <token>`, the next step and the task JSON, or "No free task."|
 |`submit_plan`|`room?`, `task`, `plan`|`SubmitPlan`|
@@ -422,8 +423,13 @@ The plugin turns failures into one line: "no MCP token in <dir>; start the Schwi
 |`debug_status`|`room?`|the room's debug session: members with their `in` folder names, the `out` and `in` folders relative to the data dir (the plugin makes them absolute), the file sizes there|
 |`debug_instruct`|`room?`, `text`, `to?`|`DebugInstruct` (master only); `to` names participants, omitted every participant|
 |`debug_start`, `debug_join`, `debug_leave`, `debug_inbox`|`room?`|for the plugin's `/schwitzer debug` only, not in its `TOOLS`: start, join, leave; `debug_inbox` takes the oldest instruction for this member no omp session has taken yet|
+|`decisions`|`room?`, `task?`|plugin-only, not in `TOOLS`: the tasks in this member's fast lane that wait for a decision (with `task`, that one whatever its stage), each with its legal decisions and pending suggestions; without `room`, every joined room|
+|`decide`|`room?`, `task`, `decision`|plugin-only, not in `TOOLS`: `Decide`; `approve` is always allowed, every other decision only in the fast lane of the task or its project|
+|`get_suggestion`|`room?`, `task`, `suggestion`|plugin-only, not in `TOOLS`: `GetSuggestion`, the whole text of a pending suggestion for the human to read|
+|`settle_suggestion`|`room?`, `task`, `suggestion`, `apply`|plugin-only, not in `TOOLS`: `ApplySuggestion` or, with `apply: false`, `DiscardSuggestion`; only in the fast lane|
+|`set_fast_lane`|`room?`, `task`, `on`|plugin-only, not in `TOOLS`: puts the task into this member's fast lane or takes it out (no request; the app saves the flag)|
 
-`room` may be left out when the app has joined one room; otherwise it matches a room name or at least 4 hex digits of the room id. The plugin registers each tool of its `TOOLS` as `schwitzer_<name>`, with approval tier `read` for `list_rooms`, `list_tasks`, `get_task` and `debug_status` and `write` for the rest. **There is no accept, reject, approve, replan or reopen tool, none to apply or discard a suggestion, and none for `EditTask`, `SetPriority`, `MoveTask`, `SetWaits`, projects or rooms.**
+`room` may be left out when the app has joined one room; otherwise it matches a room name or at least 4 hex digits of the room id. The plugin registers each tool of its `TOOLS` as `schwitzer_<name>`, with approval tier `read` for `list_rooms`, `list_tasks`, `get_task` and `debug_status` and `write` for the rest. **Agents get no tool to accept, reject, approve, replan or reopen, none to apply or discard a suggestion, and none for `EditTask`, `SetPriority`, `MoveTask`, `SetWaits`, projects or rooms; the plugin-only tools serve the human's dialogs.**
 
 ### 9.5 One task, end to end
 
@@ -530,6 +536,7 @@ Every message text is in [the plugin README](../crates/schwitzer-app/omp-plugin/
 |hand in a plan|"Mark planned" (`Decide`, clears the claim); "Edit plan" → "Save plan" only edits the text (`EditTask`)|plan review hook, `schwitzer_submit_plan`|
 |improve the details or the plan|"Edit" (`EditTask`); the history icon shows the versions with diffs, "Restore" puts an old one into the editor|`/schwitzer revise`, `schwitzer_suggest_revision` (a suggestion only)|
 |apply or discard a suggestion|"Review", then "Apply" or "Discard" (`ApplySuggestion`, `DiscardSuggestion`)|never|
+|upvote an idea|"Upvote" in the open idea; the button then reads "Upvoted" and takes the vote back (`Vote`)|none|
 |claim for building|"Pick and copy prompt" (Approved tasks only)|`/schwitzer build`, `schwitzer_claim` (`work: build`)|
 |finish|"Mark done" (`Decide`, clears the claim)|`schwitzer_finish`|
 |give a claim back|"Unclaim"|`schwitzer_unclaim`|
