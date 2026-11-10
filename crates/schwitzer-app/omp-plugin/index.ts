@@ -885,7 +885,7 @@ async function commitTrailerCheck(event: ToolCallEvent, ctx: Ctx): Promise<{ blo
   try {
     const command = event.input.command;
     if (event.toolName !== "bash" || typeof command !== "string" || !GIT_COMMIT.test(command)) return undefined;
-    if (buildClaims().size === 0) return undefined;
+    if (buildClaims.value.size === 0) return undefined;
     // A `cd` or `-C` inside the command is not interpreted.
     const dir = typeof event.input.cwd === "string" ? resolve(ctx.cwd, event.input.cwd) : ctx.cwd;
     if (!within(dir, OWN_ROOT)) return undefined;
@@ -894,7 +894,7 @@ async function commitTrailerCheck(event: ToolCallEvent, ctx: Ctx): Promise<{ blo
     if (on.length === 0) return undefined;
     const rows = await listRooms(config, HINT_TIMEOUT_MS);
     const wanted = new Set<number>();
-    for (const [key, projectName] of buildClaims()) {
+    for (const [key, { project: projectName }] of buildClaims.value) {
       const slash = key.lastIndexOf("/");
       const id8 = key.slice(0, slash);
       const number = Number(key.slice(slash + 1));
@@ -1871,48 +1871,44 @@ interface Watch {
 let watch: Watch | undefined;
 /** The main agent finished a build with schwitzer_finish; the end of its run offers the next approved task. */
 let finishedBuild = false;
-/** The build task message for the next main-agent turn. It lives on globalThis because
- *  "execute" clears the session, and the next turn must still find it. */
-const HANDOFF = Symbol.for("schwitzer.buildHandoff");
+/** A value that every instance of this plugin in the omp process shares: "execute" clears the
+ *  session and a session switch may load the plugin again, and both must still find it. It lives
+ *  on globalThis under `Symbol.for("schwitzer.<name>")`; `init` makes it on first read. */
+function globalSlot<T>(name: string, init: () => T): { value: T } {
+  const key = Symbol.for(`schwitzer.${name}`);
+  const store = globalThis as Record<symbol, unknown>;
+  return {
+    get value(): T {
+      return (store[key] ??= init()) as T;
+    },
+    set value(v: T) {
+      store[key] = v;
+    },
+  };
+}
+
+/** The build task message for the next main-agent turn. */
+const handoff = globalSlot<string | undefined>("buildHandoff", () => undefined);
 
 function setHandoff(content: string | undefined): void {
-  (globalThis as Record<symbol, unknown>)[HANDOFF] = content;
+  handoff.value = content;
 }
 
 function takeHandoff(): string | undefined {
-  const store = globalThis as Record<symbol, unknown>;
-  const content = store[HANDOFF];
-  delete store[HANDOFF];
-  return typeof content === "string" ? content : undefined;
+  const content = handoff.value;
+  handoff.value = undefined;
+  return content;
 }
 
-/** HEAD of this repo when a build claim started, keyed `<room id8>/<task>`. It lives on globalThis
- *  like the handoff: "execute" clears the session, and the build runs in the next one. */
-const BUILD_STARTS = Symbol.for("schwitzer.buildStarts");
-
-function buildStarts(): Map<string, string> {
-  const store = globalThis as Record<symbol, unknown>;
-  let starts = store[BUILD_STARTS] as Map<string, string> | undefined;
-  if (!starts) {
-    starts = new Map();
-    store[BUILD_STARTS] = starts;
-  }
-  return starts;
+/** A build claim of this omp process. */
+interface BuildClaim {
+  project: string;
+  /** HEAD of this repo when the claim started; missing without a git HEAD. */
+  head?: string;
 }
-
-/** The project name of every build claim of this omp process, keyed `<room id8>/<task>`. Unlike
- *  BUILD_STARTS it does not need a git HEAD; the commit trailer check reads it. */
-const BUILD_CLAIMS = Symbol.for("schwitzer.buildClaims");
-
-function buildClaims(): Map<string, string> {
-  const store = globalThis as Record<symbol, unknown>;
-  let claims = store[BUILD_CLAIMS] as Map<string, string> | undefined;
-  if (!claims) {
-    claims = new Map();
-    store[BUILD_CLAIMS] = claims;
-  }
-  return claims;
-}
+/** Every build claim of this omp process, keyed `<room id8>/<task>`; the commit trailer check
+ *  and the commit list of a finish note read it. */
+const buildClaims = globalSlot<Map<string, BuildClaim>>("buildTasks", () => new Map());
 
 /** git in this repo: its trimmed stdout, or undefined when git is missing, fails or takes too long. */
 async function git(args: string[]): Promise<string | undefined> {
@@ -1933,10 +1929,11 @@ async function rememberStart(config: Config, room: string | undefined, task: num
   try {
     const key = await roomKey(config, room);
     if (key === undefined) return;
-    buildClaims().set(`${key}/${task}`, project);
+    const id = `${key}/${task}`;
+    buildClaims.value.set(id, { project });
     const head = await git(["rev-parse", "--verify", "HEAD"]);
-    if (head !== undefined && /^[0-9a-f]{40,64}$/.test(head)) buildStarts().set(`${key}/${task}`, head);
-    else buildStarts().delete(`${key}/${task}`);
+    const claim = buildClaims.value.get(id);
+    if (claim && head !== undefined && /^[0-9a-f]{40,64}$/.test(head)) claim.head = head;
   } catch {}
 }
 
@@ -1945,8 +1942,7 @@ async function forgetStart(config: Config, room: string | undefined, task: numbe
   try {
     const key = await roomKey(config, room);
     if (key === undefined) return;
-    buildStarts().delete(`${key}/${task}`);
-    buildClaims().delete(`${key}/${task}`);
+    buildClaims.value.delete(`${key}/${task}`);
   } catch {}
 }
 
@@ -1955,7 +1951,7 @@ async function forgetStart(config: Config, room: string | undefined, task: numbe
 async function withCommits(config: Config, room: string | undefined, task: number, note: string): Promise<string> {
   try {
     const key = await roomKey(config, room);
-    const start = key === undefined ? undefined : buildStarts().get(`${key}/${task}`);
+    const start = key === undefined ? undefined : buildClaims.value.get(`${key}/${task}`)?.head;
     if (start === undefined) return note;
     const count = Number(await git(["rev-list", "--count", `${start}..HEAD`]));
     if (!(count > 0)) return note;
@@ -2361,16 +2357,16 @@ interface AwaitAnswer {
   task?: { stage: string; notes?: TaskNote[] };
   gone?: string;
 }
-/** The running watch lives on globalThis, like HANDOFF: a session switch may load a fresh plugin
- *  instance, which must be able to stop the old loop. */
-const AWAIT_WATCH = Symbol.for("schwitzer.awaitWatch");
+/** The running watch is shared by every plugin instance: a session switch may load a fresh one,
+ *  which must be able to stop the old loop. */
+const awaitWatch = globalSlot<AwaitWatch | undefined>("awaitWatch", () => undefined);
 
 function getAwaitWatch(): AwaitWatch | undefined {
-  return (globalThis as Record<symbol, unknown>)[AWAIT_WATCH] as AwaitWatch | undefined;
+  return awaitWatch.value;
 }
 
 function setAwaitWatch(w: AwaitWatch | undefined): void {
-  (globalThis as Record<symbol, unknown>)[AWAIT_WATCH] = w;
+  awaitWatch.value = w;
 }
 
 function awaitedKey(a: { room: string; task: number }): string {
