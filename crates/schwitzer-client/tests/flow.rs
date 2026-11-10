@@ -105,6 +105,90 @@ fn has_member(state: &RoomState, member: MemberId) -> bool {
     state.members.iter().any(|m| m.id == member)
 }
 
+/// `client` creates the project `name` in `room`.
+async fn create_project(client: &Client, room: RoomId, name: &str) -> Project {
+    project(
+        client
+            .request(
+                room,
+                Request::CreateProject {
+                    room,
+                    name: name.into(),
+                },
+            )
+            .await
+            .unwrap(),
+    )
+}
+
+/// `client` proposes `title` to `project` of `room`, without details or prerequisites.
+async fn propose(client: &Client, room: RoomId, project: u64, title: &str) -> Task {
+    task(
+        client
+            .request(
+                room,
+                Request::Propose {
+                    room,
+                    project,
+                    title: title.into(),
+                    body: String::new(),
+                    waits_for: vec![],
+                },
+            )
+            .await
+            .unwrap(),
+    )
+}
+
+/// A server on loopback, and the room "crew" that alice created and bob joined. Both
+/// clients listen to events from before the room exists.
+struct Crew {
+    server: Server,
+    a: Client,
+    b: Client,
+    key: RoomKey,
+    room: RoomId,
+    rx_a: Receiver<ClientEvent>,
+    rx_b: Receiver<ClientEvent>,
+    _data: TempDir,
+    _dirs: [TempDir; 2],
+}
+
+impl Crew {
+    async fn new() -> Self {
+        let data = TempDir::new().unwrap();
+        let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
+        let dirs = [TempDir::new().unwrap(), TempDir::new().unwrap()];
+        let a = Client::start(dirs[0].path(), "alice".into()).unwrap();
+        let b = Client::start(dirs[1].path(), "bob".into()).unwrap();
+        let (rx_a, rx_b) = (a.subscribe(), b.subscribe());
+        let key = a
+            .create_room(server.addr.clone(), "crew".into())
+            .await
+            .unwrap();
+        let room = RoomId::of(&key.token);
+        assert_eq!(b.join_room(key.clone()).await.unwrap(), room);
+        Self {
+            server,
+            a,
+            b,
+            key,
+            room,
+            rx_a,
+            rx_b,
+            _data: data,
+            _dirs: dirs,
+        }
+    }
+
+    /// Stops both clients and the server.
+    async fn finish(self) {
+        self.a.shutdown();
+        self.b.shutdown();
+        self.server.shutdown().await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
     let data = TempDir::new().unwrap();
@@ -132,45 +216,12 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
 
     // 2. A creates the projects "app" and "site"; B sees them. "site" gets an accepted High
     // task, numbered before the ones of "app".
-    let app = project(
-        a.request(
-            room,
-            Request::CreateProject {
-                room,
-                name: "app".into(),
-            },
-        )
-        .await
-        .unwrap(),
-    );
+    let app = create_project(&a, room, "app").await;
     assert_eq!(app.id, 1);
     room_where(&mut rx_b, |s| s.projects.contains(&app)).await;
-    let site = project(
-        a.request(
-            room,
-            Request::CreateProject {
-                room,
-                name: "site".into(),
-            },
-        )
-        .await
-        .unwrap(),
-    );
+    let site = create_project(&a, room, "site").await;
     assert_eq!(site.id, 2);
-    let site_task = task(
-        a.request(
-            room,
-            Request::Propose {
-                room,
-                project: site.id,
-                title: "new landing page".into(),
-                body: String::new(),
-                waits_for: vec![],
-            },
-        )
-        .await
-        .unwrap(),
-    );
+    let site_task = propose(&a, room, site.id, "new landing page").await;
     assert_eq!(site_task.project, site.id);
     for request in [
         Request::SetPriority {
@@ -188,34 +239,8 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
     }
 
     // Two proposals in "app", the second made High.
-    let normal = task(
-        a.request(
-            room,
-            Request::Propose {
-                room,
-                project: app.id,
-                title: "tidy up".into(),
-                body: String::new(),
-                waits_for: vec![],
-            },
-        )
-        .await
-        .unwrap(),
-    );
-    let urgent = task(
-        a.request(
-            room,
-            Request::Propose {
-                room,
-                project: app.id,
-                title: "fix the build".into(),
-                body: String::new(),
-                waits_for: vec![],
-            },
-        )
-        .await
-        .unwrap(),
-    );
+    let normal = propose(&a, room, app.id, "tidy up").await;
+    let urgent = propose(&a, room, app.id, "fix the build").await;
     task(
         a.request(
             room,
@@ -459,19 +484,8 @@ async fn a_task_goes_from_proposal_to_done_and_survives_a_server_restart() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_forgotten_room_closes_its_server_connection() {
-    let data = TempDir::new().unwrap();
-    let listen: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let server = start_server(listen, &data).await;
-    let addr: ServerAddr = server.addr.clone();
-
-    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
-    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
-    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
-    let (mut rx_a, mut rx_b) = (a.subscribe(), b.subscribe());
-
-    let key = a.create_room(addr, "crew".into()).await.unwrap();
-    let room = RoomId::of(&key.token);
-    assert_eq!(b.join_room(key.clone()).await.unwrap(), room);
+    let mut crew = Crew::new().await;
+    let (a, room) = (&crew.a, crew.room);
     let alice_online = |online: bool| {
         let alice = a.member();
         move |s: &RoomState| {
@@ -480,23 +494,21 @@ async fn a_forgotten_room_closes_its_server_connection() {
                 .any(|m| m.id == alice && m.online == online)
         }
     };
-    room_where(&mut rx_b, alice_online(true)).await;
+    room_where(&mut crew.rx_b, alice_online(true)).await;
 
     // A forgets the room: no room is kept, and the server sees A's connection end while A
     // stays a member.
     a.forget_room(room);
     assert!(a.rooms().is_empty());
-    let state = room_where(&mut rx_b, alice_online(false)).await;
+    let state = room_where(&mut crew.rx_b, alice_online(false)).await;
     assert!(has_member(&state, a.member()));
 
     // The key brings A back on a fresh connection to the same server.
-    a.add_room(key.clone());
-    room_where(&mut rx_a, |s| s.id == room).await;
-    room_where(&mut rx_b, alice_online(true)).await;
+    a.add_room(crew.key.clone());
+    room_where(&mut crew.rx_a, |s| s.id == room).await;
+    room_where(&mut crew.rx_b, alice_online(true)).await;
 
-    a.shutdown();
-    b.shutdown();
-    server.shutdown().await;
+    crew.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -511,31 +523,8 @@ async fn a_member_who_sends_too_fast_is_told_to_wait() {
         .await
         .unwrap();
     let room = RoomId::of(&key.token);
-    let app = project(
-        a.request(
-            room,
-            Request::CreateProject {
-                room,
-                name: "app".into(),
-            },
-        )
-        .await
-        .unwrap(),
-    );
-    let proposal = task(
-        a.request(
-            room,
-            Request::Propose {
-                room,
-                project: app.id,
-                title: "tidy up".into(),
-                body: String::new(),
-                waits_for: vec![],
-            },
-        )
-        .await
-        .unwrap(),
-    );
+    let app = create_project(&a, room, "app").await;
+    let proposal = propose(&a, room, app.id, "tidy up").await;
     let set_priority = || Request::SetPriority {
         room,
         task: proposal.number,
@@ -577,33 +566,10 @@ async fn a_full_room_refuses_more_and_its_snapshot_still_arrives() {
         .await
         .unwrap();
     let room = RoomId::of(&key.token);
-    let app = project(
-        a.request(
-            room,
-            Request::CreateProject {
-                room,
-                name: "app".into(),
-            },
-        )
-        .await
-        .unwrap(),
-    );
+    let app = create_project(&a, room, "app").await;
     let mut refused = None;
     for i in 0..20 {
-        let proposal = task(
-            a.request(
-                room,
-                Request::Propose {
-                    room,
-                    project: app.id,
-                    title: format!("task {i}"),
-                    body: String::new(),
-                    waits_for: vec![],
-                },
-            )
-            .await
-            .unwrap(),
-        );
+        let proposal = propose(&a, room, app.id, &format!("task {i}")).await;
         let edit = Request::EditTask {
             room,
             task: proposal.number,
@@ -637,25 +603,10 @@ async fn a_full_room_refuses_more_and_its_snapshot_still_arrives() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_empty_project_is_deleted_for_every_member() {
-    let data = TempDir::new().unwrap();
-    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
-    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
-    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
-    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
-    let mut rx_b = b.subscribe();
-
-    let key = a
-        .create_room(server.addr.clone(), "crew".into())
-        .await
-        .unwrap();
-    let room = RoomId::of(&key.token);
-    assert_eq!(b.join_room(key).await.unwrap(), room);
-    let create = |name: &str| Request::CreateProject {
-        room,
-        name: name.into(),
-    };
-    let app = project(a.request(room, create("app")).await.unwrap());
-    let old = project(a.request(room, create("old")).await.unwrap());
+    let mut crew = Crew::new().await;
+    let (a, b, room) = (&crew.a, &crew.b, crew.room);
+    let app = create_project(a, room, "app").await;
+    let old = create_project(a, room, "old").await;
     let propose = |project: u64| Request::Propose {
         room,
         project,
@@ -664,7 +615,7 @@ async fn an_empty_project_is_deleted_for_every_member() {
         waits_for: vec![],
     };
     a.request(room, propose(app.id)).await.unwrap();
-    room_where(&mut rx_b, |s| {
+    room_where(&mut crew.rx_b, |s| {
         s.projects == [app.clone(), old.clone()] && s.tasks.len() == 1
     })
     .await;
@@ -675,7 +626,7 @@ async fn an_empty_project_is_deleted_for_every_member() {
         ApiError::ProjectNotEmpty
     );
     assert_eq!(a.request(room, delete(old.id)).await.unwrap(), Response::Ok);
-    room_where(&mut rx_b, |s| s.projects == [app.clone()]).await;
+    room_where(&mut crew.rx_b, |s| s.projects == [app.clone()]).await;
     assert_eq!(
         api_error(b.request(room, delete(old.id)).await),
         ApiError::NoSuchProject
@@ -685,37 +636,14 @@ async fn an_empty_project_is_deleted_for_every_member() {
         ApiError::NoSuchProject
     );
 
-    a.shutdown();
-    b.shutdown();
-    server.shutdown().await;
+    crew.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn suggestions_are_applied_and_kept_in_the_history() {
-    let data = TempDir::new().unwrap();
-    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
-    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
-    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
-    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
-    let mut rx_a = a.subscribe();
-
-    let key = a
-        .create_room(server.addr.clone(), "crew".into())
-        .await
-        .unwrap();
-    let room = RoomId::of(&key.token);
-    assert_eq!(b.join_room(key).await.unwrap(), room);
-    let app = project(
-        a.request(
-            room,
-            Request::CreateProject {
-                room,
-                name: "app".into(),
-            },
-        )
-        .await
-        .unwrap(),
-    );
+    let mut crew = Crew::new().await;
+    let (a, b, room) = (&crew.a, &crew.b, crew.room);
+    let app = create_project(a, room, "app").await;
     let proposal = task(
         a.request(
             room,
@@ -747,7 +675,7 @@ async fn suggestions_are_applied_and_kept_in_the_history() {
     )
     .await
     .unwrap();
-    let state = room_where(&mut rx_a, |s| {
+    let state = room_where(&mut crew.rx_a, |s| {
         s.tasks.iter().any(|t| t.suggestions.len() == 1)
     })
     .await;
@@ -810,37 +738,14 @@ async fn suggestions_are_applied_and_kept_in_the_history() {
         ApiError::NoSuchSuggestion
     );
 
-    a.shutdown();
-    b.shutdown();
-    server.shutdown().await;
+    crew.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn comments_reach_every_member_and_are_resolved() {
-    let data = TempDir::new().unwrap();
-    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
-    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
-    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
-    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
-    let mut rx_a = a.subscribe();
-
-    let key = a
-        .create_room(server.addr.clone(), "crew".into())
-        .await
-        .unwrap();
-    let room = RoomId::of(&key.token);
-    assert_eq!(b.join_room(key).await.unwrap(), room);
-    let app = project(
-        a.request(
-            room,
-            Request::CreateProject {
-                room,
-                name: "app".into(),
-            },
-        )
-        .await
-        .unwrap(),
-    );
+    let mut crew = Crew::new().await;
+    let (a, b, room) = (&crew.a, &crew.b, crew.room);
+    let app = create_project(a, room, "app").await;
     let proposal = task(
         a.request(
             room,
@@ -869,7 +774,7 @@ async fn comments_reach_every_member_and_are_resolved() {
     )
     .await
     .unwrap();
-    let state = room_where(&mut rx_a, |s| {
+    let state = room_where(&mut crew.rx_a, |s| {
         s.tasks.iter().any(|t| t.annotations.len() == 1)
     })
     .await;
@@ -909,37 +814,14 @@ async fn comments_reach_every_member_and_are_resolved() {
         ApiError::NoSuchAnnotation
     );
 
-    a.shutdown();
-    b.shutdown();
-    server.shutdown().await;
+    crew.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn votes_reach_every_member() {
-    let data = TempDir::new().unwrap();
-    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
-    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
-    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
-    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
-    let mut rx_a = a.subscribe();
-
-    let key = a
-        .create_room(server.addr.clone(), "crew".into())
-        .await
-        .unwrap();
-    let room = RoomId::of(&key.token);
-    assert_eq!(b.join_room(key).await.unwrap(), room);
-    let app = project(
-        a.request(
-            room,
-            Request::CreateProject {
-                room,
-                name: "app".into(),
-            },
-        )
-        .await
-        .unwrap(),
-    );
+    let mut crew = Crew::new().await;
+    let (a, b, room) = (&crew.a, &crew.b, crew.room);
+    let app = create_project(a, room, "app").await;
     let idea = |title: &str| Request::AddIdea {
         room,
         project: app.id,
@@ -956,26 +838,13 @@ async fn votes_reach_every_member() {
     a.request(room, vote(true)).await.unwrap();
     b.request(room, vote(true)).await.unwrap();
     let votes = |s: &RoomState, n: u64| s.task(n).map(|t| t.votes.len());
-    let state = room_where(&mut rx_a, |s| votes(s, second) == Some(2)).await;
+    let state = room_where(&mut crew.rx_a, |s| votes(s, second) == Some(2)).await;
     assert_eq!(votes(&state, first), Some(0));
 
     b.request(room, vote(false)).await.unwrap();
-    room_where(&mut rx_a, |s| votes(s, second) == Some(1)).await;
+    room_where(&mut crew.rx_a, |s| votes(s, second) == Some(1)).await;
 
-    let proposal = task(
-        a.request(
-            room,
-            Request::Propose {
-                room,
-                project: app.id,
-                title: "p".into(),
-                body: String::new(),
-                waits_for: vec![],
-            },
-        )
-        .await
-        .unwrap(),
-    );
+    let proposal = propose(a, room, app.id, "p").await;
     assert_eq!(
         api_error(
             a.request(
@@ -991,9 +860,7 @@ async fn votes_reach_every_member() {
         ApiError::WrongStage(Stage::Proposed)
     );
 
-    a.shutdown();
-    b.shutdown();
-    server.shutdown().await;
+    crew.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1102,30 +969,9 @@ async fn a_debug_session_relays_logs_and_instructions_while_it_runs() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_task_that_waits_is_built_after_its_prerequisite() {
-    let data = TempDir::new().unwrap();
-    let server = start_server("127.0.0.1:0".parse().unwrap(), &data).await;
-    let (dir_a, dir_b) = (TempDir::new().unwrap(), TempDir::new().unwrap());
-    let a = Client::start(dir_a.path(), "alice".into()).unwrap();
-    let b = Client::start(dir_b.path(), "bob".into()).unwrap();
-    let mut rx_b = b.subscribe();
-
-    let key = a
-        .create_room(server.addr.clone(), "crew".into())
-        .await
-        .unwrap();
-    let room = RoomId::of(&key.token);
-    assert_eq!(b.join_room(key).await.unwrap(), room);
-    let app = project(
-        a.request(
-            room,
-            Request::CreateProject {
-                room,
-                name: "app".into(),
-            },
-        )
-        .await
-        .unwrap(),
-    );
+    let mut crew = Crew::new().await;
+    let (a, room) = (&crew.a, crew.room);
+    let app = create_project(a, room, "app").await;
     let propose = |title: &str, waits_for: Vec<u64>| Request::Propose {
         room,
         project: app.id,
@@ -1164,7 +1010,7 @@ async fn a_task_that_waits_is_built_after_its_prerequisite() {
         a.request(room, plan).await.unwrap();
         a.request(room, decide(Decision::Approve)).await.unwrap();
     }
-    let state = room_where(&mut rx_b, |s| {
+    let state = room_where(&mut crew.rx_b, |s| {
         s.tasks.len() == 3 && s.tasks.iter().all(|t| t.stage == Stage::Ready)
     })
     .await;
@@ -1225,9 +1071,7 @@ async fn a_task_that_waits_is_built_after_its_prerequisite() {
         other => panic!("expected Invalid, got {other:?}"),
     }
 
-    a.shutdown();
-    b.shutdown();
-    server.shutdown().await;
+    crew.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
