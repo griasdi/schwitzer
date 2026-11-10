@@ -1,5 +1,5 @@
 //! Writes assets/licenses/third-party.json, the open source components of the app and their
-//! license texts, which the app's Licenses page shows: cargo run -p schwitzer-app --example
+//! license texts, which the app's About page shows: cargo run -p schwitzer-app --example
 //! licenses (needs cargo-about 0.9.2). cargo-about finds the crates (per target, build
 //! dependencies included) and their texts; this drops Schwitzer's own crates, links every
 //! component to its source, joins equal texts and adds the NOTICE files of Apache-2.0 crates.

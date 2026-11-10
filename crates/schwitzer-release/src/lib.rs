@@ -4,7 +4,7 @@
 //! file.
 //!
 //! What differs stays with the callers: which release to look at and which asset to take, the
-//! archive formats beyond `.tar.gz`, and how the new program starts.
+//! AppImage package, and how the new program starts.
 
 #[cfg(any(unix, windows))]
 use std::ffi::OsStr;

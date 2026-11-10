@@ -1,5 +1,5 @@
-//! Full-window pages with a back button: Settings and its topic pages, About, and the reading
-//! page of the open task's proposal or plan.
+//! Full-window pages with a back button: the frame around the body of Settings and its topic
+//! pages, About and Debug, and the wider frame of the reading, History and Suggestion pages.
 
 use iced::widget::{column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
@@ -11,7 +11,7 @@ use crate::theme::{self, SEMIBOLD, SP_1, SP_2, SP_3, TS_20};
 
 /// The widest the body of a page grows in a wide window.
 const MAX_WIDTH: f32 = 560.0;
-/// The widest the reading page's text grows: about 75 characters of 16 px Figtree.
+/// The widest the text of a reading frame grows: about 75 characters of 16 px Figtree.
 const READ_WIDTH: f32 = 640.0;
 
 /// The widget id of a page's scrolling body. The pages share one, and iced keeps its offset
@@ -28,7 +28,8 @@ pub fn frame<'a>(
     framed(id, title, body, footer, MAX_WIDTH)
 }
 
-/// The reading page: a page without footer whose body grows wider than a settings page's.
+/// A page for long text (the reading, History and Suggestion pages): no footer, and a body that
+/// grows wider than a [`frame`]'s.
 pub fn reading_frame<'a>(
     id: &'static str,
     title: impl text::IntoFragment<'a>,

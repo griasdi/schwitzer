@@ -17,7 +17,7 @@ const FIGTREE: &str = include_str!("../assets/fonts/OFL.txt");
 const LUCIDE: &str = include_str!("../assets/icons/LICENSE");
 const THIRD_PARTY: &str = include_str!("../assets/licenses/third-party.json");
 
-/// Which block of the Licenses page an entry belongs to.
+/// Which block of the About page an entry belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Group {
     Schwitzer,
@@ -57,7 +57,7 @@ struct Component {
     source: String,
 }
 
-/// Every entry in page order; the Licenses page names its rows by the index.
+/// Every entry in page order; the About page names its rows by the index.
 static ENTRIES: LazyLock<Vec<Entry>> = LazyLock::new(|| {
     let own = |group, title: &'static str, caption: Option<&str>, text: &'static str| Entry {
         group,

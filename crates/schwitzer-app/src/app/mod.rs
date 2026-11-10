@@ -106,7 +106,7 @@ pub enum Message {
     CancelConfirm,
     /// Opens the About page with the licenses from Settings.
     OpenLicenses,
-    /// Unfolds license `i` of `about::entries()` on the Licenses page, or folds it.
+    /// Unfolds license `i` of `about::entries()` on the About page, or folds it.
     ToggleLicense(usize),
     /// Opens task `n` in place in the list and scrolls it into view (the `#n` links in
     /// sessions).
@@ -565,7 +565,7 @@ pub struct App {
     /// The subfolders of the projects folder, for suggestions; read outside `view`.
     project_dirs: Vec<PathBuf>,
     page: Page,
-    /// The unfolded entry of the Licenses page.
+    /// The unfolded entry of the About page.
     license_open: Option<usize>,
     /// The task or draft open in place in the list.
     expanded: Option<Expanded>,

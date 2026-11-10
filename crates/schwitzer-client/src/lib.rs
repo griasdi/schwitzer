@@ -393,6 +393,7 @@ impl Client {
     }
 
     pub(crate) fn emit(&self, event: ClientEvent) {
+        // A broadcast send fails only when nobody is subscribed, which is no error.
         let _ = self.0.events.send(event);
     }
 
