@@ -1,6 +1,7 @@
 //! What the views and `update` decide without touching iced: how tasks are grouped, which
 //! local sessions a room sees, and how numbers are shown.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use schwitzer_proto::{
@@ -507,7 +508,32 @@ pub enum OmpStart {
     /// `/schwitzer propose <n>`: writes the idea up into a proposal.
     WriteUp(u64),
     /// `omp --resume <id>`: this member's local session that carries the task's claim.
-    Resume(String),
+    Resume(ShellSafeId),
+}
+
+/// An omp session id that can go into a shell line unquoted: ASCII letters, digits, `-` and `_`.
+/// Ids come from omp files, so anything else is never offered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellSafeId(String);
+
+impl ShellSafeId {
+    pub fn new(id: &str) -> Option<Self> {
+        let safe = !id.is_empty()
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        safe.then(|| Self(id.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ShellSafeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// What a copied omp command starts for `task`, seen by `me`: the plugin command that fits its
@@ -525,17 +551,12 @@ pub fn omp_start(
         if claim.member != me {
             return None;
         }
-        let shell_safe = |id: &str| {
-            !id.is_empty()
-                && id
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-        };
         return local
             .iter()
-            .filter(|s| s.markers.contains(&claim.token) && shell_safe(&s.id))
-            .max_by_key(|s| s.active_ms)
-            .map(|s| OmpStart::Resume(s.id.clone()));
+            .filter(|s| s.markers.contains(&claim.token))
+            .filter_map(|s| Some((ShellSafeId::new(&s.id)?, s.active_ms)))
+            .max_by_key(|(_, active_ms)| *active_ms)
+            .map(|(id, _)| OmpStart::Resume(id));
     }
     match task.stage {
         Stage::Idea => Some(OmpStart::WriteUp(task.number)),
@@ -1376,7 +1397,7 @@ mod tests {
         let sessions = [a, b, other];
         assert_eq!(
             start(&claimed, me, &sessions),
-            Some(OmpStart::Resume("b".to_owned()))
+            ShellSafeId::new("b").map(OmpStart::Resume)
         );
         assert_eq!(start(&claimed, member(2), &sessions), None);
         assert_eq!(start(&claimed, me, &[]), None);
@@ -1406,7 +1427,12 @@ mod tests {
             Some("omp --cwd '/home/felix/repo' '/schwitzer propose 7'")
         );
         assert_eq!(
-            omp_command(&OmpStart::Resume("abc-1".to_owned()), None, false).as_deref(),
+            omp_command(
+                &OmpStart::Resume(ShellSafeId::new("abc-1").unwrap()),
+                None,
+                false
+            )
+            .as_deref(),
             Some("omp --resume abc-1")
         );
         assert_eq!(omp_command(&OmpStart::Plan(1), None, false), None);
