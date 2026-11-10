@@ -854,6 +854,48 @@ fn require_open(task: &Task) -> R<()> {
     Ok(())
 }
 
+/// `WrongStage` unless the task is in `stage`.
+fn require_stage(task: &Task, stage: Stage) -> R<()> {
+    if task.stage != stage {
+        return Err(ApiError::WrongStage(task.stage).into());
+    }
+    Ok(())
+}
+
+/// The task, or `NoSuchTask`, or `WrongStage` once it is `Done` or `Rejected`.
+fn require_open_task(conn: &Connection, room: &RoomId, number: u64) -> R<Task> {
+    let task = require_task(conn, room, number)?;
+    require_open(&task)?;
+    Ok(task)
+}
+
+/// Name of `part` in messages.
+fn part_name(part: Part) -> &'static str {
+    match part {
+        Part::Details => "details",
+        Part::Plan => "plan",
+    }
+}
+
+/// [`require_open_task`], and `Invalid` unless `version` of `part` exists.
+fn require_open_version(
+    conn: &Connection,
+    room: &RoomId,
+    number: u64,
+    part: Part,
+    version: u64,
+) -> R<Task> {
+    let task = require_open_task(conn, room, number)?;
+    if version > task.version(part) {
+        return Err(ApiError::Invalid(format!(
+            "version {version} of the {} does not exist",
+            part_name(part)
+        ))
+        .into());
+    }
+    Ok(task)
+}
+
 fn append_note(
     conn: &Connection,
     room: &RoomId,
@@ -1034,9 +1076,7 @@ pub fn propose_idea(
     now: u64,
 ) -> R<Task> {
     let task = require_task(conn, room, number)?;
-    if task.stage != Stage::Idea {
-        return Err(ApiError::WrongStage(task.stage).into());
-    }
+    require_stage(&task, Stage::Idea)?;
     let merged: Vec<u64> = task
         .waits_for
         .iter()
@@ -1085,7 +1125,7 @@ pub fn edit_task(
     plan: &str,
     now: u64,
 ) -> R<Task> {
-    require_open(&require_task(conn, room, number)?)?;
+    require_open_task(conn, room, number)?;
     conn.execute(
         "UPDATE tasks SET title = ?3, body = ?4, plan = ?5, updated_ms = ?6
          WHERE room = ?1 AND number = ?2",
@@ -1132,7 +1172,7 @@ pub fn set_waits(
     waits: &[u64],
     now: u64,
 ) -> R<Task> {
-    require_open(&require_task(conn, room, number)?)?;
+    require_open_task(conn, room, number)?;
     write_waits(conn, room, number, waits)?;
     touch(conn, room, number, now)?;
     require_task(conn, room, number)
@@ -1244,9 +1284,7 @@ pub fn claim(
     let number = match number {
         Some(n) => {
             let task = require_task(conn, room, n)?;
-            if task.stage != target {
-                return Err(ApiError::WrongStage(task.stage).into());
-            }
+            require_stage(&task, target)?;
             if task.claim.is_some() {
                 return Err(ApiError::Claimed.into());
             }
@@ -1379,9 +1417,7 @@ pub fn finish(
     now: u64,
 ) -> R<Task> {
     let task = require_task(conn, room, number)?;
-    if task.stage != Stage::Ready {
-        return Err(ApiError::WrongStage(task.stage).into());
-    }
+    require_stage(&task, Stage::Ready)?;
     let claim = task
         .claim
         .filter(|c| c.work == Work::Build && c.member == *member)
@@ -1463,14 +1499,6 @@ pub fn history(conn: &Connection, room: &RoomId, number: u64, part: Part) -> R<V
     Ok(versions)
 }
 
-/// Name of `part` in messages.
-fn part_name(part: Part) -> &'static str {
-    match part {
-        Part::Details => "details",
-        Part::Plan => "plan",
-    }
-}
-
 /// Stores an agent's suggestion for `part` of an open task, written on `version`; the text
 /// of the task stays as it is. `title` is empty for a plan.
 #[allow(clippy::too_many_arguments)]
@@ -1487,15 +1515,7 @@ pub fn suggest(
     note: &str,
     now: u64,
 ) -> R<Task> {
-    let task = require_task(conn, room, number)?;
-    require_open(&task)?;
-    if version > task.version(part) {
-        return Err(ApiError::Invalid(format!(
-            "version {version} of the {} does not exist",
-            part_name(part)
-        ))
-        .into());
-    }
+    let task = require_open_version(conn, room, number, part, version)?;
     let same = match part {
         Part::Details => title == task.title && text == task.body,
         Part::Plan => text == task.plan,
@@ -1565,7 +1585,7 @@ pub fn apply_suggestion(
     id: u64,
     now: u64,
 ) -> R<Task> {
-    require_open(&require_task(conn, room, number)?)?;
+    require_open_task(conn, room, number)?;
     let (s, title, text) = suggestion(conn, room, number, id)?;
     match s.part {
         Part::Details => conn.execute(
@@ -1629,15 +1649,7 @@ pub fn annotate(
     text: &str,
     now: u64,
 ) -> R<Task> {
-    let task = require_task(conn, room, number)?;
-    require_open(&task)?;
-    if version > task.version(part) {
-        return Err(ApiError::Invalid(format!(
-            "version {version} of the {} does not exist",
-            part_name(part)
-        ))
-        .into());
-    }
+    let task = require_open_version(conn, room, number, part, version)?;
     if task.annotations.iter().filter(|a| !a.resolved).count() >= caps::ANNOTATIONS {
         return Err(ApiError::Invalid(format!(
             "the task already has {} open comments; resolve one first",
@@ -1694,9 +1706,7 @@ pub fn vote(
     now: u64,
 ) -> R<Task> {
     let task = require_task(conn, room, number)?;
-    if task.stage != Stage::Idea {
-        return Err(ApiError::WrongStage(task.stage).into());
-    }
+    require_stage(&task, Stage::Idea)?;
     let sql = if up {
         "INSERT OR IGNORE INTO votes(room, number, member) VALUES (?1, ?2, ?3)"
     } else {
