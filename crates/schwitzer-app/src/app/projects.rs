@@ -101,8 +101,7 @@ impl App {
                 self.choose_project(room, project.id);
                 if self.selected == Some(room) && self.page != Page::FirstStart {
                     self.page = Page::Main;
-                    self.expanded = None;
-                    self.reset_drafts();
+                    self.close_task();
                 }
                 self.sync_project_form();
                 self.read_project_dirs();

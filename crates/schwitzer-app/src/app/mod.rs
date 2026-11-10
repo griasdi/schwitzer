@@ -1132,8 +1132,7 @@ impl App {
             }
             Message::ToggleTask(number) => {
                 if self.expanded == Some(Expanded::Task(number)) {
-                    self.expanded = None;
-                    self.reset_drafts();
+                    self.close_task();
                     return Task::none();
                 }
                 self.reset_drafts();
@@ -1965,6 +1964,12 @@ impl App {
             self.reset_drafts();
             self.sync_project_form();
         }
+    }
+
+    /// Closes the open task and drops its drafts.
+    fn close_task(&mut self) {
+        self.expanded = None;
+        self.reset_drafts();
     }
 
     /// Drops the open task's drafts and unfolds its Proposal and Plan: the next task opens with

@@ -303,8 +303,7 @@ impl App {
                     .and_then(|s| s.projects.iter().find(|p| p.id == task.project))
                     .map_or_else(|| format!("#{}", task.project), |p| p.name.clone());
                 if self.expanded == Some(Expanded::Task(task.number)) {
-                    self.expanded = None;
-                    self.reset_drafts();
+                    self.close_task();
                 }
                 self.notify(&format!("#{} moved to {target}", task.number));
             }
@@ -390,8 +389,7 @@ impl App {
             anchor,
             dy: None,
         });
-        self.expanded = None;
-        self.reset_drafts();
+        self.close_task();
         list_top_of(format!("task-{number}")).map(move |dy| Message::AcceptPlaced(number, dy))
     }
 
