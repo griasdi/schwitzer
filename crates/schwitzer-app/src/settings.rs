@@ -98,7 +98,7 @@ pub struct Settings {
     /// The projects (keys like `repos`: `<room id hex>/<project id>`) whose builds by this
     /// member's agents put `Schwitzer-Task: #<number>` into every commit. A key that does not
     /// parse is dropped on load.
-    #[serde(with = "project_set", skip_serializing_if = "BTreeSet::is_empty")]
+    #[serde(with = "key_set", skip_serializing_if = "BTreeSet::is_empty")]
     pub commit_trailers: BTreeSet<ProjectKey>,
     /// The fast lanes of this member, `fast_lane` and `fast_lane_tasks` in the file.
     #[serde(flatten)]
@@ -184,7 +184,7 @@ pub struct Lanes {
     /// key that does not parse is dropped on load.
     #[serde(
         rename = "fast_lane",
-        with = "project_set",
+        with = "key_set",
         skip_serializing_if = "BTreeSet::is_empty"
     )]
     projects: BTreeSet<ProjectKey>,
@@ -193,7 +193,7 @@ pub struct Lanes {
     /// the task is done or rejected. A key that does not parse is dropped on load.
     #[serde(
         rename = "fast_lane_tasks",
-        with = "project_set",
+        with = "key_set",
         skip_serializing_if = "BTreeSet::is_empty"
     )]
     tasks: BTreeSet<TaskKey>,
@@ -218,22 +218,12 @@ impl Lanes {
 
     /// Turns the fast lane of `project` in `room` on or off.
     pub fn set_project(&mut self, room: &RoomId, project: u64, on: bool) {
-        let key = (*room, project);
-        if on {
-            self.projects.insert(key);
-        } else {
-            self.projects.remove(&key);
-        }
+        set_key(&mut self.projects, (*room, project), on);
     }
 
     /// Puts task `task` of `room` into the fast lane or takes it out.
     pub fn set_task(&mut self, room: &RoomId, task: u64, on: bool) {
-        let key = (*room, task);
-        if on {
-            self.tasks.insert(key);
-        } else {
-            self.tasks.remove(&key);
-        }
+        set_key(&mut self.tasks, (*room, task), on);
     }
 
     /// Takes the tasks of `room` that `tasks` (the room's current list) holds as done or
@@ -267,15 +257,24 @@ impl Lanes {
     }
 }
 
-/// A [`ProjectKey`] as `<room id hex>/<project id>`.
-fn project_key_text((room, project): &ProjectKey) -> String {
-    format!("{room}/{project}")
+/// Puts `key` into `set` or takes it out.
+fn set_key<K: Ord>(set: &mut BTreeSet<K>, key: K, on: bool) {
+    if on {
+        set.insert(key);
+    } else {
+        set.remove(&key);
+    }
 }
 
-/// The [`ProjectKey`] of `<room id hex>/<project id>`; `None` if it is malformed.
-fn parse_project_key(text: &str) -> Option<ProjectKey> {
-    let (room, project) = text.rsplit_once('/')?;
-    Some((room.parse().ok()?, project.parse().ok()?))
+/// A project or task key as `<room id hex>/<number>`: the project id or the task number.
+fn key_text((room, number): &(RoomId, u64)) -> String {
+    format!("{room}/{number}")
+}
+
+/// The project or task key of `<room id hex>/<number>`; `None` if it is malformed.
+fn parse_key(text: &str) -> Option<(RoomId, u64)> {
+    let (room, number) = text.rsplit_once('/')?;
+    Some((room.parse().ok()?, number.parse().ok()?))
 }
 
 /// `BTreeMap<ProjectKey, V>` as a TOML table keyed by `<room id hex>/<project id>`.
@@ -284,13 +283,13 @@ mod project_map {
 
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    use super::{ProjectKey, parse_project_key, project_key_text};
+    use super::{ProjectKey, key_text, parse_key};
 
     pub fn serialize<S: Serializer, V: Serialize>(
         map: &BTreeMap<ProjectKey, V>,
         s: S,
     ) -> Result<S::Ok, S::Error> {
-        s.collect_map(map.iter().map(|(key, v)| (project_key_text(key), v)))
+        s.collect_map(map.iter().map(|(key, v)| (key_text(key), v)))
     }
 
     /// A key that does not parse is dropped, like those of `chosen_projects`.
@@ -300,30 +299,33 @@ mod project_map {
         let raw = BTreeMap::<String, V>::deserialize(d)?;
         Ok(raw
             .into_iter()
-            .filter_map(|(key, v)| Some((parse_project_key(&key)?, v)))
+            .filter_map(|(key, v)| Some((parse_key(&key)?, v)))
             .collect())
     }
 }
 
-/// `BTreeSet<ProjectKey>` as a TOML array of `<room id hex>/<project id>`.
-mod project_set {
+/// A set of project or task keys as a TOML array of `<room id hex>/<number>`.
+mod key_set {
     use std::collections::BTreeSet;
 
+    use schwitzer_proto::RoomId;
     use serde::{Deserialize, Deserializer, Serializer};
 
-    use super::{ProjectKey, parse_project_key, project_key_text};
+    use super::{key_text, parse_key};
 
-    pub fn serialize<S: Serializer>(set: &BTreeSet<ProjectKey>, s: S) -> Result<S::Ok, S::Error> {
-        s.collect_seq(set.iter().map(project_key_text))
+    pub fn serialize<S: Serializer>(
+        set: &BTreeSet<(RoomId, u64)>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        s.collect_seq(set.iter().map(key_text))
     }
 
     /// A key that does not parse is dropped, like those of `chosen_projects`.
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeSet<ProjectKey>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<BTreeSet<(RoomId, u64)>, D::Error> {
         let raw = Vec::<String>::deserialize(d)?;
-        Ok(raw
-            .iter()
-            .filter_map(|key| parse_project_key(key))
-            .collect())
+        Ok(raw.iter().filter_map(|key| parse_key(key)).collect())
     }
 }
 
@@ -465,12 +467,7 @@ impl Settings {
 
     /// Sets whether builds of `project` in `room` need the commit trailer.
     pub fn set_commit_trailer(&mut self, room: &RoomId, project: u64, on: bool) {
-        let key = (*room, project);
-        if on {
-            self.commit_trailers.insert(key);
-        } else {
-            self.commit_trailers.remove(&key);
-        }
+        set_key(&mut self.commit_trailers, (*room, project), on);
     }
 
     /// Sets the room keys, in the order given, to those of `rooms` (id and key) and forgets
