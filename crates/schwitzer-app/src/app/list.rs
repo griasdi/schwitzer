@@ -235,7 +235,7 @@ fn task_row<'a>(app: &'a App, state: &'a RoomState, task: &'a RoomTask) -> Eleme
         task,
         app.client.member(),
         session_hint(app, state, task),
-        app.settings.fast_lane_task(&state.id, n)
+        app.settings.lanes.task(&state.id, n)
     )]
     .spacing(SP_3)
     .align_y(Alignment::Center);

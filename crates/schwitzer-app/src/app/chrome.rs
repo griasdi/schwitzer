@@ -150,7 +150,7 @@ pub fn header(app: &App) -> Element<'_, Message> {
         .push(project)
         .push(Space::new().width(Length::Fill));
     if let (Some(room), Some(project)) = (app.selected, app.selected_project()) {
-        let on = app.settings.fast_lane(&room, project.id);
+        let on = app.settings.lanes.project(&room, project.id);
         let tip = if on {
             format!(
                 "Fast lane on for \"{}\": you decide its tasks from omp too",

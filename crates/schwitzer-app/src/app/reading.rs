@@ -258,7 +258,7 @@ pub fn page<'a>(
                 task,
                 app.client.member(),
                 None,
-                app.settings.fast_lane_task(&state.id, task.number)
+                app.settings.lanes.task(&state.id, task.number)
             ),
             hrule(),
             annotated(app, state, task, part)

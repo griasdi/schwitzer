@@ -9,12 +9,11 @@
 //! calls only from the human's own dialogs. Approving a plan is always allowed there; every
 //! other decision needs the fast lane of the task or of its project ([`FastLane`]).
 
-use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use schwitzer_proto::RoomId;
 
-use crate::settings::{ProjectKey, TaskKey};
+use crate::settings::Lanes;
 
 mod serve;
 mod token;
@@ -58,47 +57,40 @@ pub enum McpEvent {
     },
 }
 
-/// This member's fast lanes as the MCP tools see them. The app copies
-/// `Settings::fast_lane` and `fast_lane_tasks` in on every settings save; `set_fast_lane`
-/// writes a task flag here at once and sends [`McpEvent::FastLaneTask`] so the app keeps it.
+/// The app's copy of this member's [`Lanes`] as the MCP tools see them. The app applies every
+/// change of the lanes to its settings and to this copy alike ([`FastLane::change`]) and never
+/// copies the whole settings in after the start; `set_fast_lane` writes a task flag here at
+/// once and sends [`McpEvent::FastLaneTask`], which the app applies again.
 #[derive(Clone, Default)]
 pub struct FastLane(Arc<Mutex<Lanes>>);
 
-#[derive(Default)]
-struct Lanes {
-    projects: BTreeSet<ProjectKey>,
-    tasks: BTreeSet<TaskKey>,
-}
-
 impl FastLane {
-    fn lanes(&self) -> std::sync::MutexGuard<'_, Lanes> {
+    /// A copy holding `lanes`.
+    pub fn new(lanes: Lanes) -> Self {
+        Self(Arc::new(Mutex::new(lanes)))
+    }
+
+    fn lanes(&self) -> MutexGuard<'_, Lanes> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Replaces the lanes with the app's settings.
-    pub fn set(&self, projects: &BTreeSet<ProjectKey>, tasks: &BTreeSet<TaskKey>) {
-        let mut lanes = self.lanes();
-        lanes.projects.clone_from(projects);
-        lanes.tasks.clone_from(tasks);
+    /// Applies `change` to the lanes and returns what it returns.
+    pub fn change<R>(&self, change: impl FnOnce(&mut Lanes) -> R) -> R {
+        change(&mut self.lanes())
     }
 
     /// Whether the fast lane of `project` in `room` is on.
     pub fn project(&self, room: &RoomId, project: u64) -> bool {
-        self.lanes().projects.contains(&(*room, project))
+        self.lanes().project(room, project)
     }
 
     /// Whether task `task` of `room` is in the fast lane.
     pub fn task(&self, room: &RoomId, task: u64) -> bool {
-        self.lanes().tasks.contains(&(*room, task))
+        self.lanes().task(room, task)
     }
 
-    /// Puts task `task` of `room` into the fast lane or takes it out.
-    pub fn set_task(&self, room: RoomId, task: u64, on: bool) {
-        let mut lanes = self.lanes();
-        if on {
-            lanes.tasks.insert((room, task));
-        } else {
-            lanes.tasks.remove(&(room, task));
-        }
+    /// Whether task `number` of `room` is in a lane, see [`Lanes::covers`].
+    pub fn covers(&self, room: &RoomId, number: u64, project: Option<u64>) -> bool {
+        self.lanes().covers(room, number, project)
     }
 }

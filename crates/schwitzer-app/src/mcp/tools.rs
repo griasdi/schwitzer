@@ -565,7 +565,7 @@ fn work_name(work: Work) -> &'static str {
 
 /// Whether `task` of `room` is in the fast lane, by itself or through its project.
 fn in_fast_lane(lanes: &FastLane, room: &RoomId, task: &Task) -> bool {
-    lanes.task(room, task.number) || lanes.project(room, task.project)
+    lanes.covers(room, task.number, Some(task.project))
 }
 
 /// Whether omp may make `decision` on task `number` of `room` (`task` when the client knows
@@ -577,9 +577,7 @@ fn decision_allowed(
     task: Option<&Task>,
     decision: Decision,
 ) -> bool {
-    decision == Decision::Approve
-        || lanes.task(room, number)
-        || task.is_some_and(|t| lanes.project(room, t.project))
+    decision == Decision::Approve || lanes.covers(room, number, task.map(|t| t.project))
 }
 
 /// The refusal of a decision outside the fast lane.
@@ -1489,7 +1487,8 @@ impl Tools {
         Self::bounded(async {
             // The task need not be in the client's state yet: it may be proposed a moment ago.
             let room = self.room(args.room.as_deref())?;
-            self.fast_lane.set_task(room.id, args.task, args.on);
+            self.fast_lane
+                .change(|lanes| lanes.set_task(&room.id, args.task, args.on));
             self.events
                 .clone()
                 .send(McpEvent::FastLaneTask {
@@ -1703,7 +1702,7 @@ mod tests {
             task(8, Stage::Idea, None),
         ];
         let lanes = FastLane::default();
-        lanes.set(&[(RoomId([0x11; 32]), 2)].into(), &Default::default());
+        lanes.change(|lanes| lanes.set_project(&RoomId([0x11; 32]), 2, true));
         let row = room_row(&room(0x11, "Smoke", tasks), MemberId([1; 32]), &lanes);
         assert_eq!(row["room"], "11111111");
         assert_eq!(row["online"], true);
@@ -1739,7 +1738,10 @@ mod tests {
             ],
         );
         let lanes = FastLane::default();
-        lanes.set(&[(room.id, 1)].into(), &[(room.id, 2)].into());
+        lanes.change(|lanes| {
+            lanes.set_project(&room.id, 1, true);
+            lanes.set_task(&room.id, 2, true);
+        });
         let rows = decision_rows(&room, &lanes, None);
         let numbers: Vec<&Value> = rows.iter().map(|r| &r["number"]).collect();
         assert_eq!(numbers, [1, 2]);
@@ -1774,10 +1776,13 @@ mod tests {
             |task: Option<&Task>, decision| decision_allowed(&lanes, &room, 7, task, decision);
         assert!(allowed(None, Decision::Approve));
         assert!(!allowed(Some(&proposal), Decision::Accept));
-        lanes.set(&[(room, 1)].into(), &Default::default());
+        lanes.change(|lanes| lanes.set_project(&room, 1, true));
         assert!(allowed(Some(&proposal), Decision::Accept));
         assert!(!allowed(None, Decision::Accept));
-        lanes.set(&Default::default(), &[(room, 7)].into());
+        lanes.change(|lanes| {
+            lanes.set_project(&room, 1, false);
+            lanes.set_task(&room, 7, true);
+        });
         assert!(allowed(None, Decision::Accept));
     }
 

@@ -157,7 +157,7 @@ pub fn project_page(app: &App) -> Element<'_, Message> {
             "Accept, approve, apply and the other decisions on this project from omp too: \
              /schwitzer decide. Any program of yours that can call omp's tools can make them.",
             app.selected
-                .is_some_and(|room| app.settings.fast_lane(&room, project.id)),
+                .is_some_and(|room| app.settings.lanes.project(&room, project.id)),
             Message::FastLane,
         ),
     ]

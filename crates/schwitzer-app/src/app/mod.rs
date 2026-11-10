@@ -53,7 +53,7 @@ use crate::debug;
 use crate::mcp::{self, McpStatus};
 use crate::omp_plugin::PluginState;
 use crate::sessions::{self, LocalSession};
-use crate::settings::{self, Settings};
+use crate::settings::{self, Lanes, Settings};
 use crate::system_notify;
 use crate::theme::{self, SP_2};
 use crate::update::{self, UpdateState};
@@ -592,8 +592,8 @@ pub struct App {
     published: HashMap<RoomId, Vec<SessionInfo>>,
     mcp: Option<McpStatus>,
     mcp_token: Option<String>,
-    /// This member's fast lanes, shared with the MCP tools; [`App::save_settings`] keeps it in
-    /// step with the settings.
+    /// The copy of this member's fast lanes that the MCP tools read; [`App::change_lanes`] keeps
+    /// it in step with the settings.
     fast_lane: mcp::FastLane,
     /// Shared repos with the omp plugin installed, and how it compares with this app's.
     plugins: BTreeMap<PathBuf, PluginState>,
@@ -634,8 +634,7 @@ impl App {
         let unreadable = matches!(problem, Some(settings::LoadProblem::Unreadable(_)));
         let saved_before = settings.clone();
         let first_start = !unreadable && settings.projects_dirs.is_none();
-        let fast_lane = mcp::FastLane::default();
-        fast_lane.set(&settings.fast_lane, &settings.fast_lane_tasks);
+        let fast_lane = mcp::FastLane::new(settings.lanes.clone());
         if settings.projects_dirs.is_none() {
             settings.projects_dirs = Some(
                 settings::home_dir()
@@ -970,7 +969,7 @@ impl App {
                 Task::none()
             }
             Message::Mcp(mcp::McpEvent::FastLaneTask { room, task, on }) => {
-                self.settings.set_fast_lane_task(&room, task, on);
+                self.change_lanes(|lanes| lanes.set_task(&room, task, on));
                 self.save_settings();
                 Task::none()
             }
@@ -1364,7 +1363,7 @@ impl App {
             }
             Message::FastLane(on) => {
                 if let Some((room, project)) = self.selected_ids() {
-                    self.settings.set_fast_lane(&room, project, on);
+                    self.change_lanes(|lanes| lanes.set_project(&room, project, on));
                     self.save_settings();
                 }
                 Task::none()
@@ -1373,8 +1372,8 @@ impl App {
                 let Some(room) = self.selected else {
                     return Task::none();
                 };
-                let on = !self.settings.fast_lane_task(&room, number);
-                self.settings.set_fast_lane_task(&room, number, on);
+                let on = !self.settings.lanes.task(&room, number);
+                self.change_lanes(|lanes| lanes.set_task(&room, number, on));
                 self.save_settings();
                 let proposed = self.selected_state().is_some_and(|state| {
                     state
@@ -1857,8 +1856,12 @@ impl App {
                     .then(|| self.selected_project().map(|p| p.id))
                     .flatten();
                 let projects_gone = self.settings.forget_deleted_projects(&id, &state.projects);
-                let tasks_settled = self.settings.forget_settled_tasks(&id, &state.tasks);
-                if projects_gone || tasks_settled {
+                let lanes_changed = self.change_lanes(|lanes| {
+                    let projects_gone = lanes.forget_deleted_projects(&id, &state.projects);
+                    let tasks_settled = lanes.forget_settled(&id, &state.tasks);
+                    projects_gone || tasks_settled
+                });
+                if projects_gone || lanes_changed {
                     self.save_settings();
                 }
                 let me = self.client.member();
@@ -1938,6 +1941,8 @@ impl App {
             let first = self.rooms.ids().next();
             self.select(first);
         }
+        let joined: Vec<RoomId> = self.rooms.ids().collect();
+        self.change_lanes(|lanes| lanes.retain_rooms(&joined));
         self.settings
             .retain_rooms(self.rooms.iter().map(|(id, key, _)| (id, key.to_string())));
         self.save_settings();
@@ -1997,13 +2002,19 @@ impl App {
         });
     }
 
+    /// Applies `change` to this member's fast lanes in the settings and in the copy the MCP
+    /// tools read, and returns what it returns for the settings. Every change of the lanes goes
+    /// through here, so the two never differ for longer than a flag the plugin set a moment ago.
+    /// The caller saves the settings.
+    fn change_lanes<R>(&mut self, change: impl Fn(&mut Lanes) -> R) -> R {
+        self.fast_lane.change(&change);
+        change(&mut self.settings.lanes)
+    }
+
     /// Writes `settings.toml` when something changed since it was last read or written.
     /// Changed repos or a changed MCP port also rewrite the omp plugins. On the first-start page
     /// the projects folders and the entered WSL distros are held back.
     fn save_settings(&mut self) {
-        // The MCP tools see a change at once, also one that leaves the file as it was.
-        self.fast_lane
-            .set(&self.settings.fast_lane, &self.settings.fast_lane_tasks);
         // On the first-start page the folders wait for the member's confirmation.
         let on_disk = if self.page == Page::FirstStart {
             Cow::Owned(Settings {

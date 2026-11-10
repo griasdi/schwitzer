@@ -56,7 +56,7 @@ pub fn view<'a>(
             ));
         }
         if editable {
-            let on = app.settings.fast_lane_task(&state.id, n);
+            let on = app.settings.lanes.task(&state.id, n);
             let tip = if on {
                 "In the fast lane: omp accepts, plans and builds it; only the plan waits for \
                  your approval. Press to take it out"
@@ -112,7 +112,7 @@ pub fn view<'a>(
                     task,
                     app.client.member(),
                     None,
-                    app.settings.fast_lane_task(&state.id, n)
+                    app.settings.lanes.task(&state.id, n)
                 ),
                 icons
             ]
