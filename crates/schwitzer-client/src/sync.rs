@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use schwitzer_proto::{
-    ApiError, Event, MAX_EVENT_FRAME, Member, PROTOCOL_VERSION, Request, Response, RoomId, RoomKey,
-    RoomState, ServerAddr, Subscribe, read_frame, to_bytes,
+    ApiError, DebugId, Event, MAX_EVENT_FRAME, Member, PROTOCOL_VERSION, Project, Request,
+    Response, RoomId, RoomKey, RoomState, ServerAddr, Subscribe, Task, read_frame, to_bytes,
 };
 use weida::TransferMeta;
 
@@ -344,9 +344,7 @@ impl Client {
     /// Drops the inbox and the rejoin wish of `room` when they belong to a session that is
     /// not the room's current one.
     fn sync_debug(&self, room: RoomId) {
-        let current = lock(&self.0.rooms)
-            .get(&room)
-            .and_then(|entry| entry.state.debug.as_ref().map(|s| s.id));
+        let current = self.current_debug(room);
         let dropped = {
             let mut inboxes = lock(&self.0.debug_inbox);
             match inboxes.get(&room) {
@@ -373,7 +371,7 @@ impl Client {
     /// lost through a disconnect: their human already agreed to them.
     fn rejoin_debug(&self, server: &ServerAddr) {
         let me = self.member();
-        let pending: Vec<(RoomId, schwitzer_proto::DebugId)> = {
+        let pending: Vec<(RoomId, DebugId)> = {
             let rejoin = lock(&self.0.debug_rejoin);
             lock(&self.0.rooms)
                 .iter()
@@ -420,7 +418,7 @@ impl Client {
     }
 }
 
-fn upsert_task(state: &mut RoomState, task: schwitzer_proto::Task) {
+fn upsert_task(state: &mut RoomState, task: Task) {
     match state.tasks.binary_search_by_key(&task.number, |t| t.number) {
         Ok(i) => state.tasks[i] = task,
         Err(i) => state.tasks.insert(i, task),
@@ -428,7 +426,7 @@ fn upsert_task(state: &mut RoomState, task: schwitzer_proto::Task) {
 }
 
 /// Keeps the projects ordered by id.
-fn upsert_project(state: &mut RoomState, project: schwitzer_proto::Project) {
+fn upsert_project(state: &mut RoomState, project: Project) {
     match state.projects.binary_search_by_key(&project.id, |p| p.id) {
         Ok(i) => state.projects[i] = project,
         Err(i) => state.projects.insert(i, project),

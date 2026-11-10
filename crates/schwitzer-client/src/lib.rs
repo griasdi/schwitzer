@@ -371,11 +371,16 @@ impl Client {
         Some(taken)
     }
 
-    /// The id of `room`'s running debug session.
-    fn debug_id(&self, room: RoomId) -> Result<DebugId, ClientError> {
+    /// The id of `room`'s running debug session, if any.
+    fn current_debug(&self, room: RoomId) -> Option<DebugId> {
         lock(&self.0.rooms)
             .get(&room)
             .and_then(|entry| entry.state.debug.as_ref().map(|s| s.id))
+    }
+
+    /// The id of `room`'s running debug session.
+    fn debug_id(&self, room: RoomId) -> Result<DebugId, ClientError> {
+        self.current_debug(room)
             .ok_or(ClientError::Api(ApiError::NoDebugSession))
     }
 
