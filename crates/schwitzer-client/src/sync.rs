@@ -104,7 +104,7 @@ impl Client {
             Response::Hello { .. } => {
                 return Err(ClientError::Net("server saw another key".into()));
             }
-            other => return Err(crate::unexpected(&other)),
+            other => return Err(ClientError::unexpected(&other)),
         }
         lock(&conn.joined).clear();
         let gone = self.join_pending(conn, session).await?;

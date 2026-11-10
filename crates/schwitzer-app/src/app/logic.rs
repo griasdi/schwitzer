@@ -5,8 +5,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use schwitzer_proto::{
-    ClaimToken, Member, MemberId, Part, RoomId, RoomState, ServerAddr, SessionInfo, Stage,
-    Suggestion, Task, Work, caps,
+    ClaimToken, Member, MemberId, Part, Response, RoomId, RoomState, ServerAddr, SessionInfo,
+    Stage, Suggestion, Task, Work, caps,
 };
 use schwitzer_release::Channel;
 use serde::{Deserialize, Serialize};
@@ -356,6 +356,11 @@ pub fn member_name(members: &[Member], id: &MemberId) -> String {
         .map(|m| m.name.as_str())
         .filter(|name| !name.is_empty())
         .map_or_else(|| id.short(), str::to_owned)
+}
+
+/// The banner for a reply that does not answer the request.
+pub fn unexpected(response: &Response) -> String {
+    format!("Unexpected reply: {response:?}")
 }
 
 /// The tooltip of an idea's vote count: "No votes yet", or "Upvoted by alice, bob" in the

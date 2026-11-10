@@ -107,7 +107,7 @@ impl App {
                 self.read_project_dirs();
                 self.notify("Project created");
             }
-            Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
+            Ok(other) => self.banner = Some(logic::unexpected(&other)),
             Err(e) => self.banner = Some(e),
         }
         Task::none()
@@ -136,7 +136,7 @@ impl App {
                 self.forms.project_name = project.name;
                 self.notify("Project renamed");
             }
-            Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
+            Ok(other) => self.banner = Some(logic::unexpected(&other)),
             Err(e) => self.banner = Some(e),
         }
         Task::none()
@@ -162,7 +162,7 @@ impl App {
                     return self.open_page(Page::RoomSettings);
                 }
             }
-            Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
+            Ok(other) => self.banner = Some(logic::unexpected(&other)),
             Err(e) => self.banner = Some(e),
         }
         Task::none()

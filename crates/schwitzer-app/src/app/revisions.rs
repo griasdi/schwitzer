@@ -107,6 +107,12 @@ impl App {
         Task::batch([self.history_request(number, part), top()])
     }
 
+    /// Closes the revisions page and shows `banner`: what was loading did not arrive.
+    fn revisions_failed(&mut self, banner: String) {
+        self.revisions = None;
+        self.banner = Some(banner);
+    }
+
     pub(super) fn history_loaded(
         &mut self,
         number: u64,
@@ -132,14 +138,8 @@ impl App {
                 *diff = diff_for(*part, &list, *selected);
                 *versions = Some(list);
             }
-            Ok(other) => {
-                self.revisions = None;
-                self.banner = Some(format!("Unexpected reply: {other:?}"));
-            }
-            Err(e) => {
-                self.revisions = None;
-                self.banner = Some(e);
-            }
+            Ok(other) => self.revisions_failed(logic::unexpected(&other)),
+            Err(e) => self.revisions_failed(e),
         }
         Task::none()
     }
@@ -241,14 +241,8 @@ impl App {
                     *slot = Some(loaded);
                 }
             }
-            Ok(other) => {
-                self.revisions = None;
-                self.banner = Some(format!("Unexpected reply: {other:?}"));
-            }
-            Err(e) => {
-                self.revisions = None;
-                self.banner = Some(e);
-            }
+            Ok(other) => self.revisions_failed(logic::unexpected(&other)),
+            Err(e) => self.revisions_failed(e),
         }
         Task::none()
     }

@@ -161,7 +161,7 @@ impl App {
                 };
                 match client.request(room, claim).await? {
                     Response::Claimed(Some(task)) => Ok((name, task)),
-                    other => Err(ClientError::Proto(format!("unexpected reply: {other:?}"))),
+                    other => Err(ClientError::unexpected(&other)),
                 }
             },
             Message::Picked,
@@ -305,7 +305,7 @@ impl App {
                 }
                 self.notify(&format!("#{} moved to {target}", task.number));
             }
-            Ok(other) => self.banner = Some(format!("Unexpected reply: {other:?}")),
+            Ok(other) => self.banner = Some(logic::unexpected(&other)),
             Err(e) => self.banner = Some(e),
         }
         Task::none()

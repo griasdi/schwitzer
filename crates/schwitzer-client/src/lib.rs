@@ -45,6 +45,13 @@ pub enum ClientError {
     Proto(String),
 }
 
+impl ClientError {
+    /// The error for a reply that does not answer the request.
+    pub fn unexpected(response: &Response) -> Self {
+        Self::Proto(format!("unexpected reply: {response:?}"))
+    }
+}
+
 impl From<ApiError> for ClientError {
     fn from(e: ApiError) -> Self {
         Self::Api(e)
@@ -224,7 +231,7 @@ impl Client {
                 self.remember(key.clone()).mark_joined(key.token);
                 Ok(key)
             }
-            other => Err(unexpected(&other)),
+            other => Err(ClientError::unexpected(&other)),
         }
     }
 
@@ -236,7 +243,7 @@ impl Client {
                 self.remember(key.clone()).mark_joined(key.token);
                 Ok(id)
             }
-            other => Err(unexpected(&other)),
+            other => Err(ClientError::unexpected(&other)),
         }
     }
 
@@ -298,7 +305,7 @@ impl Client {
                 lock(&self.0.debug_rejoin).insert(room, session.id);
                 Ok(session)
             }
-            other => Err(unexpected(&other)),
+            other => Err(ClientError::unexpected(&other)),
         }
     }
 
@@ -346,7 +353,7 @@ impl Client {
         };
         match self.request(room, req).await? {
             Response::DebugInstruction(instruction) => Ok(instruction),
-            other => Err(unexpected(&other)),
+            other => Err(ClientError::unexpected(&other)),
         }
     }
 
@@ -463,8 +470,4 @@ fn server_of(keys: &[RoomKey], room: RoomId) -> Option<&ServerAddr> {
     keys.iter()
         .find(|key| RoomId::of(&key.token) == room)
         .map(|key| &key.server)
-}
-
-fn unexpected(response: &Response) -> ClientError {
-    ClientError::Proto(format!("unexpected reply {response:?}"))
 }
