@@ -132,7 +132,7 @@ pub fn project_page(app: &App) -> Element<'_, Message> {
         .spacing(SP_2)
         .align_y(Alignment::Center),
         muted(
-            "The omp plugin lets /schwitzer plan, build and propose this project's tasks in \
+            "The omp plugin lets omp's /schwitzer commands work on this project's tasks in \
              that repo."
         ),
     ]
