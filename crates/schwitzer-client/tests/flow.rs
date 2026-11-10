@@ -547,7 +547,7 @@ async fn a_member_who_sends_too_fast_is_told_to_wait() {
         assert!(sent < 200, "never refused");
         match a.request(room, set_priority()).await {
             Ok(_) => sent += 1,
-            Err(e) => break api_error::<()>(Err(e)),
+            Err(e) => break api_error(Err::<(), _>(e)),
         }
     };
     assert_eq!(
@@ -612,7 +612,7 @@ async fn a_full_room_refuses_more_and_its_snapshot_still_arrives() {
             plan: "x".repeat(caps::PLAN),
         };
         if let Err(e) = a.request(room, edit).await {
-            refused = Some((i, api_error::<()>(Err(e)), proposal.number));
+            refused = Some((i, api_error(Err::<(), _>(e)), proposal.number));
             break;
         }
     }
@@ -1251,19 +1251,12 @@ async fn a_member_is_in_at_most_50_rooms() {
         first.get_or_insert(RoomId::of(&key.token));
     }
     assert_eq!(
-        api_error(
-            a.create_room(addr.clone(), "one more".into())
-                .await
-                .map(|_| ())
-        ),
+        api_error(a.create_room(addr.clone(), "one more".into()).await),
         too_many
     );
 
     let key_b = b.create_room(addr.clone(), "bob's".into()).await.unwrap();
-    assert_eq!(
-        api_error(a.join_room(key_b.clone()).await.map(|_| ())),
-        too_many
-    );
+    assert_eq!(api_error(a.join_room(key_b.clone()).await), too_many);
 
     a.leave_room(first.unwrap()).await.unwrap();
     assert_eq!(
