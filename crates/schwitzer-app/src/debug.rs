@@ -222,8 +222,16 @@ impl Outbox {
 /// What of each received file has been written.
 #[derive(Default)]
 pub struct Inbox {
-    next: HashMap<(MemberId, String), u64>,
-    size: HashMap<(MemberId, String), u64>,
+    files: HashMap<(MemberId, String), Progress>,
+}
+
+/// How far one received file got.
+#[derive(Default)]
+struct Progress {
+    /// The offset the next chunk is expected at.
+    next: u64,
+    /// The bytes written to the file so far.
+    size: u64,
 }
 
 impl Inbox {
@@ -238,20 +246,18 @@ impl Inbox {
         offset: u64,
         data: &[u8],
     ) -> io::Result<u64> {
-        let key = (from, stream.to_owned());
-        let next = self.next.get(&key).copied().unwrap_or(0);
-        let restart = offset == 0 && next > 0;
+        let progress = self.files.entry((from, stream.to_owned())).or_default();
+        let restart = offset == 0 && progress.next > 0;
         let skip = if restart {
             0
         } else {
-            next.saturating_sub(offset).min(data.len() as u64) as usize
+            progress.next.saturating_sub(offset).min(data.len() as u64) as usize
         };
-        self.next.insert(key.clone(), offset + data.len() as u64);
-        let size = self.size.entry(key).or_default();
+        progress.next = offset + data.len() as u64;
         if restart {
-            *size = 0;
+            progress.size = 0;
         }
-        let room = MAX_IN_FILE.saturating_sub(*size) as usize;
+        let room = MAX_IN_FILE.saturating_sub(progress.size) as usize;
         let data = &data[skip..];
         let data = &data[..data.len().min(room)];
         if let Some(dir) = file.parent() {
@@ -266,7 +272,7 @@ impl Inbox {
             return Ok(0);
         }
         f.write_all(data)?;
-        *size += data.len() as u64;
+        progress.size += data.len() as u64;
         Ok(data.len() as u64)
     }
 }
