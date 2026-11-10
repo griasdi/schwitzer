@@ -103,6 +103,11 @@ CREATE TABLE votes(room BLOB NOT NULL, number INTEGER NOT NULL, member BLOB NOT 
     PRIMARY KEY(room, number, member));
 ";
 
+/// `MIGRATIONS[i]` takes a database from schema version `i + 1` to `i + 2`; a database at
+/// version `v` runs `MIGRATIONS[v - 1..]` in one transaction.
+const MIGRATIONS: [&str; 5] = [MIGRATE_1, MIGRATE_2, MIGRATE_3, MIGRATE_4, MIGRATE_5];
+const _: () = assert!(MIGRATIONS.len() as i64 + 1 == SCHEMA_VERSION);
+
 /// Why a store closure failed.
 #[derive(Debug)]
 pub enum Fail {
@@ -163,26 +168,12 @@ impl Store {
                 conn.execute_batch(SCHEMA).context("applying schema")?;
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            1..=5 => {
+            1..SCHEMA_VERSION => {
                 let tx = conn.transaction()?;
-                if version == 1 {
-                    tx.execute_batch(MIGRATE_1)
-                        .context("migrating from schema version 1")?;
+                for (i, sql) in MIGRATIONS.iter().enumerate().skip(version as usize - 1) {
+                    tx.execute_batch(sql)
+                        .with_context(|| format!("migrating from schema version {}", i + 1))?;
                 }
-                if version <= 2 {
-                    tx.execute_batch(MIGRATE_2)
-                        .context("migrating from schema version 2")?;
-                }
-                if version <= 3 {
-                    tx.execute_batch(MIGRATE_3)
-                        .context("migrating from schema version 3")?;
-                }
-                if version <= 4 {
-                    tx.execute_batch(MIGRATE_4)
-                        .context("migrating from schema version 4")?;
-                }
-                tx.execute_batch(MIGRATE_5)
-                    .context("migrating from schema version 5")?;
                 tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
                 tx.commit()?;
                 tracing::info!(
@@ -2112,15 +2103,18 @@ CREATE INDEX notes_by_task ON notes(room, number);
         assert_eq!(version, SCHEMA_VERSION);
     }
 
-    #[test]
-    fn schema_2_gains_the_waits_table() {
+    /// A current database cut back to schema version `from` by dropping `later_tables` (those of
+    /// the versions after it), then opened again and so migrated. Returns it with a room that
+    /// has the project "app" and its member.
+    fn an_older_schema_is_migrated(
+        from: i64,
+        later_tables: &[&str],
+    ) -> (Connection, RoomId, MemberId) {
         let conn = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
-        conn.execute_batch(
-            "DROP TABLE waits; DROP TABLE versions; DROP TABLE suggestions; DROP TABLE annotations;
-             DROP TABLE votes;
-             PRAGMA user_version = 2;",
-        )
-        .unwrap();
+        for table in later_tables {
+            conn.execute_batch(&format!("DROP TABLE {table};")).unwrap();
+        }
+        conn.pragma_update(None, "user_version", from).unwrap();
         let conn = into_conn(Store::init(conn).unwrap());
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
@@ -2130,6 +2124,68 @@ CREATE INDEX notes_by_task ON notes(room, number);
         let me = member(1);
         create_room(&conn, &room, "room", &me, NOW).unwrap();
         create_project(&conn, &room, "app", NOW).unwrap();
+        (conn, room, me)
+    }
+
+    /// The tables of `conn` with their columns (name, type, not null, primary key position;
+    /// without the order and the defaults, which `ALTER TABLE ... ADD COLUMN` changes) and the
+    /// other schema objects with their SQL, spaces normalized.
+    fn schema_shape(conn: &Connection) -> Vec<String> {
+        let mut objects = conn
+            .prepare("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name")
+            .unwrap();
+        let rows: Vec<(String, String, String, Option<String>)> = objects
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        rows.into_iter()
+            .map(|(kind, name, table, sql)| {
+                if kind != "table" {
+                    let sql = sql.unwrap_or_default();
+                    let sql: Vec<&str> = sql.split_whitespace().collect();
+                    return format!("{kind} {name} on {table}: {}", sql.join(" "));
+                }
+                let mut columns = conn
+                    .prepare(
+                        "SELECT name, type, \"notnull\", pk FROM pragma_table_info(?1)
+                         ORDER BY name",
+                    )
+                    .unwrap();
+                let columns: Vec<String> = columns
+                    .query_map([&name], |r| {
+                        Ok(format!(
+                            "{} {} {} {}",
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, i64>(2)?,
+                            r.get::<_, i64>(3)?
+                        ))
+                    })
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect();
+                format!("table {name}: {}", columns.join(", "))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_oldest_schema_migrates_to_the_current_one() {
+        let old = Connection::open_in_memory().unwrap();
+        old.execute_batch(SCHEMA_V1).unwrap();
+        old.pragma_update(None, "user_version", 1).unwrap();
+        let migrated = into_conn(Store::init(old).unwrap());
+        let fresh = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
+        assert_eq!(schema_shape(&migrated), schema_shape(&fresh));
+    }
+
+    #[test]
+    fn schema_2_gains_the_waits_table() {
+        let (conn, room, me) = an_older_schema_is_migrated(
+            2,
+            &["waits", "versions", "suggestions", "annotations", "votes"],
+        );
         let a = task_in(&conn, &room, &me, Stage::Proposed);
         let b = task_in(&conn, &room, &me, Stage::Proposed);
         assert_eq!(
@@ -2522,36 +2578,14 @@ CREATE INDEX notes_by_task ON notes(room, number);
 
     #[test]
     fn schema_4_gains_the_annotations_table() {
-        let conn = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
-        conn.execute_batch("DROP TABLE annotations; DROP TABLE votes; PRAGMA user_version = 4;")
-            .unwrap();
-        let conn = into_conn(Store::init(conn).unwrap());
-        let version: i64 = conn
-            .pragma_query_value(None, "user_version", |r| r.get(0))
-            .unwrap();
-        assert_eq!(version, SCHEMA_VERSION);
-        let room = RoomId([7; 32]);
-        let me = member(1);
-        create_room(&conn, &room, "room", &me, NOW).unwrap();
-        create_project(&conn, &room, "app", NOW).unwrap();
+        let (conn, room, me) = an_older_schema_is_migrated(4, &["annotations", "votes"]);
         let n = task_in(&conn, &room, &me, Stage::Proposed);
         annotate(&conn, &room, &me, n, Part::Details, 1, "b", "c", NOW).unwrap();
     }
 
     #[test]
     fn schema_5_gains_the_votes_table() {
-        let conn = into_conn(Store::init(Connection::open_in_memory().unwrap()).unwrap());
-        conn.execute_batch("DROP TABLE votes; PRAGMA user_version = 5;")
-            .unwrap();
-        let conn = into_conn(Store::init(conn).unwrap());
-        let version: i64 = conn
-            .pragma_query_value(None, "user_version", |r| r.get(0))
-            .unwrap();
-        assert_eq!(version, SCHEMA_VERSION);
-        let room = RoomId([7; 32]);
-        let me = member(1);
-        create_room(&conn, &room, "room", &me, NOW).unwrap();
-        create_project(&conn, &room, "app", NOW).unwrap();
+        let (conn, room, me) = an_older_schema_is_migrated(5, &["votes"]);
         let n = task_in(&conn, &room, &me, Stage::Idea);
         assert_eq!(
             vote(&conn, &room, &me, n, true, NOW).unwrap().votes,

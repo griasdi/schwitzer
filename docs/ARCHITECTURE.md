@@ -231,7 +231,7 @@ sequenceDiagram
 - Room and task size (`lib.rs`): a room snapshot (`Event::Room`) stays under `ROOM_BYTES = MAX_EVENT_FRAME − 64 KiB`, a task under `TASK_BYTES = MAX_RPC_BYTES − 16`, so the snapshot and the task reply always fit their frames. Every task mutation (`mutate`) checks both, a project mutation, a first `JoinRoom` and a non-empty `PublishSessions` check the room, inside the transaction, so a refusal rolls back. The 64 KiB headroom covers name changes, which are not checked. Refusals: `the room is full: its tasks, notes, members and sessions must stay under 4 MiB`, `the task is full: with its notes it must stay under 1 MiB`. The server has no delete; a full room still takes edits that shorten bodies or plans.
 - Rooms per member (`rpc.rs`): `MAX_ROOMS_PER_MEMBER = 50` memberships; `CreateRoom` and a first `JoinRoom` above it are refused with `you are in 50 rooms already; leave one to create or join another`. Leaving frees a slot; the left room stays on disk.
 
-**Store** (`store.rs`): SQLite in WAL mode with `synchronous=NORMAL`, one connection behind a mutex, used from `spawn_blocking`. `SCHEMA_VERSION = 6` sits in `PRAGMA user_version`: 0 creates the schema, 1 to 5 migrate in one transaction (`MIGRATE_1` for 1, `MIGRATE_2` for 1 and 2, `MIGRATE_3` for 1 to 3, which makes every task's current text its version 1, `MIGRATE_4` for 1 to 4, then `MIGRATE_5`), any other version is refused.
+**Store** (`store.rs`): SQLite in WAL mode with `synchronous=NORMAL`, one connection behind a mutex, used from `spawn_blocking`. `SCHEMA_VERSION = 6` sits in `PRAGMA user_version`: 0 creates the schema, 1 to 5 migrate in one transaction, running `MIGRATIONS[version - 1..]` (`MIGRATIONS[i]` takes schema `i + 1` to `i + 2`; `MIGRATE_3`, for instance, makes every task's current text its version 1), any other version is refused.
 
 |Table|Holds|
 |---|---|
@@ -619,7 +619,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |New request or event|`schwitzer-proto/src/rpc.rs` or `events.rs` (append the variant; bump `PROTOCOL_VERSION` when old peers would break), `schwitzer-server/src/rpc.rs` (`dispatch`, validation), `store.rs`, the caller in `app/tasks.rs` (task actions), `app/projects.rs` (rooms and projects) or `app/mod.rs`|
 |New debug request|`schwitzer-proto/src/rpc.rs` and `events.rs`, `schwitzer-server/src/debug.rs` (`DebugRuns`) and its handler in `rpc.rs`, a `Client::debug_*` method in `schwitzer-client/src/lib.rs`, `schwitzer-app/src/debug.rs` (the worker), `app/debug_session.rs` (the lifecycle in the app), `app/debug_view.rs` (the page), `mcp/tools.rs`, `omp-plugin/index.ts`|
 |New stage, decision or claim rule|`model.rs` (append; `Task::next_stage`, `Task::legal_decisions`), `store.rs` (`stage_to_int` …, `claim`), `app/logic.rs` (`Group::of`, `stage_label`, `lamp`), `mcp/tools.rs` (`StageArg`), the plugin (`STAGE`)|
-|Schema change|`store.rs` (`SCHEMA`, a new `MIGRATE_n`, `SCHEMA_VERSION`)|
+|Schema change|`store.rs` (`SCHEMA`, a new `MIGRATE_n` and its entry at the end of `MIGRATIONS`, `SCHEMA_VERSION`; a compile-time check ties the two)|
 |New MCP tool or argument|`mcp/tools.rs`, `omp-plugin/index.ts` (`TOOLS`), `omp-plugin/README.md`|
 |New `/schwitzer` subcommand or prompt text|`omp-plugin/index.ts`, `omp-plugin/README.md`; a rebuilt app marks every installed plugin out of date and rewrites it|
 |Shared session fields|`sessions.rs` (`FileState::apply`), `logic::shared_sessions`, `SessionInfo` in `model.rs` (a wire change), `app/live.rs`|
