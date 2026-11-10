@@ -259,7 +259,6 @@ pub enum Message {
     AnnotationSaved(Result<Response, String>),
     /// Marks a comment resolved (`true`) or open again.
     ResolveAnnotation(u64, bool),
-    AnnotationResolved(Result<Response, String>),
     ToggleResolved,
     SetPriority(Priority),
     AddWait(u64),
@@ -1582,12 +1581,6 @@ impl App {
             Message::SaveAnnotation => self.save_annotation(),
             Message::AnnotationSaved(result) => self.annotation_saved(result),
             Message::ResolveAnnotation(id, resolved) => self.resolve_annotation(id, resolved),
-            Message::AnnotationResolved(result) => {
-                if let Err(e) = result {
-                    self.banner = Some(e);
-                }
-                Task::none()
-            }
             Message::ToggleResolved => {
                 self.show_resolved = !self.show_resolved;
                 Task::none()

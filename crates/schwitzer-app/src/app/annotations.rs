@@ -6,7 +6,7 @@ use iced::widget::{operation, text_editor};
 use schwitzer_proto::{Part, Request, Response};
 
 use super::{App, Message};
-use crate::bridge::call;
+use crate::bridge::{call, fire};
 
 /// The comment being written on a block of the open task; not kept over a restart.
 pub(super) struct AnnotationDraft {
@@ -98,6 +98,6 @@ impl App {
             annotation: id,
             resolved,
         };
-        call(self.request(room, req), Message::AnnotationResolved)
+        fire(self.request(room, req))
     }
 }
