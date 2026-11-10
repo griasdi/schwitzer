@@ -563,33 +563,36 @@ fn work_name(work: Work) -> &'static str {
     }
 }
 
-/// Whether `task` of `room` is in the fast lane, by itself or through its project.
-fn in_fast_lane(lanes: &FastLane, room: &RoomId, task: &Task) -> bool {
-    lanes.covers(room, task.number, Some(task.project))
-}
-
-/// Whether omp may make `decision` on task `number` of `room` (`task` when the client knows
-/// it): approving a plan always, everything else only in the fast lane.
-fn decision_allowed(
+/// Whether omp may make `decision` on task `number` of `room`: approving a plan always,
+/// everything else only in the fast lane.
+fn require_decision_lane(
     lanes: &FastLane,
-    room: &RoomId,
+    room: &RoomRef,
     number: u64,
-    task: Option<&Task>,
     decision: Decision,
-) -> bool {
-    decision == Decision::Approve || lanes.covers(room, number, task.map(|t| t.project))
+) -> Result<(), String> {
+    if decision == Decision::Approve {
+        Ok(())
+    } else {
+        require_lane(lanes, room, number)
+    }
 }
 
-/// The refusal of a decision outside the fast lane.
-fn lane_closed(number: u64, room: &RoomRef, task: Option<&Task>) -> String {
+/// Refuses unless task `number` of `room` is in the fast lane, by itself or through its
+/// project (when the client knows the task).
+fn require_lane(lanes: &FastLane, room: &RoomRef, number: u64) -> Result<(), String> {
+    let task = room.task(number);
+    if lanes.covers(&room.id, number, task.map(|t| t.project)) {
+        return Ok(());
+    }
     let project = task.map_or_else(
         || "unknown".to_owned(),
         |t| project_name(room.projects(), t.project),
     );
-    format!(
+    Err(format!(
         "The fast lane is off for task #{number} and its project \"{project}\". Turn it on in \
          Schwitzer (the zap button in the header, or the open task), or decide there."
-    )
+    ))
 }
 
 /// The rows of `decisions` for `room`: its tasks in the fast lane, ordered by number. With
@@ -602,7 +605,7 @@ fn decision_rows(room: &RoomRef, lanes: &FastLane, task: Option<u64>) -> Vec<Val
     let mut tasks: Vec<&Task> = state
         .tasks
         .iter()
-        .filter(|t| in_fast_lane(lanes, &room.id, t))
+        .filter(|t| lanes.covers(&room.id, t.number, Some(t.project)))
         .filter(|t| match task {
             Some(n) => t.number == n,
             None => {
@@ -1383,10 +1386,7 @@ impl Tools {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
             let decision = Decision::from(args.decision);
-            let task = room.task(args.task);
-            if !decision_allowed(&self.fast_lane, &room.id, args.task, task, decision) {
-                return Err(lane_closed(args.task, &room, task));
-            }
+            require_decision_lane(&self.fast_lane, &room, args.task, decision)?;
             let task = self
                 .task_request(
                     &room,
@@ -1451,11 +1451,8 @@ impl Tools {
     ) -> CallToolResult {
         Self::bounded(async {
             let room = self.room(args.room.as_deref())?;
-            let task = room.task(args.task);
             // Applying or discarding is no approval: it needs the fast lane.
-            if !decision_allowed(&self.fast_lane, &room.id, args.task, task, Decision::Accept) {
-                return Err(lane_closed(args.task, &room, task));
-            }
+            require_lane(&self.fast_lane, &room, args.task)?;
             let request = if args.apply {
                 Request::ApplySuggestion {
                     room: room.id,
@@ -1769,21 +1766,29 @@ mod tests {
 
     #[test]
     fn only_approval_passes_outside_the_fast_lane() {
-        let room = RoomId([5; 32]);
-        let proposal = task(7, Stage::Proposed, None);
+        let known = room(5, "r", vec![task(7, Stage::Proposed, None)]);
+        let unknown = RoomRef {
+            id: known.id,
+            state: None,
+        };
         let lanes = FastLane::default();
         let allowed =
-            |task: Option<&Task>, decision| decision_allowed(&lanes, &room, 7, task, decision);
-        assert!(allowed(None, Decision::Approve));
-        assert!(!allowed(Some(&proposal), Decision::Accept));
-        lanes.change(|lanes| lanes.set_project(&room, 1, true));
-        assert!(allowed(Some(&proposal), Decision::Accept));
-        assert!(!allowed(None, Decision::Accept));
+            |room: &RoomRef, decision| require_decision_lane(&lanes, room, 7, decision).is_ok();
+        assert!(allowed(&unknown, Decision::Approve));
+        assert!(!allowed(&known, Decision::Accept));
+        let refusal = require_lane(&lanes, &known, 7).unwrap_err();
+        assert!(refusal.starts_with("The fast lane is off for task #7 and its project \"app\"."));
+        let refusal = require_lane(&lanes, &unknown, 7).unwrap_err();
+        assert!(refusal.contains("task #7 and its project \"unknown\""));
+        lanes.change(|lanes| lanes.set_project(&known.id, 1, true));
+        assert!(allowed(&known, Decision::Accept));
+        assert!(!allowed(&unknown, Decision::Accept));
         lanes.change(|lanes| {
-            lanes.set_project(&room, 1, false);
-            lanes.set_task(&room, 7, true);
+            lanes.set_project(&known.id, 1, false);
+            lanes.set_task(&known.id, 7, true);
         });
-        assert!(allowed(None, Decision::Accept));
+        assert!(allowed(&unknown, Decision::Accept));
+        assert!(require_lane(&lanes, &unknown, 7).is_ok());
     }
 
     #[test]
