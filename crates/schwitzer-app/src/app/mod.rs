@@ -12,6 +12,7 @@ mod list;
 mod live;
 pub mod logic;
 mod main_view;
+mod navigation;
 mod pages;
 mod plugins;
 mod projects;
@@ -46,7 +47,7 @@ use schwitzer_proto::{
 use serde::{Deserialize, Serialize};
 
 use self::chrome::RoomChoice;
-use self::list::{reveal, reveal_bottom};
+use self::list::reveal_bottom;
 use self::logic::{Group, ServerStatus};
 use self::rooms::Rooms;
 use crate::bridge::{self, ClientKey, call};
@@ -880,45 +881,12 @@ impl App {
             && self.prompted_plugin().is_none()
     }
 
-    /// Brings up the main page for Ctrl+N and Ctrl+L, which type into its list; false when it
-    /// shows no list (first start, no project, no repo, the plugin prompt).
-    fn show_main_for_input(&mut self) -> bool {
-        if self.page == Page::FirstStart || !self.shows_list() {
-            return false;
-        }
-        if self.page != Page::Main {
-            self.page = Page::Main;
-            self.reset_drafts();
-        }
-        self.reading = None;
-        self.revisions = None;
-        true
-    }
-
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
         self.settle_reading();
         let settle = self.settle_revisions();
         self.refresh_markdown();
         Task::batch([task, settle])
-    }
-
-    /// Drops the reading page unless the main page shows it, its task is still the open one and
-    /// that task still has the text: Ctrl+N, Ctrl+, , a room or project switch, a task that
-    /// vanished or lost its plan all close it.
-    fn settle_reading(&mut self) {
-        let Some((number, part)) = self.reading else {
-            return;
-        };
-        let keep = self.page == Page::Main
-            && self.expanded == Some(Expanded::Task(number))
-            && self.open().is_some_and(|(_, task)| match part {
-                Reading::Proposal => !task.body.is_empty(),
-                Reading::Plan => task.has_plan(),
-            });
-        if !keep {
-            self.reading = None;
-        }
     }
 
     fn handle(&mut self, message: Message) -> Task<Message> {
@@ -1031,27 +999,8 @@ impl App {
                 }
             }
 
-            Message::OpenNewTask { idea } => {
-                if !self.show_main_for_input() {
-                    return Task::none();
-                }
-                if matches!(self.expanded, Some(Expanded::Task(_))) {
-                    self.reset_drafts();
-                }
-                self.expanded = Some(Expanded::New { idea });
-                self.collapsed.remove(if idea {
-                    &Group::Ideas
-                } else {
-                    &Group::Proposals
-                });
-                Task::batch([operation::focus("proposal-title"), reveal("new-task")])
-            }
-            Message::FocusIdea => {
-                if !self.show_main_for_input() {
-                    return Task::none();
-                }
-                operation::focus("quick-idea")
-            }
+            Message::OpenNewTask { idea } => self.open_new_task(idea),
+            Message::FocusIdea => self.focus_idea(),
             Message::OpenPage(page) => self.open_page(page),
             Message::OpenRoom(id) => {
                 self.select(Some(id));
@@ -1077,62 +1026,9 @@ impl App {
                 self.license_open = (self.license_open != Some(i)).then_some(i);
                 Task::none()
             }
-            Message::OpenTask(number) => {
-                let Some((room, project, group)) = self.selected_state().and_then(|s| {
-                    let task = s.task(number)?;
-                    Some((s.id, task.project, Group::of(task)))
-                }) else {
-                    return Task::none();
-                };
-                if self.page == Page::FirstStart {
-                    return Task::none();
-                }
-                if self.choose_project(room, project) {
-                    self.sync_project_form();
-                }
-                self.page = Page::Main;
-                if self.expanded != Some(Expanded::Task(number)) {
-                    self.reset_drafts();
-                }
-                self.expanded = Some(Expanded::Task(number));
-                self.collapsed.remove(&group);
-                reveal("open-task")
-            }
-            Message::ToggleTask(number) => {
-                if self.expanded == Some(Expanded::Task(number)) {
-                    self.close_task();
-                    return Task::none();
-                }
-                self.reset_drafts();
-                self.expanded = Some(Expanded::Task(number));
-                reveal("open-task")
-            }
-            Message::Back => {
-                if self.page == Page::FirstStart {
-                    self.confirm_projects_dirs();
-                    return Task::none();
-                }
-                if self.confirm.take().is_some() {
-                    return Task::none();
-                }
-                if self.annotating.take().is_some() {
-                    return Task::none();
-                }
-                if self.revisions.take().is_some() {
-                    return reveal("open-task");
-                }
-                if self.reading.take().is_some() {
-                    return reveal("open-task");
-                }
-                if self.expanded.take().is_some() {
-                    self.reset_drafts();
-                    return Task::none();
-                }
-                match self.page.parent() {
-                    Some(parent) => self.open_page(parent),
-                    None => Task::none(),
-                }
-            }
+            Message::OpenTask(number) => self.open_task(number),
+            Message::ToggleTask(number) => self.toggle_task(number),
+            Message::Back => self.back(),
             Message::ToggleGroup(group) => {
                 if !self.collapsed.remove(&group) {
                     self.collapsed.insert(group);
@@ -1155,13 +1051,7 @@ impl App {
                 self.plan_folded = !self.plan_folded;
                 Task::none()
             }
-            Message::Read(part) => {
-                let Some(Expanded::Task(n)) = self.expanded else {
-                    return Task::none();
-                };
-                self.reading = Some((n, part));
-                operation::snap_to(pages::BODY_ID, operation::RelativeOffset::START)
-            }
+            Message::Read(part) => self.read(part),
 
             Message::SelectRoom(id) => {
                 self.select(Some(id));
@@ -1519,22 +1409,6 @@ impl App {
             .unwrap_or_default();
     }
 
-    /// Opens `page` at its top. Drafts and a pending confirmation stay only when it is open
-    /// already. The first-start page stays until its confirmation.
-    fn open_page(&mut self, page: Page) -> Task<Message> {
-        if self.page == Page::FirstStart {
-            return Task::none();
-        }
-        if self.page != page {
-            self.reset_drafts();
-            self.confirm = None;
-        }
-        self.expanded = None;
-        self.page = page;
-        self.sync_project_form();
-        operation::snap_to(pages::BODY_ID, operation::RelativeOffset::START)
-    }
-
     /// After the selected room was left or removed: from its page back to Settings.
     fn leave_room_page(&mut self) -> Task<Message> {
         if self.page == Page::RoomSettings {
@@ -1542,19 +1416,6 @@ impl App {
         } else {
             Task::none()
         }
-    }
-
-    /// Shows project `id` of the selected room.
-    fn show_project(&mut self, id: u64) {
-        if let Some(room) = self.selected {
-            self.choose_project(room, id);
-        }
-        self.expanded = None;
-        self.confirm = None;
-        self.reset_drafts();
-        self.sync_project_form();
-        // A repo cloned a moment ago shows as soon as its project is opened.
-        self.read_project_dirs();
     }
 
     /// Enters the default projects folders of every running distro seen for the first time.
@@ -1814,35 +1675,6 @@ impl App {
         self.settings
             .retain_rooms(self.rooms.iter().map(|(id, key, _)| (id, key.to_string())));
         self.save_settings();
-    }
-
-    fn select(&mut self, room: Option<RoomId>) {
-        if self.selected != room {
-            self.selected = room;
-            self.expanded = None;
-            self.confirm = None;
-            self.reset_drafts();
-            self.sync_project_form();
-        }
-    }
-
-    /// Closes the open task and drops its drafts.
-    fn close_task(&mut self) {
-        self.expanded = None;
-        self.reset_drafts();
-    }
-
-    /// Drops the open task's drafts and unfolds its Proposal and Plan: the next task opens with
-    /// both shown.
-    fn reset_drafts(&mut self) {
-        self.task_draft = None;
-        self.plan_draft = None;
-        self.proposal_folded = false;
-        self.plan_folded = false;
-        self.forms.note.clear();
-        self.revisions = None;
-        self.annotating = None;
-        self.show_resolved = false;
     }
 
     /// Opens a web link from task text in the default browser. Other links are refused:
