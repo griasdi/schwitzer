@@ -713,6 +713,19 @@ function ownProjects(config: Config, rows: RoomRow[]): JoinedProject[] {
   return joined;
 }
 
+/** The configured projects of this repo that the app has joined, asked from the app. */
+async function joinedProjects(config: Config): Promise<JoinedProject[]> {
+  return ownProjects(config, await listRooms(config));
+}
+
+/** The joined projects of this repo; tells the user and answers undefined when there is none. */
+async function requireJoined(ctx: Ctx, config: Config): Promise<JoinedProject[] | undefined> {
+  const projects = await joinedProjects(config);
+  if (projects.length > 0) return projects;
+  ctx.ui.notify(NOT_JOINED, "info");
+  return undefined;
+}
+
 /** The projects of the joined rooms `rows` that this repo is not linked to, in list order. */
 function otherProjects(config: Config, rows: RoomRow[]): OtherProject[] {
   const others: OtherProject[] = [];
@@ -907,7 +920,7 @@ async function commitTrailerCheck(event: ToolCallEvent, ctx: Ctx): Promise<{ blo
  *  is skipped. */
 async function unclaimed(config: Config, stage: string): Promise<Candidate[]> {
   const found: Candidate[] = [];
-  for (const { room, roomName, projectName } of ownProjects(config, await listRooms(config))) {
+  for (const { room, roomName, projectName } of await joinedProjects(config)) {
     const tasks = JSON.parse(await tool(config, "list_tasks", { room, project: projectName, stage })) as TaskRow[];
     for (const task of tasks) {
       if (task.claim !== null || (stage === STAGE.build && task.waits_for.length > 0)) continue;
@@ -940,7 +953,7 @@ function severalProjects(found: Candidate[]): boolean {
  *  linked to projects in several rooms may find more than one. */
 async function tasksNumbered(config: Config, number: number): Promise<Candidate[]> {
   const found: Candidate[] = [];
-  for (const p of ownProjects(config, await listRooms(config))) {
+  for (const p of await joinedProjects(config)) {
     const tasks = JSON.parse(await tool(config, "list_tasks", { room: p.room, project: p.projectName })) as TaskRow[];
     const task = tasks.find((t) => t.number === number);
     if (task) found.push({ ...p, task });
@@ -1289,11 +1302,8 @@ async function addIdea(ctx: Ctx, config: Config, text: string): Promise<void> {
     ctx.ui.notify("Type the idea after /schwitzer idea and press Enter.", "info");
     return;
   }
-  const projects = ownProjects(config, await listRooms(config));
-  if (projects.length === 0) {
-    ctx.ui.notify(NOT_JOINED, "info");
-    return;
-  }
+  const projects = await requireJoined(ctx, config);
+  if (!projects) return;
   const target = await pickProject(ctx, projects, "Note the idea in which Schwitzer project?", []);
   if (!target) return;
   let title = text;
@@ -1745,11 +1755,8 @@ async function fastCommand(pi: Pi, ctx: Ctx, config: Config, rest: string): Prom
     return;
   }
   // Only this repo's projects: the task is planned and built here.
-  const own = ownProjects(config, await listRooms(config));
-  if (own.length === 0) {
-    ctx.ui.notify(NOT_JOINED, "info");
-    return;
-  }
+  const own = await requireJoined(ctx, config);
+  if (!own) return;
   const target = await pickProject(ctx, own, "Fast lane in which Schwitzer project?", []);
   if (!target) return;
   fastPending = target;
@@ -2197,12 +2204,10 @@ async function debugCommand(pi: Pi, ctx: CommandCtx, config: Config, stop: boole
     ctx.ui.notify("/schwitzer debug needs omp with a UI.", "info");
     return;
   }
+  const joined = await requireJoined(ctx, config);
+  if (!joined) return;
   const rooms = new Map<string, string>();
-  for (const p of ownProjects(config, await listRooms(config))) if (!rooms.has(p.room)) rooms.set(p.room, p.roomName);
-  if (rooms.size === 0) {
-    ctx.ui.notify(NOT_JOINED, "info");
-    return;
-  }
+  for (const p of joined) if (!rooms.has(p.room)) rooms.set(p.room, p.roomName);
   let room = [...rooms.keys()][0];
   if (rooms.size > 1) {
     const names = [...rooms.values()];
