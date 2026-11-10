@@ -275,6 +275,12 @@ const AWAIT_END_ENTRY = "schwitzer-await-proposal-end";
 /** The repo this plugin lives in: <repo>/.omp/plugins/node_modules/schwitzer. */
 const OWN_ROOT = resolve(import.meta.dir, "../../../..");
 const STAGE: Record<Work, string> = { plan: "accepted", build: "ready" };
+/** The start of the line that links a session to a claim; the app's session scanner reads it. */
+const MARKER = "schwitzer-claim: ";
+const MARKER_RE = new RegExp(`^${MARKER}([0-9a-f]{32})$`, "m");
+function markerLine(token: string): string {
+  return `${MARKER}${token}`;
+}
 const SUBCOMMANDS = [
   { name: "plan", label: "plan · plan a task that waits for a plan" },
   { name: "build", label: "build · build an approved task" },
@@ -1118,7 +1124,7 @@ async function claimPicked(pi: Pi, ctx: Ctx, config: Config, picked: Candidate, 
   );
   // The marker must sit in a user message: that is where the app's session scanner looks.
   const verb = work === "plan" ? "Plan" : "Build";
-  const prompt = `${verb} Schwitzer task #${claim.task} "${claim.title}" from project "${claim.projectName}" in room "${claim.roomName}". schwitzer-claim: ${marker}`;
+  const prompt = `${verb} Schwitzer task #${claim.task} "${claim.title}" from project "${claim.projectName}" in room "${claim.roomName}". ${markerLine(marker)}`;
   if (now && (await startNow(pi, ctx, work, prompt, claim.task))) return;
   ctx.ui.setEditorText(work === "plan" && !planMode(ctx) ? `/plan ${prompt}` : prompt);
   ctx.ui.notify(
@@ -1262,12 +1268,12 @@ async function claimForApproved(ctx: Ctx, config: Config, claim: TaskClaim): Pro
 
 /** The task message that makes a session build `claim` under the build claim `got`. */
 function buildHandoff(claim: TaskClaim, got: Granted): string {
-  return `${taskContext(claim, got.task, "build")}\nThis session builds the task under schwitzer-claim: ${got.marker}`;
+  return `${taskContext(claim, got.task, "build")}\nThis session builds the task under ${markerLine(got.marker)}`;
 }
 
 /** The app's answer to a claim: the marker and the task, or `refused` with the answer. */
 function parseClaim(answer: string): Claimed {
-  const marker = answer.match(/^schwitzer-claim: ([0-9a-f]{32})$/m);
+  const marker = answer.match(MARKER_RE);
   if (!marker) return { refused: answer };
   // The answer: the marker line, a hint line, then the task.
   const task = JSON.parse(answer.split("\n").slice(2).join("\n")) as Record<string, unknown>;
@@ -2131,7 +2137,7 @@ async function replan(ctx: Ctx, config: Config, claim: TaskClaim, reviewId: stri
         ]
       : ["The room left no note on why."]),
     "Revise the plan.",
-    `schwitzer-claim: ${got.marker}`,
+    markerLine(got.marker),
   ]
     .filter(Boolean)
     .join("\n");

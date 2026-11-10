@@ -341,7 +341,7 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use schwitzer_proto::RoomId;
+    use schwitzer_proto::{RoomId, caps};
 
     use super::*;
 
@@ -588,6 +588,22 @@ mod tests {
         lock["plugins"]["schwitzer"]["version"] = json!("0.0.1");
         write(&lock_path(repo.path()), &lock.to_string());
         assert_eq!(state(repo.path(), &config()), Some(PluginState::Outdated));
+    }
+
+    /// The plugin cuts a long idea at the server's caps, so index.ts holds them as numbers.
+    #[test]
+    fn plugin_caps_match_the_protocol() {
+        let cap = |name: &str| -> usize {
+            let (_, rest) = INDEX_TS
+                .split_once(&format!("const {name} = "))
+                .unwrap_or_else(|| panic!("index.ts has no {name}"));
+            let (expr, _) = rest.split_once(';').unwrap();
+            expr.split('*')
+                .map(|factor| factor.trim().parse::<usize>().unwrap())
+                .product()
+        };
+        assert_eq!(cap("TITLE_BYTES"), caps::TITLE);
+        assert_eq!(cap("NOTE_BYTES"), caps::NOTE);
     }
 
     #[test]
