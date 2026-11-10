@@ -18,6 +18,9 @@
 // puts a task into the fast lane: it is accepted and planned at once, and only the plan's
 // approval waits for a human. The decisions go through the app's tools that start "For the omp
 // plugin, not for agents." and are never in TOOLS.
+// /schwitzer revise #n [details|plan] [what to change] lets the agent rewrite the details or
+// the plan of a task and send it with suggest_revision, once the user agrees; a human applies or
+// discards the suggestion in the app.
 // /schwitzer debug starts or joins the debug session of a room (/schwitzer debug stop leaves it):
 // the app streams the files of each member's out folder to the others, and the master's agent
 // sends instructions with schwitzer_debug_instruct. An instruction reaches a participant's agent
@@ -334,7 +337,7 @@ const TOOLS: ToolSpec[] = [
     name: "list_tasks",
     label: "Schwitzer tasks",
     description:
-      "List the tasks of a room, or of one of its projects: number, title, project, stage, priority, who claims it and the tasks it still waits for (`waits_for`: not done yet, so it cannot be built before). Stages: idea (a rough sketch, not proposed yet), proposed, accepted, planned, ready (approved, nobody builds it yet), in_progress, done, rejected.",
+      "List the tasks of a room, or of one of its projects: number, title, project, stage, priority, votes (how many members upvoted it as an idea; ideas with more votes are wanted more), who claims it and the tasks it still waits for (`waits_for`: not done yet, so it cannot be built before). Stages: idea (a rough sketch, not proposed yet), proposed, accepted, planned, ready (approved, nobody builds it yet), in_progress, done, rejected.",
     approval: "read",
     parameters: (z) =>
       z.object({
@@ -381,7 +384,7 @@ const TOOLS: ToolSpec[] = [
           .array(z.number().int())
           .optional()
           .describe(
-            "Numbers of tasks in the same room that must be done before this one can be claimed for building, for example [12]. With `idea`, they are added to what the idea already waits for.",
+            "Numbers of tasks in the same room that must be done before this one can be claimed for building, for example `[12]`. With `idea`, they are added to what the idea already waits for.",
           ),
         blocks: z
           .number()
@@ -513,7 +516,7 @@ const TOOLS: ToolSpec[] = [
     parameters: (z) =>
       z.object({
         room: z.string().optional().describe(ROOM_ARG),
-        text: z.string().describe("The instruction: exactly what to run and what to write to the out folder."),
+        text: z.string().describe("What the participants' agents are to do."),
         to: z
           .array(z.string())
           .optional()
