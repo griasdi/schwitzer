@@ -11,7 +11,7 @@ use schwitzer_release::{Asset, Channel, GitHubRelease};
 use tokio::sync::oneshot;
 use tokio::time::MissedTickBehavior;
 
-use crate::update::AutoUpdate;
+use crate::update::{ASSET_PREFIX, AutoUpdate, asset_suffix};
 use crate::{PROGRAM, State};
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(120);
@@ -52,12 +52,9 @@ pub(crate) fn newest_dev(json: &[u8], platform: &str) -> Result<Option<Published
     let Some(dev) = schwitzer_release::parse_dev(json)? else {
         return Ok(None);
     };
-    let version = schwitzer_release::newest_asset(
-        &dev.assets,
-        "schwitzer-server-",
-        &format!("-{platform}.tar.gz"),
-    )
-    .map(|(version, _)| version);
+    let version =
+        schwitzer_release::newest_asset(&dev.assets, ASSET_PREFIX, &asset_suffix(platform))
+            .map(|(version, _)| version);
     Ok(version.map(|version| Published {
         version,
         assets: dev.assets,

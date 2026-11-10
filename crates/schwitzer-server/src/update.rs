@@ -18,8 +18,16 @@ fn platform() -> Option<&'static str> {
 const MAX_ARCHIVE: u64 = 64 << 20;
 const BINARY: &str = "schwitzer-server";
 
+/// What a server asset's name starts with, before the version.
+pub(crate) const ASSET_PREFIX: &str = "schwitzer-server-";
+
+/// What a server asset's name ends with for `platform`, after the version.
+pub(crate) fn asset_suffix(platform: &str) -> String {
+    format!("-{platform}.tar.gz")
+}
+
 fn asset_name(version: &semver::Version, platform: &str) -> String {
-    format!("schwitzer-server-{version}-{platform}.tar.gz")
+    format!("{ASSET_PREFIX}{version}{}", asset_suffix(platform))
 }
 
 /// The server archive for `platform` among the `assets` of release `version`.
