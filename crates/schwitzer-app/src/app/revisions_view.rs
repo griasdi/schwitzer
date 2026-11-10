@@ -7,12 +7,13 @@ use iced::widget::{Column, Space, column, container, row, text};
 use iced::{Alignment, Element, Length};
 use schwitzer_proto::{MemberId, Part, RoomState, Stage, Task};
 
-use super::icons::{Icon, icon};
 use super::logic::{self, DiffLine};
 use super::revisions::{LoadedSuggestion, RevisionPage};
-use super::widgets::{self, chevron, heading, hrule, id_button, member_tag_of, muted, text_button};
+use super::widgets::{
+    self, byline, chevron, heading, hrule, id_button, member_tag_of, muted, text_button,
+};
 use super::{App, Message, list, pages};
-use crate::theme::{self, MEDIUM, READ_LINE_HEIGHT, SP_1, SP_2, SP_3, TS_14, TS_16, Tone};
+use crate::theme::{self, MEDIUM, READ_LINE_HEIGHT, SP_1, SP_2, SP_3, TS_14, TS_16};
 
 pub fn page<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, Message> {
     let (id, title, content) = match &app.revisions {
@@ -77,21 +78,11 @@ fn who<'a>(
     agent: Option<&'a str>,
     at_ms: u64,
 ) -> iced::widget::Row<'a, Message> {
-    let mut line = row![].spacing(6).align_y(Alignment::Center);
-    line = match author {
-        Some(author) => line.push(member_tag_of(&state.members, author)),
-        None => line.push(muted("before the history")),
+    let who = match author {
+        Some(author) => member_tag_of(&state.members, author),
+        None => muted("before the history").into(),
     };
-    if let Some(agent) = agent {
-        line = line
-            .push(icon(Icon::Bot, 14.0, Tone::Muted))
-            .push(muted(agent));
-    }
-    line.push(Space::new().width(Length::Fill))
-        .push(muted(format!(
-            "{} ago",
-            logic::ago(app.now_ms.saturating_sub(at_ms))
-        )))
+    byline(who, agent, logic::age(app.now_ms, at_ms))
 }
 
 fn history<'a>(

@@ -6,12 +6,12 @@ use iced::widget::text::LineHeight;
 use iced::widget::{
     Space, checkbox, column, container, hover, rich_text, row, scrollable, text, text_editor,
 };
-use iced::{Alignment, Element, Length, alignment};
+use iced::{Element, Length, alignment};
 use schwitzer_proto::{Annotation, Part, RoomState, Stage, Task};
 
 use super::annotations::AnnotationDraft;
 use super::icons::{Icon, icon};
-use super::widgets::{group_head, hrule, id_button, member_tag_of, muted, text_button, with_tip};
+use super::widgets::{byline, group_head, hrule, id_button, member_tag_of, text_button, with_tip};
 use super::{App, Message, Reading, list, logic, pages};
 use crate::theme::{self, READ_LINE_HEIGHT, SEMIBOLD, SP_1, SP_2, SP_3, TS_12, TS_14, Tone};
 
@@ -182,21 +182,17 @@ pub fn annotated<'a>(
 
 /// A comment under its block: author, age, Resolve or Reopen, and the text.
 fn comment_card<'a>(app: &'a App, state: &'a RoomState, a: &'a Annotation) -> Element<'a, Message> {
-    let head = row![member_tag_of(&state.members, &a.author)]
-        .spacing(6)
-        .align_y(Alignment::Center);
-    let head = head
-        .push(Space::new().width(Length::Fill))
-        .push(muted(format!(
-            "{} ago",
-            logic::ago(app.now_ms.saturating_sub(a.at_ms))
-        )))
-        .push(text_button(
-            format!("resolve-comment-{}", a.id),
-            if a.resolved { "Reopen" } else { "Resolve" },
-            Some(Message::ResolveAnnotation(a.id, !a.resolved)),
-            theme::button_secondary,
-        ));
+    let head = byline(
+        member_tag_of(&state.members, &a.author),
+        None,
+        logic::age(app.now_ms, a.at_ms),
+    )
+    .push(text_button(
+        format!("resolve-comment-{}", a.id),
+        if a.resolved { "Reopen" } else { "Resolve" },
+        Some(Message::ResolveAnnotation(a.id, !a.resolved)),
+        theme::button_secondary,
+    ));
     let body = text(&a.text).size(TS_14);
     let body = if a.resolved {
         body.style(theme::text_muted)

@@ -12,8 +12,8 @@ use super::icons::{Icon, icon};
 use super::list;
 use super::logic::{self, OmpStart, TaskText};
 use super::widgets::{
-    self, LAMP, chevron, fold_button, heading, hrule, icon_button, icon_text_button, id_button,
-    lamp, member_tag_of, muted, segment, text_button, with_tip,
+    self, LAMP, byline, chevron, fold_button, heading, hrule, icon_button, icon_text_button,
+    id_button, lamp, member_tag_of, muted, segment, text_button, with_tip,
 };
 use super::{App, Message, Reading, reading, sticky};
 use crate::theme::{
@@ -400,10 +400,7 @@ fn people<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a,
             "Proposed by"
         }),
         member_tag_of(&state.members, &task.author),
-        muted(format!(
-            "{} ago",
-            logic::ago(app.now_ms.saturating_sub(task.created_ms))
-        )),
+        muted(logic::age(app.now_ms, task.created_ms)),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
@@ -683,10 +680,7 @@ fn suggestions<'a>(
         }
         line = line
             .push(Space::new().width(Length::Fill))
-            .push(muted(format!(
-                "{} ago",
-                logic::ago(app.now_ms.saturating_sub(s.at_ms))
-            )))
+            .push(muted(logic::age(app.now_ms, s.at_ms)))
             .push(text_button(
                 format!("review-suggestion-{}", s.id),
                 "Review",
@@ -828,28 +822,19 @@ fn notes<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Element<'a, 
         ));
     }
     for (i, note) in task.notes.iter().enumerate() {
-        let mut who = row![member_tag_of(&state.members, &note.author)]
-            .spacing(6)
-            .align_y(Alignment::Center);
-        if let Some(agent) = &note.agent {
-            who = who
-                .push(icon(Icon::Bot, 14.0, Tone::Muted))
-                .push(muted(agent));
-        }
-        who = who
-            .push(Space::new().width(Length::Fill))
-            .push(muted(format!(
-                "{} ago",
-                logic::ago(app.now_ms.saturating_sub(note.at_ms))
-            )))
-            .push(icon_button(
-                format!("copy-note-{i}"),
-                Icon::Copy,
-                Tone::Muted,
-                "Copy note as Markdown",
-                Some(Message::CopyText(TaskText::Note(i))),
-                theme::button_ghost,
-            ));
+        let who = byline(
+            member_tag_of(&state.members, &note.author),
+            note.agent.as_deref(),
+            logic::age(app.now_ms, note.at_ms),
+        )
+        .push(icon_button(
+            format!("copy-note-{i}"),
+            Icon::Copy,
+            Tone::Muted,
+            "Copy note as Markdown",
+            Some(Message::CopyText(TaskText::Note(i))),
+            theme::button_ghost,
+        ));
         let body = match app.open_md.notes.get(i) {
             Some(md) => reading::markdown(app, md),
             None => text(&note.text)

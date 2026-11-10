@@ -333,6 +333,22 @@ pub fn member_tag_of<'a>(members: &[Member], id: &MemberId) -> Element<'a, Messa
     member_tag(logic::member_name(members, id), logic::member_hue(id))
 }
 
+/// The line above a note, version, suggestion or comment: `who`, the agent behind it with the
+/// bot glyph, and `age` at the right. Callers push a trailing button.
+pub fn byline<'a>(
+    who: Element<'a, Message>,
+    agent: Option<&'a str>,
+    age: String,
+) -> iced::widget::Row<'a, Message> {
+    let mut line = row![who].spacing(6).align_y(Alignment::Center);
+    if let Some(agent) = agent {
+        line = line
+            .push(icon(Icon::Bot, 14.0, Tone::Muted))
+            .push(muted(agent));
+    }
+    line.push(Space::new().width(Length::Fill)).push(muted(age))
+}
+
 /// A quiet pill with a label.
 pub fn pill<'a>(label: impl text::IntoFragment<'a>) -> Element<'a, Message> {
     container(text(label).size(TS_12).font(MEDIUM))

@@ -875,6 +875,11 @@ pub fn ago(ms: u64) -> String {
     }
 }
 
+/// How long ago `at_ms` was at `now_ms`, worded for a row: `5m ago`, `3d ago`.
+pub fn age(now_ms: u64, at_ms: u64) -> String {
+    format!("{} ago", ago(now_ms.saturating_sub(at_ms)))
+}
+
 /// What a check for a new release does next.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Check {
