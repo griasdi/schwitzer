@@ -1210,7 +1210,8 @@ async function buildInNewSession(ctx: CommandCtx): Promise<void> {
   ctx.ui.notify("New session: press Enter to pick the task to build.", "info");
 }
 
-type Claimed = { marker: string; task: Record<string, unknown> } | { refused: string };
+type Granted = { marker: string; task: Record<string, unknown> };
+type Claimed = Granted | { refused: string };
 
 /** Claims task `number` for `work`; `refused` holds the app's answer when it gave no claim
  *  ("No free task." when someone was faster). */
@@ -1218,6 +1219,22 @@ async function claimFor(config: Config, room: string, project: string, number: n
   const got = parseClaim(await tool(config, "claim", { room, project, work, task: number, agent: "omp" }));
   if (work === "build" && !("refused" in got)) await rememberStart(config, room, number, project);
   return got;
+}
+
+/** Claims the build of `claim`'s task, which was just approved. A refusal is shown to the user and
+ *  answers undefined. */
+async function claimForApproved(ctx: Ctx, config: Config, claim: TaskClaim): Promise<Granted | undefined> {
+  const got = await claimFor(config, claim.room, claim.projectName, claim.task, "build");
+  if ("refused" in got) {
+    ctx.ui.notify(`Task #${claim.task} is approved in Schwitzer, but the build claim failed: ${got.refused}`, "error");
+    return undefined;
+  }
+  return got;
+}
+
+/** The task message that makes a session build `claim` under the build claim `got`. */
+function buildHandoff(claim: TaskClaim, got: Granted): string {
+  return `${taskContext(claim, got.task, "build")}\nThis session builds the task under schwitzer-claim: ${got.marker}`;
 }
 
 /** The app's answer to a claim: the marker and the task, or `refused` with the answer. */
@@ -1796,16 +1813,11 @@ async function approveFromReview(pi: Pi, ctx: Ctx, claim: TaskClaim): Promise<vo
       );
       return;
     }
-    const got = await claimFor(config, claim.room, claim.projectName, n, "build");
-    if ("refused" in got) {
-      ctx.ui.notify(`Task #${n} is approved in Schwitzer, but the build claim failed: ${got.refused}`, "error");
-      return;
-    }
+    const got = await claimForApproved(ctx, config, claim);
+    if (!got) return;
     // A user message: the marker links this session to the build claim. "aside" reaches the
     // execution turn at its next step without interrupting it.
-    pi.sendUserMessage(`${taskContext(claim, got.task, "build")}\nThis session builds the task under schwitzer-claim: ${got.marker}`, {
-      deliverAs: "aside",
-    });
+    pi.sendUserMessage(buildHandoff(claim, got), { deliverAs: "aside" });
     ctx.ui.notify(`Task #${n} is approved in Schwitzer too; this session builds it under its build claim.`, "info");
   } catch (e) {
     ctx.ui.notify(`Schwitzer: ${e instanceof Error ? e.message : String(e)}`, "error");
@@ -2060,12 +2072,9 @@ async function unclaimTask(ctx: Ctx, config: Config, claim: TaskClaim, note: str
 /** The room approved the plan: claims the build and executes the review in a fresh session,
  *  which gets the task and its claim as a task message. */
 async function startBuild(ctx: Ctx, config: Config, claim: TaskClaim, reviewId: string): Promise<void> {
-  const got = await claimFor(config, claim.room, claim.projectName, claim.task, "build");
-  if ("refused" in got) {
-    ctx.ui.notify(`Task #${claim.task} is approved in Schwitzer, but the build claim failed: ${got.refused}`, "error");
-    return;
-  }
-  setHandoff(`${taskContext(claim, got.task, "build")}\nThis session builds the task under schwitzer-claim: ${got.marker}`);
+  const got = await claimForApproved(ctx, config, claim);
+  if (!got) return;
+  setHandoff(buildHandoff(claim, got));
   if (ctx.getPendingPlanReview?.()?.reviewId !== reviewId || !ctx.resolvePlanReview!(reviewId, "execute")) {
     setHandoff(undefined);
     await unclaimTask(ctx, config, claim, "The plan review in omp closed before the build started.");
