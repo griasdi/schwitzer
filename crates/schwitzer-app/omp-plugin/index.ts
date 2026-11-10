@@ -2110,6 +2110,9 @@ async function awaitDecision(ctx: Ctx, config: Config, claim: TaskClaim, reviewI
         }
       },
     });
+  } catch (e) {
+    // A throw from a detached promise would kill the omp session.
+    reportError(ctx, e);
   } finally {
     if (watch === me) watch = undefined;
   }
@@ -2355,6 +2358,9 @@ async function awaitDebugInstructions(ctx: Ctx, config: Config, me: DebugWatch):
         return undefined;
       },
     });
+  } catch (e) {
+    // A throw from a detached promise would kill the omp session.
+    reportError(ctx, e);
   } finally {
     if (debugWatch === me) debugWatch = undefined;
   }
