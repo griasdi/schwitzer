@@ -132,6 +132,7 @@ An opened task lets you:
 - move it to another project with the project picker, shown when the room has more than one project;
 - add or remove tasks under "Waits for";
 - add notes;
+- upvote an idea with "Upvote" ("Upvoted" takes the vote back): the slab shows the count, hover it for who voted, and the Ideas group lists the most upvoted first;
 - press the decision buttons its stage allows.
 
 The sessions panel shows the live agent sessions of the open project. The status bar shows your name and one status lamp for the server, the agent port and the omp plugin; hover it to see each.
@@ -187,6 +188,7 @@ The data directory is:
 |`auto_install_updates`|bool|`true`|install a new release as soon as it is found|
 |`auto_restart_updates`|bool|`true`|restart after installing an update|
 |`notify_hand_ins`|bool|`false`|notify when your agents hand in a plan or finish a build|
+|`text_size`|`"normal"`, `"large"` or `"larger"`|`"normal"`|how large the window draws everything: 100%, 115% or 130%; set in Settings under "You"|
 
 The Settings pages edit these, with these exceptions: `omp_sessions_dir` is set in the file only (Settings → omp lists it read-only under "Session files"), and `rooms`, `last_server`, `repos`, `chosen_projects` and `wsl_distros` change as you join, create or leave rooms, link repos, pick a project and add a WSL distro's folders. A `settings.toml` that cannot be read loads as defaults with a notice, and is not overwritten until the next save.
 

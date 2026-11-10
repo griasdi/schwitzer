@@ -292,17 +292,24 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |`list.rs`|the task list in its groups and the quick idea bar (`idea_bar`)|
 |`task_view.rs`|an opened task, the new-task form, the decision buttons|
 |`live.rs`|the live agent sessions of the open project|
-|`settings_view/`|settings: `mod.rs` the overview of nav slabs by scope (room, this machine, you, about), the first-start page and the shared rows (nav slab, switch row, confirm row); `room.rs` the selected room and all rooms; `project.rs` the selected project and its repos; `machine.rs` omp, projects folders, updates|
-|`pages.rs`|full-window pages with a back button: Settings and its topics, About|
+|`settings_view/`|settings: `mod.rs` the overview of nav slabs by scope (room, this machine, you, about), the first-start page and the shared rows (nav slab, switch row); `room.rs` the selected room and all rooms; `project.rs` the selected project and its repos; `machine.rs` omp, projects folders, updates|
+|`pages.rs`|full-window pages with a back button: `frame` (Settings and its topics, About, Debug), `reading_frame` (the wider frame of the reading, History and Suggestion pages) and `section`|
 |`licenses_view.rs`|the About page with the licenses|
 |`debug_view.rs`|the Debug page: start or join, the people in the session, the folders, what was sent and received, the instructions|
 |`debug_session.rs`|no view: the debug session lifecycle (`impl App`: start, join, leave, one worker subscription per joined session and the counts they report, the notices of a session change and of an instruction)|
 |`tasks.rs`|no view: the task actions (`impl App`: propose, note an idea, pick, edit, plan, note, move, priority, waits, decide, unclaim) and what each reply does to the forms and drafts|
 |`revisions_view.rs`|the History page of the open task's details or plan (versions with the diff to the one before, Restore) and the review page of an agent's suggestion (diff against the current text, Apply, Discard)|
 |`revisions.rs`|no view: loading the history and a suggestion, selecting and restoring a version, applying or discarding (`impl App`), and `settle_revisions`, which closes the page when its task or suggestion goes, reloads a history a new version made stale and recomputes a suggestion's diff|
+|`reading.rs`|task text set for reading: the Markdown viewer of the open task with its blocks and their comments, and the full-window reading page|
 |`annotations.rs`|no view: comments on blocks of the open task (`impl App`: open the editor under a block, save, resolve, reopen); `reading.rs` draws the blocks with their comments|
 |`projects.rs`|no view: creating and joining a room, creating, renaming and deleting a project, the projects folders and the repos linked to a project (`impl App`)|
-|`widgets.rs`|lamps, pills, buttons and other shared widgets|
+|`widgets.rs`|lamps, pills, buttons and other shared widgets: the `bar` strip of headers and footers, `segment`, `group_head` and `fold_button`, `member_tag_of`, `confirm_row`|
+|`plugins.rs`|no view: the omp plugin in the shared repos (`impl App`: install, update, remove, the periodic `check_plugins`, `sync_plugins`)|
+|`updates.rs`|no view: the self-update (`impl App`: which release to look for, the check, the install, the channel and what follows)|
+|`rooms.rs`|no view: `Rooms`, a copy of the client's room list with each room's last known state, looked up by room id|
+|`resume.rs`|no view: `Resume`, what the window showed when the app restarted for an update or a lost graphics device (page, room, open task or draft, unsaved text, focus, window place), written to `resume.json` and applied by the new process|
+|`gpu.rs`|no view: `Watch` and the `probe` element, which notice a lost graphics device so that the app restarts instead of showing an empty window|
+|`logic.rs`|no view: pure logic without iced: how tasks are grouped and sorted, which decisions are legal, which local sessions a room sees, how numbers are shown|
 |`sticky.rs`|`Sticky`: the open task's head, pinned to the list's top while its slab is scrolled past|
 |`icons.rs`|Lucide icons from `assets/icons/`|
 |`../theme.rs`|Daylight and Night tokens, Figtree, widget styles|
@@ -356,6 +363,9 @@ flowchart LR
 |`update_channel`|`"release"` or `"dev"`; absent follows this build's version (dev for a dev build); set on Settings → Updates|
 |`notify_hand_ins`|system notification when one of the member's agents hands in a plan or finishes a build; default `false`|
 |`commit_trailers`|`"<room id hex>/<project id>"` set: projects whose builds by the member's agents put `Schwitzer-Task: #<n>` into every commit; default empty|
+|`text_size`|`"normal"`, `"large"` or `"larger"`: the window's scale factor 1, 1.15 or 1.3; default `"normal"`; set in Settings under "You" (100%, 115%, 130%)|
+|`fast_lane`|`"<room id hex>/<project id>"` set: projects whose fast lane is on for this member (the zap in the header or on the project's page); default empty|
+|`fast_lane_tasks`|`"<room id hex>/<task number>"` set: tasks in this member's fast lane (the zap in the open task or `/schwitzer fast`); a task that is done or rejected loses its flag; default empty|
 
 A bad `settings.toml` loads as defaults with a notice and is not overwritten until the next save. A `mcp_port` of 0 is replaced by the default with a notice, as the Settings page accepts 1 to 65535 only.
 

@@ -33,7 +33,7 @@ cargo test --workspace
 cargo deny check
 ```
 
-For UI changes, also click through the affected flow in Daylight and Night (DESIGN.md is the reference) at the default window size of 400×780.
+For UI changes, also click through the affected flow in Daylight and Night (DESIGN.md is the reference) at the default window size of 480×780.
 
 ## Layout
 
