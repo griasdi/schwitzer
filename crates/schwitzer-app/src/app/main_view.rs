@@ -1,15 +1,18 @@
 //! The main page below the header bar: the task list and sessions, or the empty state that
 //! says what is missing (a room, a project, a linked repo, the omp plugin).
 
+use iced::keyboard::{Key, key::Named};
 use iced::widget::text::Wrapping;
-use iced::widget::{column, container, row};
-use iced::{Alignment, Element, Length};
+use iced::widget::{column, container, row, text, text_editor};
+use iced::{Alignment, Element, Length, Padding};
 use schwitzer_proto::Project;
 
 use super::icons::{Icon, icon};
-use super::widgets::{hrule, icon_button, icon_text_button, input, muted, path_text, text_button};
+use super::widgets::{
+    bar, hrule, icon_button, icon_text_button, input, lamp, muted, path_text, text_button,
+};
 use super::{App, FolderFor, Message, Page, list, live, logic};
-use crate::theme::{self, SP_2, Tone};
+use crate::theme::{self, Lamp, SEMIBOLD, SP_2, SP_4, TS_14, Tone};
 
 impl App {
     /// The main page below the header bar: list and sessions, or an empty state.
@@ -20,7 +23,7 @@ impl App {
                 Some(project) if self.shows_list() => column![
                     container(list::view(self, state, project)).height(Length::Fill),
                     hrule(),
-                    list::idea_bar(self),
+                    idea_bar(self),
                     hrule(),
                     live::view(self, state, project.id),
                 ]
@@ -42,7 +45,7 @@ impl App {
                         "The room shows up as soon as its server answers.".to_owned(),
                     ),
                 };
-                list::empty(
+                empty(
                     Icon::Plug,
                     title,
                     hint,
@@ -56,7 +59,7 @@ impl App {
                     ),
                 )
             }
-            (None, None) => list::empty(
+            (None, None) => empty(
                 Icon::Users,
                 "Welcome to Schwitzer",
                 "Create a room on a server, or join one with the key someone shared.",
@@ -75,7 +78,7 @@ impl App {
     /// The selected room has no project yet: create the first one.
     fn no_projects(&self) -> Element<'_, Message> {
         let filled = !self.forms.new_project.trim().is_empty();
-        list::empty(
+        empty(
             Icon::FolderPlus,
             "No projects yet",
             "A project holds a part of the room's tasks, for example one repo. Create the first \
@@ -109,7 +112,7 @@ impl App {
             .get(index)
             .map(|repo| repo.display().to_string())
             .unwrap_or_default();
-        list::empty(
+        empty(
             Icon::Plug,
             format!("Set up omp in {}", project.name),
             "omp agents started in this repo reach Schwitzer through the plugin: /schwitzer \
@@ -219,7 +222,7 @@ impl App {
             .spacing(SP_2)
             .align_y(Alignment::Center),
         );
-        list::empty(
+        empty(
             Icon::FolderPlus,
             format!("Link a repo to {}", project.name),
             "Its tasks show up once a repo on this machine is linked to it. omp sessions \
@@ -227,4 +230,62 @@ impl App {
             col.into(),
         )
     }
+}
+
+/// The quick idea bar between the task list and the sessions: Enter adds the text as an idea
+/// (first line the title, the rest its details), Shift+Enter breaks the line.
+fn idea_bar(app: &App) -> Element<'_, Message> {
+    let editor = text_editor(&app.forms.quick_idea)
+        .id("quick-idea")
+        .placeholder("Note an idea, Enter adds it  (Ctrl+L)")
+        .max_height(120.0)
+        .padding(SP_2)
+        .size(TS_14)
+        .on_action(Message::QuickIdea)
+        .key_binding(|kp| {
+            if matches!(kp.status, text_editor::Status::Focused { .. })
+                && matches!(kp.key.as_ref(), Key::Named(Named::Enter))
+                && !kp.modifiers.shift()
+            {
+                Some(text_editor::Binding::Custom(Message::NoteIdea))
+            } else {
+                text_editor::Binding::from_key_press(kp)
+            }
+        })
+        .style(theme::editor);
+    // Level with the middle of the editor's first line.
+    let lamp_box = container(lamp(Lamp::Idea)).padding(Padding {
+        top: 12.0,
+        ..Padding::ZERO
+    });
+    bar(
+        row![lamp_box, editor]
+            .spacing(SP_2)
+            .align_y(Alignment::Start),
+        SP_2,
+    )
+    .into()
+}
+
+/// A centred empty state with one action.
+fn empty<'a>(
+    glyph: Icon,
+    title: impl text::IntoFragment<'a>,
+    hint: impl text::IntoFragment<'a>,
+    action: Element<'a, Message>,
+) -> Element<'a, Message> {
+    container(
+        column![
+            icon(glyph, 40.0, Tone::Muted),
+            text(title).size(TS_14).font(SEMIBOLD),
+            muted(hint).align_x(Alignment::Center),
+            action,
+        ]
+        .spacing(SP_2)
+        .align_x(Alignment::Center)
+        .max_width(280),
+    )
+    .center(Length::Fill)
+    .padding(SP_4)
+    .into()
 }

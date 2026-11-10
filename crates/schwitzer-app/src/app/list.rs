@@ -1,10 +1,9 @@
 //! The task list: foldable groups of raised slabs, each with its stage lamp, labels, the
 //! worker's name tag and its next-step button; the open task or draft sits in place among them.
 
-use iced::keyboard::{Key, key::Named};
 use iced::widget::operation::{self, AbsoluteOffset};
 use iced::widget::selector::{self, Target};
-use iced::widget::{Space, column, container, responsive, row, scrollable, text, text_editor};
+use iced::widget::{Space, column, container, responsive, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding, Task};
 use schwitzer_proto::{Decision, MemberId, Project, RoomState, Stage, Task as RoomTask};
 
@@ -16,7 +15,7 @@ use super::widgets::{
     priority_pill, with_tip,
 };
 use super::{App, Expanded, Message};
-use crate::theme::{self, Lamp, MEDIUM, SEMIBOLD, SP_1, SP_2, SP_3, SP_4, TS_12, TS_14, Tone};
+use crate::theme::{self, MEDIUM, SP_1, SP_2, SP_3, TS_12, TS_14, Tone};
 
 /// The widget id of the task list's scrollable.
 pub const LIST_ID: &str = "tasks";
@@ -67,64 +66,6 @@ pub fn view<'a>(app: &'a App, state: &'a RoomState, project: &'a Project) -> Ele
             .style(theme::scroll)
             .into()
     })
-    .into()
-}
-
-/// The quick idea bar between the task list and the sessions: Enter adds the text as an idea
-/// (first line the title, the rest its details), Shift+Enter breaks the line.
-pub fn idea_bar(app: &App) -> Element<'_, Message> {
-    let editor = text_editor(&app.forms.quick_idea)
-        .id("quick-idea")
-        .placeholder("Note an idea, Enter adds it  (Ctrl+L)")
-        .max_height(120.0)
-        .padding(SP_2)
-        .size(TS_14)
-        .on_action(Message::QuickIdea)
-        .key_binding(|kp| {
-            if matches!(kp.status, text_editor::Status::Focused { .. })
-                && matches!(kp.key.as_ref(), Key::Named(Named::Enter))
-                && !kp.modifiers.shift()
-            {
-                Some(text_editor::Binding::Custom(Message::NoteIdea))
-            } else {
-                text_editor::Binding::from_key_press(kp)
-            }
-        })
-        .style(theme::editor);
-    // Level with the middle of the editor's first line.
-    let lamp_box = container(lamp(Lamp::Idea)).padding(Padding {
-        top: 12.0,
-        ..Padding::ZERO
-    });
-    widgets::bar(
-        row![lamp_box, editor]
-            .spacing(SP_2)
-            .align_y(Alignment::Start),
-        SP_2,
-    )
-    .into()
-}
-
-/// A centred empty state with one action.
-pub fn empty<'a>(
-    glyph: Icon,
-    title: impl text::IntoFragment<'a>,
-    hint: impl text::IntoFragment<'a>,
-    action: Element<'a, Message>,
-) -> Element<'a, Message> {
-    container(
-        column![
-            icon(glyph, 40.0, Tone::Muted),
-            text(title).size(TS_14).font(SEMIBOLD),
-            muted(hint).align_x(Alignment::Center),
-            action,
-        ]
-        .spacing(SP_2)
-        .align_x(Alignment::Center)
-        .max_width(280),
-    )
-    .center(Length::Fill)
-    .padding(SP_4)
     .into()
 }
 

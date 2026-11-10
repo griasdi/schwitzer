@@ -288,8 +288,8 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |File (`app/`)|Shows|
 |---|---|
 |`chrome.rs`|the header bar (room picker), the members row, the status bar (name, notice, the status lamp and its card for server, agent port and omp plugin)|
-|`main_view.rs`|the main page: the task list with its idea bar and the sessions panel, or the empty state (no room, no project, no linked repo, the omp plugin prompt)|
-|`list.rs`|the task list in its groups and the quick idea bar (`idea_bar`), and its scroll helpers (`reveal`, `reveal_bottom`, `list_top_of`, `return_to`)|
+|`main_view.rs`|the main page: the task list and the sessions panel, the quick idea bar (`idea_bar`), or the empty state (`empty`: no room, no project, no linked repo, the omp plugin prompt)|
+|`list.rs`|the task list in its groups and its scroll helpers (`reveal`, `reveal_bottom`, `list_top_of`, `return_to`)|
 |`task_view.rs`|an opened task, the new-task form, the decision buttons|
 |`live.rs`|the live agent sessions of the open project|
 |`settings_view/`|settings: `mod.rs` the overview of nav slabs by scope (room, this machine, you, about), the first-start page and the shared rows (nav slab, switch row); `room.rs` the selected room and all rooms; `project.rs` the selected project and its repos; `machine.rs` omp, projects folders, updates|
