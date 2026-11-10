@@ -491,7 +491,7 @@ fn actions<'a>(app: &'a App, state: &'a RoomState, task: &'a Task) -> Option<Ele
             theme::button_primary,
         ));
     }
-    for decision in logic::legal_decisions(task) {
+    for decision in task.legal_decisions() {
         any = true;
         let (id, label) = match decision {
             Decision::Accept => ("accept", "Accept"),

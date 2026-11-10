@@ -1,11 +1,11 @@
 //! What the views and `update` decide without touching iced: how tasks are grouped, which
-//! decisions are legal, which local sessions a room sees, and how numbers are shown.
+//! local sessions a room sees, and how numbers are shown.
 
 use std::path::{Path, PathBuf};
 
 use schwitzer_proto::{
-    ClaimToken, Decision, Member, MemberId, Part, RoomId, RoomState, ServerAddr, SessionInfo,
-    Stage, Suggestion, Task, Work, caps,
+    ClaimToken, Member, MemberId, Part, RoomId, RoomState, ServerAddr, SessionInfo, Stage,
+    Suggestion, Task, Work, caps,
 };
 use schwitzer_release::Channel;
 use serde::{Deserialize, Serialize};
@@ -283,21 +283,6 @@ fn name_key(s: &str) -> String {
         .filter(|c| c.is_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
-}
-
-/// The decisions the server accepts for `task` right now (`store::next_stage` of the server), in button order.
-pub fn legal_decisions(task: &Task) -> Vec<Decision> {
-    match task.stage {
-        Stage::Idea => vec![Decision::Reject],
-        Stage::Proposed => vec![Decision::Accept, Decision::Reject],
-        Stage::Accepted if !task.has_plan() => vec![Decision::Reject],
-        Stage::Accepted => vec![Decision::MarkPlanned, Decision::Reject],
-        Stage::Planned if !task.has_plan() => vec![Decision::Replan, Decision::Reject],
-        Stage::Planned => vec![Decision::Approve, Decision::Replan, Decision::Reject],
-        Stage::Ready if task.claim.is_none() => vec![Decision::Replan, Decision::MarkDone],
-        Stage::Ready => vec![Decision::MarkDone],
-        Stage::Done | Stage::Rejected => vec![Decision::Reopen],
-    }
 }
 
 /// "waits for #12, #14" for the slab.
@@ -1522,55 +1507,6 @@ mod tests {
             .map(|i| PathBuf::from(format!("/code/x-demo-{i}")))
             .collect();
         assert_eq!(suggested_repos("demo", &many, &[]).len(), MAX_SUGGESTIONS);
-    }
-
-    #[test]
-    fn decisions_match_the_server_table() {
-        let token = ClaimToken([1; 16]);
-        assert_eq!(
-            legal_decisions(&task(1, Stage::Idea, None)),
-            [Decision::Reject]
-        );
-        assert_eq!(
-            legal_decisions(&task(1, Stage::Proposed, None)),
-            [Decision::Accept, Decision::Reject]
-        );
-        assert_eq!(
-            legal_decisions(&task(1, Stage::Accepted, None)),
-            [Decision::Reject]
-        );
-        let mut accepted = task(1, Stage::Accepted, None);
-        accepted.plan = "Do it".to_owned();
-        assert_eq!(
-            legal_decisions(&accepted),
-            [Decision::MarkPlanned, Decision::Reject]
-        );
-        let mut planned = task(1, Stage::Planned, None);
-        assert_eq!(
-            legal_decisions(&planned),
-            [Decision::Replan, Decision::Reject]
-        );
-        planned.plan = "Do it".to_owned();
-        assert_eq!(
-            legal_decisions(&planned),
-            [Decision::Approve, Decision::Replan, Decision::Reject]
-        );
-        assert_eq!(
-            legal_decisions(&task(1, Stage::Ready, None)),
-            [Decision::Replan, Decision::MarkDone]
-        );
-        assert_eq!(
-            legal_decisions(&task(1, Stage::Ready, Some(claim(Work::Build, token)))),
-            [Decision::MarkDone]
-        );
-        assert_eq!(
-            legal_decisions(&task(1, Stage::Done, None)),
-            [Decision::Reopen]
-        );
-        assert_eq!(
-            legal_decisions(&task(1, Stage::Rejected, None)),
-            [Decision::Reopen]
-        );
     }
 
     #[test]

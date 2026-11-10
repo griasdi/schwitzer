@@ -101,7 +101,7 @@ Addresses (`addr.rs`): a `ServerAddr` is `weida://sha256:<64 hex>@host:port`, th
 
 A room holds members, projects and tasks. A `Project` is `{id, name}` with ids per room from 1. A `Task` (`model.rs`) has a number per room, its project, title, body, plan, stage, priority, author, times, an optional `Claim {member, agent, work, since_ms, token}`, its `Note`s, the newest version numbers of its details and plan and its pending `Suggestion`s. A member's name is global per key (`people.name` on the server), set by `Hello` and `SetName`.
 
-The stage machine, from `store.rs` (`next_stage`, `claim`, `submit_plan`, `finish`, `unclaim`):
+The stage machine, from `model.rs` (`Task::next_stage`) and `store.rs` (`claim`, `submit_plan`, `finish`, `unclaim`); the app's decision buttons are `Task::legal_decisions`, derived from `next_stage`:
 
 ```mermaid
 stateDiagram-v2
@@ -309,7 +309,7 @@ The app is an iced 0.14 Elm loop (`crates/schwitzer-app/src/app/mod.rs`): `App` 
 |`rooms.rs`|no view: `Rooms`, a copy of the client's room list with each room's last known state, looked up by room id|
 |`resume.rs`|no view: `Resume`, what the window showed when the app restarted for an update or a lost graphics device (page, room, open task or draft, unsaved text, focus, window place), written to `resume.json` and applied by the new process|
 |`gpu.rs`|no view: `Watch` and the `probe` element, which notice a lost graphics device so that the app restarts instead of showing an empty window|
-|`logic.rs`|no view: pure logic without iced: how tasks are grouped and sorted, which decisions are legal, which local sessions a room sees, how numbers are shown|
+|`logic.rs`|no view: pure logic without iced: how tasks are grouped and sorted, which local sessions a room sees, how numbers are shown|
 |`sticky.rs`|`Sticky`: the open task's head, pinned to the list's top while its slab is scrolled past|
 |`icons.rs`|Lucide icons from `assets/icons/`|
 |`../theme.rs`|Daylight and Night tokens, Figtree, widget styles|
@@ -618,7 +618,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |---|---|
 |New request or event|`schwitzer-proto/src/rpc.rs` or `events.rs` (append the variant; bump `PROTOCOL_VERSION` when old peers would break), `schwitzer-server/src/rpc.rs` (`dispatch`, validation), `store.rs`, the caller in `app/tasks.rs` (task actions), `app/projects.rs` (rooms and projects) or `app/mod.rs`|
 |New debug request|`schwitzer-proto/src/rpc.rs` and `events.rs`, `schwitzer-server/src/debug.rs` (`DebugRuns`) and its handler in `rpc.rs`, a `Client::debug_*` method in `schwitzer-client/src/lib.rs`, `schwitzer-app/src/debug.rs` (the worker), `app/debug_session.rs` (the lifecycle in the app), `app/debug_view.rs` (the page), `mcp/tools.rs`, `omp-plugin/index.ts`|
-|New stage, decision or claim rule|`model.rs` (append), `store.rs` (`stage_to_int` …, `next_stage`, `claim`), `app/logic.rs` (`Group::of`, `legal_decisions`, `stage_label`), `app/widgets.rs` (`lamp_kind`), `mcp/tools.rs` (`StageArg`), the plugin (`STAGE`)|
+|New stage, decision or claim rule|`model.rs` (append; `Task::next_stage`, `Task::legal_decisions`), `store.rs` (`stage_to_int` …, `claim`), `app/logic.rs` (`Group::of`, `stage_label`), `app/widgets.rs` (`lamp_kind`), `mcp/tools.rs` (`StageArg`), the plugin (`STAGE`)|
 |Schema change|`store.rs` (`SCHEMA`, a new `MIGRATE_n`, `SCHEMA_VERSION`)|
 |New MCP tool or argument|`mcp/tools.rs`, `omp-plugin/index.ts` (`TOOLS`), `omp-plugin/README.md`|
 |New `/schwitzer` subcommand or prompt text|`omp-plugin/index.ts`, `omp-plugin/README.md`; a rebuilt app marks every installed plugin out of date and rewrites it|

@@ -1202,36 +1202,6 @@ pub fn set_priority(
     require_task(conn, room, number)
 }
 
-/// The stage a decision leads to, or the error for an illegal combination.
-fn next_stage(decision: Decision, task: &Task) -> Result<Stage, ApiError> {
-    let wrong = || ApiError::WrongStage(task.stage);
-    match (decision, task.stage) {
-        (Decision::Accept, Stage::Proposed) => Ok(Stage::Accepted),
-        (Decision::Reject, Stage::Idea | Stage::Proposed | Stage::Accepted | Stage::Planned) => {
-            Ok(Stage::Rejected)
-        }
-        (Decision::Approve, Stage::Planned) => {
-            if !task.has_plan() {
-                Err(ApiError::Invalid("plan is empty".into()))
-            } else {
-                Ok(Stage::Ready)
-            }
-        }
-        (Decision::Replan, Stage::Planned) => Ok(Stage::Accepted),
-        (Decision::Replan, Stage::Ready) if task.claim.is_none() => Ok(Stage::Accepted),
-        (Decision::Reopen, Stage::Rejected | Stage::Done) => Ok(Stage::Proposed),
-        (Decision::MarkPlanned, Stage::Accepted) => {
-            if !task.has_plan() {
-                Err(ApiError::Invalid("plan is empty".into()))
-            } else {
-                Ok(Stage::Planned)
-            }
-        }
-        (Decision::MarkDone, Stage::Ready) => Ok(Stage::Done),
-        _ => Err(wrong()),
-    }
-}
-
 /// Applies a human decision to the task's stage.
 pub fn decide(
     conn: &Connection,
@@ -1241,7 +1211,7 @@ pub fn decide(
     now: u64,
 ) -> R<Task> {
     let task = require_task(conn, room, number)?;
-    let stage = next_stage(decision, &task)?;
+    let stage = task.next_stage(decision)?;
     if matches!(
         decision,
         Decision::Reject | Decision::MarkPlanned | Decision::MarkDone

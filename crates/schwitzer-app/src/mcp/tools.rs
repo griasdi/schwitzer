@@ -637,7 +637,7 @@ fn decision_rows(room: &RoomRef, lanes: &FastLane, task: Option<u64>) -> Vec<Val
                 "stage": stage_of(t).name(),
                 "has_plan": t.has_plan(),
                 "fast_lane_task": lanes.task(&room.id, t.number),
-                "decisions": logic::legal_decisions(t)
+                "decisions": t.legal_decisions()
                     .into_iter()
                     .map(decision_name)
                     .collect::<Vec<_>>(),

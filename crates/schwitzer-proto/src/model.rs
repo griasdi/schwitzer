@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ClaimToken, DebugId, MemberId, RoomId, caps};
+use crate::{ApiError, ClaimToken, DebugId, MemberId, RoomId, caps};
 
 // Postcard is positional: enum variants are append-only.
 
@@ -182,6 +182,56 @@ impl Task {
         !self.stage.is_closed()
     }
 
+    /// The stage `decision` leads to, or the error for an illegal combination: `WrongStage`,
+    /// or `Invalid` when approving or handing in an empty plan. The server applies it; the app
+    /// derives its buttons from it ([`Task::legal_decisions`]).
+    pub fn next_stage(&self, decision: Decision) -> Result<Stage, ApiError> {
+        let wrong = || ApiError::WrongStage(self.stage);
+        match (decision, self.stage) {
+            (Decision::Accept, Stage::Proposed) => Ok(Stage::Accepted),
+            (
+                Decision::Reject,
+                Stage::Idea | Stage::Proposed | Stage::Accepted | Stage::Planned,
+            ) => Ok(Stage::Rejected),
+            (Decision::Approve, Stage::Planned) => {
+                if !self.has_plan() {
+                    Err(ApiError::Invalid("plan is empty".into()))
+                } else {
+                    Ok(Stage::Ready)
+                }
+            }
+            (Decision::Replan, Stage::Planned) => Ok(Stage::Accepted),
+            (Decision::Replan, Stage::Ready) if self.claim.is_none() => Ok(Stage::Accepted),
+            (Decision::Reopen, Stage::Rejected | Stage::Done) => Ok(Stage::Proposed),
+            (Decision::MarkPlanned, Stage::Accepted) => {
+                if !self.has_plan() {
+                    Err(ApiError::Invalid("plan is empty".into()))
+                } else {
+                    Ok(Stage::Planned)
+                }
+            }
+            (Decision::MarkDone, Stage::Ready) => Ok(Stage::Done),
+            _ => Err(wrong()),
+        }
+    }
+
+    /// The decisions [`Task::next_stage`] accepts right now, in button order.
+    pub fn legal_decisions(&self) -> Vec<Decision> {
+        const BUTTON_ORDER: [Decision; 7] = [
+            Decision::Accept,
+            Decision::MarkPlanned,
+            Decision::Approve,
+            Decision::Replan,
+            Decision::MarkDone,
+            Decision::Reject,
+            Decision::Reopen,
+        ];
+        BUTTON_ORDER
+            .into_iter()
+            .filter(|d| self.next_stage(*d).is_ok())
+            .collect()
+    }
+
     /// The newest version of `part`.
     pub fn version(&self, part: Part) -> u64 {
         match part {
@@ -257,4 +307,98 @@ pub struct RoomState {
     pub sessions: Vec<(MemberId, Vec<SessionInfo>)>,
     /// The running debug session; the server keeps it in memory only.
     pub debug: Option<DebugSession>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task(stage: Stage, plan: &str, claim: Option<Claim>) -> Task {
+        Task {
+            number: 1,
+            project: 1,
+            title: "task".to_owned(),
+            body: String::new(),
+            plan: plan.to_owned(),
+            stage,
+            priority: Priority::Normal,
+            author: MemberId([1; 32]),
+            created_ms: 0,
+            updated_ms: 0,
+            claim,
+            notes: Vec::new(),
+            waits_for: Vec::new(),
+            details_version: 1,
+            plan_version: 0,
+            suggestions: Vec::new(),
+            annotations: Vec::new(),
+            votes: Vec::new(),
+        }
+    }
+
+    fn build_claim() -> Claim {
+        Claim {
+            member: MemberId([1; 32]),
+            agent: "agent".to_owned(),
+            work: Work::Build,
+            since_ms: 0,
+            token: ClaimToken([1; 16]),
+        }
+    }
+
+    #[test]
+    fn legal_decisions_are_the_ones_next_stage_accepts() {
+        assert_eq!(
+            task(Stage::Idea, "", None).legal_decisions(),
+            [Decision::Reject]
+        );
+        assert_eq!(
+            task(Stage::Proposed, "", None).legal_decisions(),
+            [Decision::Accept, Decision::Reject]
+        );
+        assert_eq!(
+            task(Stage::Accepted, "", None).legal_decisions(),
+            [Decision::Reject]
+        );
+        assert_eq!(
+            task(Stage::Accepted, "Do it", None).legal_decisions(),
+            [Decision::MarkPlanned, Decision::Reject]
+        );
+        assert_eq!(
+            task(Stage::Planned, "", None).legal_decisions(),
+            [Decision::Replan, Decision::Reject]
+        );
+        assert_eq!(
+            task(Stage::Planned, "Do it", None).legal_decisions(),
+            [Decision::Approve, Decision::Replan, Decision::Reject]
+        );
+        assert_eq!(
+            task(Stage::Ready, "Do it", None).legal_decisions(),
+            [Decision::Replan, Decision::MarkDone]
+        );
+        assert_eq!(
+            task(Stage::Ready, "Do it", Some(build_claim())).legal_decisions(),
+            [Decision::MarkDone]
+        );
+        assert_eq!(
+            task(Stage::Done, "", None).legal_decisions(),
+            [Decision::Reopen]
+        );
+        assert_eq!(
+            task(Stage::Rejected, "", None).legal_decisions(),
+            [Decision::Reopen]
+        );
+    }
+
+    #[test]
+    fn an_empty_plan_is_invalid_and_a_wrong_stage_names_the_stage() {
+        assert_eq!(
+            task(Stage::Planned, " ", None).next_stage(Decision::Approve),
+            Err(ApiError::Invalid("plan is empty".into()))
+        );
+        assert_eq!(
+            task(Stage::Done, "", None).next_stage(Decision::Accept),
+            Err(ApiError::WrongStage(Stage::Done))
+        );
+    }
 }
