@@ -5,8 +5,9 @@
 //! discard a suggestion. Those decisions are human actions: the tools `decisions`, `decide`,
 //! `get_suggestion`, `settle_suggestion` and `set_fast_lane` start "For the omp plugin, not for
 //! agents." and serve only the plugin's dialogs (plan review approval, `/schwitzer decide`,
-//! the fast lane); the plugin never hands them to its agent. Approving a plan is always
-//! allowed there; every other decision needs the fast lane of the task or of its project.
+//! the fast lane); the plugin never hands them to its agent. Approving a plan and sending one
+//! back (replan) are always allowed there; every other decision needs the fast lane of the task
+//! or of its project.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -573,15 +574,15 @@ fn work_name(work: Work) -> &'static str {
     }
 }
 
-/// Whether omp may make `decision` on task `number` of `room`: approving a plan always,
-/// everything else only in the fast lane.
+/// Whether omp may make `decision` on task `number` of `room`: approving a plan and sending one
+/// back always, everything else only in the fast lane.
 fn require_decision_lane(
     lanes: &FastLane,
     room: &RoomRef,
     number: u64,
     decision: Decision,
 ) -> Result<(), String> {
-    if decision == Decision::Approve {
+    if matches!(decision, Decision::Approve | Decision::Replan) {
         Ok(())
     } else {
         require_lane(lanes, room, number)
@@ -1386,7 +1387,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "For the omp plugin, not for agents. Make a decision the human picked in omp: approve always; accept, reject, replan, reopen, mark_planned and mark_done only in the fast lane. Answers like get_task."
+        description = "For the omp plugin, not for agents. Make a decision the human picked in omp: approve and replan always; accept, reject, reopen, mark_planned and mark_done only in the fast lane. Answers like get_task."
     )]
     async fn decide(&self, Parameters(args): Parameters<DecideArgs>) -> CallToolResult {
         Self::bounded(async {
@@ -1756,7 +1757,7 @@ mod tests {
     }
 
     #[test]
-    fn only_approval_passes_outside_the_fast_lane() {
+    fn approval_and_replan_pass_outside_the_fast_lane() {
         let known = room(5, "r", vec![task(7, Stage::Proposed, None)]);
         let unknown = RoomRef {
             id: known.id,
@@ -1766,6 +1767,8 @@ mod tests {
         let allowed =
             |room: &RoomRef, decision| require_decision_lane(&lanes, room, 7, decision).is_ok();
         assert!(allowed(&unknown, Decision::Approve));
+        assert!(allowed(&unknown, Decision::Replan));
+        assert!(allowed(&known, Decision::Replan));
         assert!(!allowed(&known, Decision::Accept));
         let refusal = require_lane(&lanes, &known, 7).unwrap_err();
         assert!(refusal.starts_with("The fast lane is off for task #7 and its project \"app\"."));

@@ -9,6 +9,8 @@
 // plugin keeps the plan review open until the room approves the plan (it then claims the build
 // and executes it) or asks for a new one (it refines the plan with the room's notes). /schwitzer
 // build claims an approved task for building; the agent implements it and reports with finish.
+// If the plan does not hold, the agent gives the task back with unclaim and the plugin offers to
+// send it back for a new plan (replan) and plan it again.
 // /schwitzer propose [text] lets the agent draft a proposal, ask the user, then send it with
 // propose. /schwitzer idea <text> notes an idea in a project right away (add_idea); /schwitzer
 // propose offers the open ideas to write up into a proposal. A bare /schwitzer offers a menu.
@@ -1007,7 +1009,7 @@ function taskContext(claim: TaskClaim, task: Record<string, unknown>, work: Work
     replan ? "The room sent the previous plan (`plan`) back; the notes say why." : "",
     work === "plan"
       ? "Write a plan for this task in plan mode; do not implement it. The proposed plan goes to the Schwitzer room, where a human approves it or asks for a new one."
-      : `Implement the approved plan (\`plan\`) for this task. When it is done and checked, call the tool \`schwitzer_finish\` with room "${claim.room}", task ${claim.task} and a note on what was done. If you stop without finishing, call \`schwitzer_unclaim\` with a note on why.`,
+      : `Implement the approved plan (\`plan\`) for this task. When it is done and checked, call the tool \`schwitzer_finish\` with room "${claim.room}", task ${claim.task} and a note on what was done. If the plan turns out not to work, stop and call \`schwitzer_unclaim\` with room "${claim.room}", task ${claim.task} and a note on what does not hold and what a new plan must change; I am then asked whether to send the task back for a new plan. If you stop without finishing for another reason, call \`schwitzer_unclaim\` with a note on why.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1570,7 +1572,7 @@ async function decisionRows(config: Config, room?: string, task?: number): Promi
   return toolJson<DecisionRow[]>(config, "decisions", args);
 }
 
-/** Makes `decision` on `task`; the app allows approve always, the rest only in the fast lane. */
+/** Makes `decision` on `task`; the app allows approve and replan always, the rest only in the fast lane. */
 async function decide(config: Config, room: string, task: number, decision: string): Promise<Record<string, unknown>> {
   return toolJson<Record<string, unknown>>(config, "decide", { room, task, decision });
 }
@@ -1707,6 +1709,17 @@ let offers: Offer[] = [];
 let fastPending: JoinedProject | undefined;
 /** The fast lane proposal the agent sent in this run; planning starts when the run ends. */
 let fastProposed: Candidate | undefined;
+/** A task the main agent gave back with schwitzer_unclaim, still approved and unclaimed. */
+interface GivenBack {
+  /** The `room` argument of the agent's call, when it passed one. */
+  room?: string;
+  number: number;
+  title: string;
+  project: string;
+  note: string;
+}
+/** The last approved task the main agent gave back in this run; the end of the run offers to send it back for a new plan. */
+let givenBack: GivenBack | undefined;
 
 /** The JSON object a successful tool call answered with; undefined for anything else. */
 function resultJson(event: ToolResultEvent): Record<string, unknown> | undefined {
@@ -1740,10 +1753,33 @@ function noteOffer(event: ToolResultEvent): void {
   if (newest) offers.push({ kind: "suggestion", room, number: task.number, title: task.title, suggestion: newest.id, part: newest.part });
 }
 
+/** Notes an approved task the main agent gave back with schwitzer_unclaim for the end of its run;
+ *  a given-back plan claim (the task stays accepted) is ignored. The last call in a run wins. */
+function noteGivenBack(event: ToolResultEvent): void {
+  const task = resultJson(event);
+  if (!task || typeof task.number !== "number" || typeof task.title !== "string" || typeof task.project !== "string") return;
+  if (task.stage !== "ready" || task.claim !== null) return;
+  givenBack = {
+    room: typeof event.input.room === "string" ? event.input.room : undefined,
+    number: task.number,
+    title: task.title,
+    project: task.project,
+    note: typeof event.input.note === "string" ? event.input.note : "",
+  };
+}
+
 /** The end of a main-agent run: plans the fast lane proposal, or offers the human the decisions on
- *  what the agent proposed or suggested in the fast lane, then the next build after a finished one.
- *  Never throws. */
-async function afterRun(pi: Pi, ctx: Ctx, taken: Offer[], fast: Candidate | undefined, finished: boolean): Promise<void> {
+ *  what the agent proposed or suggested in the fast lane, then to send a given-back task `back` for
+ *  a new plan, then the next build after a finished one (unless this session now plans). Never throws. */
+async function afterRun(
+  pi: Pi,
+  ctx: Ctx,
+  taken: Offer[],
+  fast: Candidate | undefined,
+  finished: boolean,
+  back: GivenBack | undefined,
+): Promise<void> {
+  let planning = false;
   try {
     const config = await loadConfig();
     if (fast) {
@@ -1768,10 +1804,46 @@ async function afterRun(pi: Pi, ctx: Ctx, taken: Offer[], fast: Candidate | unde
         await settleSuggestion(ctx, config, row, offer.suggestion!, index === 0);
       }
     }
+    if (back) planning = await offerReplan(pi, ctx, config, back);
   } catch (e) {
     reportError(ctx, e);
   }
-  if (finished) await offerNext(pi, ctx);
+  if (finished && !planning) await offerNext(pi, ctx);
+}
+
+const REPLAN_CHOICES = ["Send it back and plan it here", "Send it back only", "Leave it for the room"] as const;
+
+/** Offers to send the given-back task `g` back for a new plan (`decide` with `replan`, allowed outside
+ *  the fast lane); the first choice claims it for planning in this session and starts plan mode.
+ *  True when this session starts planning. */
+async function offerReplan(pi: Pi, ctx: Ctx, config: Config, g: GivenBack): Promise<boolean> {
+  const room = await roomKey(config, g.room);
+  if (room === undefined) {
+    ctx.ui.notify(`Schwitzer: #${g.number} was given back; send it back for a new plan in Schwitzer.`, "info");
+    return false;
+  }
+  const task = await toolJson<Record<string, unknown>>(config, "get_task", { room, task: g.number });
+  if (task.stage !== "ready" || task.claim !== null) return false; // claimed or decided meanwhile
+  const why = g.note.trim() === "" ? "" : `: ${cutText(g.note, 200)}`;
+  const options = [...REPLAN_CHOICES];
+  const index = pickIndex(await ctx.ui.select(`#${g.number} "${g.title}" was given back${why}. Send it back for a new plan?`, options), options);
+  if (index !== 0 && index !== 1) return false;
+  const replanned = (await decide(config, room, g.number, "replan")) as unknown as TaskRow;
+  decided(ctx, g.number, "replan");
+  if (index === 1) {
+    ctx.ui.notify(`Run /schwitzer plan ${g.number} to plan it.`, "info");
+    return false;
+  }
+  const project = (await joinedProjects(config)).find((p) => p.room.startsWith(room) && p.projectName === g.project);
+  if (!project) {
+    ctx.ui.notify(
+      `#${g.number} belongs to project "${g.project}", which this repo is not linked to; plan it there with /schwitzer plan ${g.number}.`,
+      "info",
+    );
+    return false;
+  }
+  await claimPicked(pi, ctx, config, { ...project, task: replanned }, "plan", true);
+  return true;
 }
 
 /** `/schwitzer fast [#n | text]`: task `#n` of this repo's projects goes into the fast lane, or
@@ -2654,6 +2726,7 @@ export default function schwitzer(pi: Pi): void {
     if (event.toolName === "schwitzer_finish") finishedBuild = true;
     if (event.toolName === "schwitzer_propose") void watchProposal(pi, ctx, event);
     if (event.toolName === "schwitzer_propose" || event.toolName === "schwitzer_suggest_revision") noteOffer(event);
+    if (event.toolName === "schwitzer_unclaim") noteGivenBack(event);
   });
   // Rebuild the proposal watch from the session now loaded, so a resumed session that still waits
   // picks it up.
@@ -2661,17 +2734,19 @@ export default function schwitzer(pi: Pi): void {
     pi.on(name, (_event, ctx) => restoreAwaits(pi, ctx));
   pi.on("session_shutdown", () => stopAwaitWatch());
   // The run ended: plan the fast lane proposal it sent, offer the decisions on what it proposed or
-  // suggested in the fast lane, and after a finished build the next approved task. Detached: the
-  // dialogs must not hold up the hook.
+  // suggested in the fast lane, offer to send an approved task it gave back for a new plan, and
+  // after a finished build the next approved task. Detached: the dialogs must not hold up the hook.
   pi.on("agent_end", (_event, ctx) => {
     if (ctx.agent && ctx.agent.kind !== "main") return;
     const taken = offers;
     const fast = fastProposed;
     const finished = finishedBuild;
+    const back = givenBack;
     offers = [];
     fastProposed = undefined;
     fastPending = undefined;
     finishedBuild = false;
-    if (ctx.hasUI && (taken.length > 0 || fast || finished)) void afterRun(pi, ctx, taken, fast, finished);
+    givenBack = undefined;
+    if (ctx.hasUI && (taken.length > 0 || fast || finished || back)) void afterRun(pi, ctx, taken, fast, finished, back);
   });
 }
