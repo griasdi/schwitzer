@@ -14,6 +14,11 @@ path = "src/main.rs"
 name = "licenses"
 test = true
 
+# Drives the real headless app and a real omp with a scripted model; needs omp on PATH.
+[[test]]
+name = "omp_plugin"
+required-features = ["remote"]
+
 [features]
 # Headless remote control (iced_remote): `schwitzer --headless --control <sock>`.
 remote = ["dep:iced_remote"]
@@ -55,6 +60,7 @@ close_fds.workspace = true
 workspace = true
 
 [dev-dependencies]
+schwitzer-server.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 ico.workspace = true

@@ -33,6 +33,8 @@ cargo test --workspace
 cargo deny check
 ```
 
+A change to the omp plugin (`omp-plugin/index.ts`), the MCP server (`src/mcp/`) or the plugin installer (`src/omp_plugin.rs`) also runs `cargo test -p schwitzer-app --features remote --test omp_plugin`, which needs `omp` on `PATH`.
+
 For UI changes, also click through the affected flow in Daylight and Night (DESIGN.md is the reference) at the default window size of 480×780.
 
 ## Layout

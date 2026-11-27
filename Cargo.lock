@@ -4123,6 +4123,7 @@ dependencies = [
  "schwitzer-client",
  "schwitzer-proto",
  "schwitzer-release",
+ "schwitzer-server",
  "semver",
  "serde",
  "serde_json",

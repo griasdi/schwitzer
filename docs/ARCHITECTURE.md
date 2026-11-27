@@ -640,6 +640,7 @@ Tests: `crates/schwitzer-client/tests/flow.rs` runs a real server on loopback UD
 |`crates/schwitzer-app/assets/`|fonts, Lucide icons, the logo, license data|
 |`crates/schwitzer-app/examples/`|`licenses.rs` (rewrites `third-party.json`), `icons.rs`|
 |`crates/schwitzer-app/tests/fixtures/`|omp session logs for the scanner tests|
+|`crates/schwitzer-app/tests/omp_plugin/`|end-to-end tests of the omp plugin: headless app, in-process server, a real omp with a scripted model|
 |`deploy/`|deploy, release, changelog and packaging scripts, the systemd unit, the installer script|
 |`design/logo/`|the logo and its concepts|
 |`docs/`|this document, its diagrams and the consolidation run logs (`docs/consolidations/`)|

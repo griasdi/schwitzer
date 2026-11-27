@@ -10,6 +10,7 @@ target/debug/schwitzer-server --listen 127.0.0.1:7454 --data-dir /tmp/sw/server 
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo test -p schwitzer-app --features remote --test omp_plugin   # the omp plugin end to end: real omp, scripted model; needs omp on PATH
 deploy/release.sh 0.2.0   # on main, pushed: set the version, tag v0.2.0 (.github/workflows/release.yml builds and publishes the desktop app and the Linux server; the same workflow publishes every commit on main that passed CI as the rolling `dev` prerelease)
 deploy/changelog.sh v0.1.0..HEAD   # release notes from the Changelog: trailers
 cargo run -p schwitzer-app --example licenses   # rewrite assets/licenses/third-party.json after Cargo.lock changed (needs cargo-about 0.9.3)
@@ -34,6 +35,8 @@ stkn.org runs the latest release and installs it itself (`schwitzer-server --aut
 `cargo deny check` (`deny.toml`) fetches the RustSec advisory database and checks the graph with every feature: it fails on every vulnerability, on an "unmaintained" notice only for a direct dependency, on a license outside the allow list, and on a source other than crates.io; a crate in two versions is a warning. An advisory is never silenced, a license never allowed and a source never added without the user's decision. Install it with `cargo install --locked cargo-deny`.
 
 A change to doc comments also runs `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`. A UI change is checked the way a user meets it: clicked through headless and screenshotted, not only compiled. `crates/schwitzer-client/tests/flow.rs` starts a real server on loopback UDP and restarts it on the same data dir; it needs no network beyond `127.0.0.1`.
+
+A change to `crates/schwitzer-app/omp-plugin/index.ts`, `crates/schwitzer-app/src/mcp/` or `crates/schwitzer-app/src/omp_plugin.rs` also runs `cargo test -p schwitzer-app --features remote --test omp_plugin` (needs `omp` on `PATH`; not in CI).
 
 ## Finishing a change
 
@@ -66,6 +69,16 @@ Start hosts with `setsid … &`: a plain `&` dies with the harness's shell. `ctl
 A headless instance opens no folder dialog: the folder buttons (`#repo-browse`, `#projects-dir-browse`) answer with `$SCHWITZER_PICK_FOLDER` from the app's environment, or act as cancelled when it is unset.
 
 The MCP server of a headless instance is at `http://127.0.0.1:<mcp_port>/mcp`, with `Authorization: Bearer <$SCHWITZER_HOME/mcp-token>` and `Accept: application/json, text/event-stream`. It answers 401 without the bearer and 403 to any request with an `Origin` header.
+
+## Testing the omp plugin
+
+Plugin behaviour is tested in `crates/schwitzer-app/tests/omp_plugin/`. Each test runs an in-process server; bob, a second member who makes the human decisions through `Client`; the real headless app, built by cargo with `remote`, which installs the plugin into a temp repo through its auto-update; and a real `omp --mode rpc` in that repo, with `HOME=target/tmp/omp-home` and its own `PI_CODING_AGENT_DIR`.
+
+- The model is `FakeModel`, a scripted OpenAI-compatible server: push `Reply::Text` or `Reply::Tool` before the prompt; an empty queue answers `ok`; `requests()` shows what the model saw.
+- Dialogs are `select` frames answered with `Omp::answer`. Waits use `prompt_result` and frames, never sleeps.
+- A new plugin behaviour gets a scenario there, never a real model. tmux with a real omp stays only for what omp shows in its TUI alone: the plan review (`plan_review_requested`/`plan_review_resolved`, `submit_plan` and the approval wait) and the multiplexer tabs of `/schwitzer plan #a #b`.
+- omp never runs with its cwd inside this repository: `.omp/mcp.json` holds the user's token. The tests' temp dirs lie in the system temp dir.
+- On failure, the temp dir is kept and its path printed, with the app log and the omp frames.
 
 ## Architecture
 
