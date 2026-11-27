@@ -65,6 +65,6 @@ similar = "3"
 # The Markdown parser of iced 0.14's `markdown` widget, which splits task text into blocks;
 # it follows iced (0.13 is out).
 pulldown-cmark = { version = "0.12", default-features = false }
-ico = "0.5"
+ico = "0.6"
 icns = "0.5"
 winresource = "0.1"
