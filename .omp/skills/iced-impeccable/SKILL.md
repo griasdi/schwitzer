@@ -1,7 +1,7 @@
 ---
 name: iced-impeccable
 description: Use only when the project is an iced (Rust) desktop app and the task is designing, redesigning, critiquing, auditing, polishing or otherwise improving its UI, or visually verifying it headless (start it offscreen, inject keyboard and mouse input, take screenshots). Load it alongside the impeccable skill: impeccable owns the turn (commands, doctrine, modes); this skill layers iced-native guidance and headless verification on top. Not for web, iOS or Android UI.
-version: 0.3.0
+version: 0.3.1
 user-invocable: true
 argument-hint: "[impeccable command] [target] | verify | integrate"
 license: MIT OR Apache-2.0
@@ -18,7 +18,7 @@ Impeccable's bounded-pass rule holds unchanged: build fully, inspect once with a
 ## Setup
 
 1. Run impeccable's `context` launcher exactly as its Setup says (`"<impeccable skill dir>/scripts/impeccable" context`, once per session, cwd at the user's project).
-2. PRODUCT.md `## Platform` is `desktop` and `## Stack` records `iced 0.14 (Rust)`. Impeccable (checked against 4.7.0) recognises only `web`, `ios`, `android` and `adaptive`, so the launcher treats `desktop` as unrecognized (web) and resolves `"platform": null`. Expected: do not "fix" the field and do not surface it to the user. Handle the launcher's directives like this:
+2. PRODUCT.md `## Platform` is `desktop` and `## Stack` records `iced 0.14 (Rust)`. Impeccable (checked against 4.9.1) recognises only `web`, `ios`, `android` and `adaptive`, so the launcher treats `desktop` as unrecognized (web), prints a `WARNING` asking to fix the field, and resolves `"platform": null`. Expected: do not "fix" the field and do not surface it to the user. Handle the launcher's directives like this:
    - `MANUAL_DETECTOR_REQUIRED`: web-only; ignore it. Never run `impeccable detect` on an iced app.
    - `IMAGE_TOOLS`: ignore it for screenshots; crops, zooms and comparisons go through `screenshot --crop X Y W H --zoom N` and `iced-impeccable sheet` ([reference/verify.md](reference/verify.md)), never `magick` or `ffmpeg`.
    - `WORLD_DISCOVERY_REQUIRED`: the launcher does not recognise Rust views as a visual implementation (`"hasVisualImplementation": false`). An app with existing iced views has an incumbent implementation; the directive applies only to a new build or an explicit redesign, as it says.
@@ -52,6 +52,7 @@ With `"platform": null` none of impeccable's native branches fire by themselves.
 | `optimize` | Impeccable's `optimize.md` is web-only. Diagnose with the Performance checks of [reference/audit.iced.md](reference/audit.iced.md), fix in Rust, measure with `wait-idle` / `tree` before and after. |
 | `craft`, `shape`, comp-led builds | `craft` is an alias of ordinary new work, code-led. `comp-spec`, `region-map`, `component-review`, hero and plate gates, `build-phase` and image-generated comps do not apply; `buildPath` / `config-build-path-*` findings are not applicable. |
 | `doctor` | Run `doctor --json`. A finding about `## Platform` `desktop` is expected: report it in one line and never repair it. Run `doctor --fix` only when no `auto` finding touches PRODUCT.md `## Platform`. |
+| `foundations` | Run it as impeccable's `foundations.md` says; web items (`not-found-page`, `app-icons`, `social-previews`, `legal-pages`, `error-tracking`) do not apply to an iced app. `readable-contrast`, `no-generic-ai-patterns`, `design-tokens` and `reduced-motion` stay `not checked` because the detector does not read Rust: never run `impeccable detect` for them; judge them by hand against [reference/iced.md](reference/iced.md) (Motion for reduced motion) and the Accessibility and Appearance & Theming checks of [reference/audit.iced.md](reference/audit.iced.md). |
 | `/impeccable` with no argument | Impeccable's `routing.md` web guards do not fire with `platform: null`, so skip them by hand: no `impeccable detect` on `scan.targets`, no `live` / `generate` as browser modes. Offer `verify` and the contact-sheet variants instead. Never auto-run. |
 | every other command | impeccable's own reference; translate its web examples (CSS, HTML, media queries) with [reference/iced.md](reference/iced.md) |
 

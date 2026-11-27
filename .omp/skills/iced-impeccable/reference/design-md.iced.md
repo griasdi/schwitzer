@@ -18,7 +18,7 @@ Search, in priority order:
 | DESIGN.md frontmatter | iced code |
 |---|---|
 | `colors` | `Palette` fields (`background`, `text`, `primary`, `success`, `warning`, `danger`) plus extended-palette steps (`background.weak/base/strong`, `primary.strong`, ...) in the `theme` module. Keep the key slugs descriptive; record in `colorMeta` which palette field or extended step each one is. |
-| `typography` | font consts (`Font::with_name`, bundled bytes), size tokens as `f32` consts (`fontSize` in px), `text::LineHeight` for `lineHeight`, `Font { weight, .. }` for `fontWeight`. `letterSpacing` is not available in iced: write `"normal"`. |
+| `typography` | font consts (`Font::with_name`, bundled bytes), size tokens as `f32` consts (`fontSize` in px), `text::LineHeight` for `lineHeight`, `Font { weight, .. }` for `fontWeight`. `letterSpacing` does not exist in iced: omit it (document.md includes only the props that are real for the project). |
 | `rounded` | `border::Radius` consts (`RADIUS_SM`, `RADIUS_MD`) |
 | `spacing` | spacing consts (`SP_1` .. `SP_8`) used in `.spacing(..)` and `.padding(..)` |
 | `components` | style functions (`button::primary`, `container::card`, ...): `backgroundColor` / `textColor` from the `Status::Active` branch, `rounded` from `border.radius`, `padding` from the view that uses it |

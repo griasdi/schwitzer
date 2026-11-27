@@ -82,6 +82,8 @@ Generate the report exactly as `audit.native.md` "Generate Report" says (health 
 - Pattern examples: "Raw `Color::from_rgb` appears in 15+ views, should use `extended_palette()`"; "Icon-only buttons are below 24x24 and carry no tooltip or id throughout the toolbar".
 - Screen-reader support is out of scope (iced 0.14 has no accessibility tree): say so once and score what the app controls.
 
+After delivering it, save it as `audit.native.md` "Save the Report" says (`audit-storage write`).
+
 **Avoid**, in addition to `audit.native.md`'s list:
 - Driving the user's desktop or a browser to gather evidence
 - Running `impeccable detect` or hooks (not available on iced)

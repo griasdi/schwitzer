@@ -61,7 +61,7 @@ iced-impeccable ctl /tmp/sw/a.sock tree                     # or target/debug/sc
 iced-impeccable ctl /tmp/sw/a.sock screenshot --annotate /tmp/sw/a.png   # look at it with Read
 ```
 
-Start hosts with `setsid … &`: a plain `&` dies with the harness's shell. `ctl -` reads a batch of commands from stdin; `~/code/iced_impeccable/README.md` lists every command. If `iced-impeccable` is missing, install it with `cargo install iced_impeccable --version 0.3.0 --locked`. A control that can only be reached by coordinates gets a widget id (`container(...).id("...")`) instead. Signals to the agent's own processes go by PID, never by name: `pkill schwitzer` would hit the user's app.
+Start hosts with `setsid … &`: a plain `&` dies with the harness's shell. `ctl -` reads a batch of commands from stdin; `~/code/iced_impeccable/README.md` lists every command. If `iced-impeccable` is missing, install it with `cargo install iced_impeccable --version 0.3.1 --locked`. A control that can only be reached by coordinates gets a widget id (`container(...).id("...")`) instead. Signals to the agent's own processes go by PID, never by name: `pkill schwitzer` would hit the user's app.
 
 A headless instance opens no folder dialog: the folder buttons (`#repo-browse`, `#projects-dir-browse`) answer with `$SCHWITZER_PICK_FOLDER` from the app's environment, or act as cancelled when it is unset.
 
