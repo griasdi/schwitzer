@@ -1,6 +1,6 @@
 //! Writes assets/licenses/third-party.json, the open source components of the app and their
 //! license texts, which the app's About page shows: cargo run -p schwitzer-app --example
-//! licenses (needs cargo-about 0.9.2). cargo-about finds the crates (per target, build
+//! licenses (needs cargo-about 0.9.3). cargo-about finds the crates (per target, build
 //! dependencies included) and their texts; this drops Schwitzer's own crates, links every
 //! component to its source, joins equal texts and adds the NOTICE files of Apache-2.0 crates.
 //! Its test fails when Cargo.lock moved on since the listing was written.
@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 
 /// What `cargo about --version` must print: another version may pick other texts, and the
 /// committed listing would change with the machine.
-const CARGO_ABOUT: &str = "cargo-about 0.9.2";
+const CARGO_ABOUT: &str = "cargo-about 0.9.3";
 
 /// The listing, relative to the crate directory.
 const LISTING: &str = "assets/licenses/third-party.json";
@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
     if version.as_deref() != Some(CARGO_ABOUT) {
-        return Err("the licenses example needs cargo-about 0.9.2: cargo install --locked --features cli cargo-about@0.9.2".into());
+        return Err("the licenses example needs cargo-about 0.9.3: cargo install --locked --features cli cargo-about@0.9.3".into());
     }
     let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let root = crate_dir.join("../..");
@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(
             listing.lock,
             lock_fingerprint(&lock).unwrap(),
-            "assets/licenses/third-party.json was written from another Cargo.lock: run `cargo run -p schwitzer-app --example licenses` (needs cargo-about 0.9.2)"
+            "assets/licenses/third-party.json was written from another Cargo.lock: run `cargo run -p schwitzer-app --example licenses` (needs cargo-about 0.9.3)"
         );
     }
 

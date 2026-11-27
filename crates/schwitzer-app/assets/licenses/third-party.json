@@ -353,6 +353,18 @@
     {
       "id": "ISC",
       "name": "ISC License",
+      "text": "// Copyright 2015-2024 Brian Smith.\n//\n// Permission to use, copy, modify, and/or distribute this software for any\n// purpose with or without fee is hereby granted, provided that the above\n// copyright notice and this permission notice appear in all copies.\n//\n// THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\n// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\n// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY\n// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\n// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION\n// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN\n// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.\n\n#[cfg(target_pointer_width = \"64\")]\ntype CompilerWord = u64;\n\n#[cfg(target_pointer_width = \"32\")]\ntype CompilerWord = u32;\n\n/// A native word that isn't secret.\n///\n/// `LeakyWord` supports `as` conversions to/from native types.\n///\n/// XXX: This isn't the native word size on targets where a pointer isn't the\n/// same size as a native word. TODO: Fix this.\npub(crate) type LeakyWord = CompilerWord;\n",
+      "crates": [
+        {
+          "name": "ring",
+          "version": "0.17.14",
+          "source": "https://crates.io/crates/ring/0.17.14"
+        }
+      ]
+    },
+    {
+      "id": "ISC",
+      "name": "ISC License",
       "text": "// Copyright 2015-2025 Brian Smith.\n//\n// Permission to use, copy, modify, and/or distribute this software for any\n// purpose with or without fee is hereby granted, provided that the above\n// copyright notice and this permission notice appear in all copies.\n//\n// THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\n// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\n// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY\n// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\n// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION\n// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN\n// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.\n\nuse crate::{bb, error};\n\n#[deprecated(\n    note = \"To be removed. Internal function not intended for external use with no promises regarding side channels.\"\n)]\npub fn verify_slices_are_equal(a: &[u8], b: &[u8]) -> Result<(), error::Unspecified> {\n    bb::verify_slices_are_equal(a, b)\n}\n",
       "crates": [
         {
@@ -389,6 +401,18 @@
     {
       "id": "ISC",
       "name": "ISC License",
+      "text": "// Copyright 2018 Brian Smith.\n//\n// Permission to use, copy, modify, and/or distribute this software for any\n// purpose with or without fee is hereby granted, provided that the above\n// copyright notice and this permission notice appear in all copies.\n//\n// THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\n// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\n// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY\n// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\n// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION\n// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN\n// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.\n\n#[cfg(target_arch = \"x86\")]\npub fn shift_full_blocks<const BLOCK_LEN: usize>(\n    in_out: super::overlapping::Overlapping<'_, u8>,\n    mut transform: impl FnMut(&[u8; BLOCK_LEN]) -> [u8; BLOCK_LEN],\n) {\n    let (in_out, src) = in_out.into_slice_src_mut();\n    let in_out_len = in_out[src.clone()].len();\n\n    for i in (0..in_out_len).step_by(BLOCK_LEN) {\n        let block = {\n            let input =\n                <&[u8; BLOCK_LEN]>::try_from(&in_out[(src.start + i)..][..BLOCK_LEN]).unwrap();\n            transform(input)\n        };\n        let output = <&mut [u8; BLOCK_LEN]>::try_from(&mut in_out[i..][..BLOCK_LEN]).unwrap();\n        *output = block;\n    }\n}\n",
+      "crates": [
+        {
+          "name": "ring",
+          "version": "0.17.14",
+          "source": "https://crates.io/crates/ring/0.17.14"
+        }
+      ]
+    },
+    {
+      "id": "ISC",
+      "name": "ISC License",
       "text": "// Copyright 2018 Brian Smith.\n//\n// Permission to use, copy, modify, and/or distribute this software for any\n// purpose with or without fee is hereby granted, provided that the above\n// copyright notice and this permission notice appear in all copies.\n//\n// THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\n// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\n// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY\n// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\n// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION\n// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN\n// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.\n\n//! Serialization and deserialization.\n\n#[doc(hidden)]\npub mod der;\n\n#[cfg(feature = \"alloc\")]\nmod writer;\n\n#[cfg(feature = \"alloc\")]\npub(crate) mod der_writer;\n\npub(crate) mod positive;\n\npub use self::positive::Positive;\n\n#[cfg(feature = \"alloc\")]\npub(crate) use self::writer::TooLongError;\n",
       "crates": [
         {
@@ -402,6 +426,18 @@
       "id": "ISC",
       "name": "ISC License",
       "text": "// Copyright 2019-2024 Brian Smith.\n//\n// Permission to use, copy, modify, and/or distribute this software for any\n// purpose with or without fee is hereby granted, provided that the above\n// copyright notice and this permission notice appear in all copies.\n//\n// THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\n// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\n// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY\n// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\n// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION\n// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN\n// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.\n\nuse super::BlockLen;\n\npub(super) use self::{\n    sha2_32::{block_data_order_32, State32, SHA256_BLOCK_LEN},\n    sha2_64::{block_data_order_64, State64, SHA512_BLOCK_LEN},\n};\n\npub(super) const CHAINING_WORDS: usize = 8;\n\n#[cfg(any(\n    all(target_arch = \"aarch64\", target_endian = \"little\"),\n    all(target_arch = \"arm\", target_endian = \"little\"),\n    target_arch = \"x86_64\"\n))]\n#[macro_use]\nmod ffi;\n\npub(super) mod fallback;\nmod sha2_32;\nmod sha2_64;\n",
+      "crates": [
+        {
+          "name": "ring",
+          "version": "0.17.14",
+          "source": "https://crates.io/crates/ring/0.17.14"
+        }
+      ]
+    },
+    {
+      "id": "ISC",
+      "name": "ISC License",
+      "text": "// Copyright 2022 Brian Smith.\n//\n// Permission to use, copy, modify, and/or distribute this software for any\n// purpose with or without fee is hereby granted, provided that the above\n// copyright notice and this permission notice appear in all copies.\n//\n// THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\n// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\n// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY\n// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\n// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION\n// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN\n// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.\n\n/// Polyfill for `Option::unwrap()` as a const fn; feature `const_option`.\n/// https://github.com/rust-lang/rust/issues/67441.\n/// TODO(MSRV): Replace this with `x.unwrap()`.\n///\n/// `T: Copy` avoids \"constant functions cannot evaluate destructors.\"\npub const fn unwrap_const<T>(x: Option<T>) -> T\nwhere\n    T: Copy,\n{\n    if let Some(x) = x {\n        x\n    } else {\n        panic!(\"unwrap_const on `None`\");\n    }\n}\n",
       "crates": [
         {
           "name": "ring",
@@ -437,7 +473,31 @@
     {
       "id": "ISC",
       "name": "ISC License",
+      "text": "// Copyright 2024 Brian Smith.\n//\n// Permission to use, copy, modify, and/or distribute this software for any\n// purpose with or without fee is hereby granted, provided that the above\n// copyright notice and this permission notice appear in all copies.\n//\n// THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\n// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\n// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY\n// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\n// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION\n// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN\n// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.\n\n//! Utilities to make dealing with slices less tediuous.\n\n/// Replaces the first N elements of `a` with the first N elements of `b`, where\n/// N is `core::cmp::min(a.len(), b.len())`, leaving the rest unchanged.\npub fn overwrite_at_start<T: Copy>(a: &mut [T], b: &[T]) {\n    a.iter_mut().zip(b).for_each(|(a, b)| {\n        *a = *b;\n    });\n}\n",
+      "crates": [
+        {
+          "name": "ring",
+          "version": "0.17.14",
+          "source": "https://crates.io/crates/ring/0.17.14"
+        }
+      ]
+    },
+    {
+      "id": "ISC",
+      "name": "ISC License",
       "text": "// Copyright 2024 Brian Smith.\n//\n// Permission to use, copy, modify, and/or distribute this software for any\n// purpose with or without fee is hereby granted, provided that the above\n// copyright notice and this permission notice appear in all copies.\n//\n// THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\n// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\n// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY\n// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\n// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION\n// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN\n// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.\n\npub use self::{\n    array::Array,\n    base::{IndexError, Overlapping},\n    partial_block::PartialBlock,\n};\n\nmod array;\nmod base;\nmod partial_block;\n",
+      "crates": [
+        {
+          "name": "ring",
+          "version": "0.17.14",
+          "source": "https://crates.io/crates/ring/0.17.14"
+        }
+      ]
+    },
+    {
+      "id": "ISC",
+      "name": "ISC License",
+      "text": "// Copyright 2024 Brian Smith.\n//\n// Permission to use, copy, modify, and/or distribute this software for any\n// purpose with or without fee is hereby granted, provided that the above\n// copyright notice and this permission notice appear in all copies.\n//\n// THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\n// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\n// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY\n// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\n// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION\n// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN\n// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.\n\nuse crate::testutil;\nuse core::{marker::PhantomData, mem::size_of};\n\n/// A ZST that can be added to any type to make the type `!Send`.\n#[derive(Clone, Copy)]\npub struct NotSend(PhantomData<*mut ()>);\n\nimpl NotSend {\n    pub const VALUE: Self = Self(PhantomData);\n}\n\n#[allow(deprecated)]\nconst _: () = testutil::compile_time_assert_clone::<NotSend>();\n#[allow(deprecated)]\nconst _: () = testutil::compile_time_assert_copy::<NotSend>();\nconst _: () = assert!(size_of::<NotSend>() == 0);\n",
       "crates": [
         {
           "name": "ring",

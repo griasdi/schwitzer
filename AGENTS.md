@@ -12,7 +12,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 deploy/release.sh 0.2.0   # on main, pushed: set the version, tag v0.2.0 (.github/workflows/release.yml builds and publishes the desktop app and the Linux server; the same workflow publishes every commit on main that passed CI as the rolling `dev` prerelease)
 deploy/changelog.sh v0.1.0..HEAD   # release notes from the Changelog: trailers
-cargo run -p schwitzer-app --example licenses   # rewrite assets/licenses/third-party.json after Cargo.lock changed (needs cargo-about 0.9.2)
+cargo run -p schwitzer-app --example licenses   # rewrite assets/licenses/third-party.json after Cargo.lock changed (needs cargo-about 0.9.3)
 ```
 
 Never `cargo run -p schwitzer-app` or start `schwitzer` without `--headless`: see "Running headless". There is no xtask. GitHub Actions (`.github/workflows/ci.yml`) runs the gate on every push to `main` and every pull request, and app and release clippy, the `update::` tests and the `schwitzer-release` tests on macOS and Windows; the local gate below still runs before every push.
