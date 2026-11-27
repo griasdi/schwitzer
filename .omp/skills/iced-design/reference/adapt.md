@@ -1,6 +1,6 @@
 > **Additional context needed**: target window sizes, OS targets (Linux / Windows / macOS) and usage contexts (docked, tiled, full screen, HiDPI).
 
-Adapt an existing iced design to a different context: another window class, scale factor, OS, or origin (a website, a mobile app). Extends `adapt.native.md`'s principles (restructure, don't stretch; no device checks), inside the conventions of [iced.md](iced.md); read it before planning if Setup hasn't already.
+Adapt an existing iced design to a different context: another window class, scale factor, OS, or origin (a website, a mobile app). Principles: restructure, never stretch; drive structure from size classes, never from OS or device checks; carry the brand's expressive layer over and rebuild navigation and controls in desktop vocabulary. Work inside the conventions of [iced.md](iced.md); read it before planning if you have not yet.
 
 ## Assess Adaptation Challenge
 
@@ -43,9 +43,12 @@ Replace the hamburger menu and bottom tab bar with a sidebar or top toolbar, hov
 ## Implement & Verify
 
 - Set `min_size` to the compact class; keep every control reachable there.
-- Verify with the capture set in [verify.md](verify.md): standard dark and light, compact, wide, and hidpi (scale 2). Reach the same app state in each, `wait-idle`, `screenshot`, then `iced-impeccable sheet` to compare at a glance. Fix everything the round shows in one batch, confirm once.
+- Verify with the capture set in [verify.md](verify.md): standard dark and light, compact, wide, and hidpi (scale 2). Reach the same app state in each, `wait-idle`, `screenshot`, then `iced-remote sheet` to compare at a glance. Fix everything the round shows in one batch, confirm once.
 - Keyboard and pointer behaviour are checked on the headless instance (`key tab`, `focused`, `tap`); real-OS behaviour (native dialogs, IME, window-manager integration) needs a human on that OS. Say which one produced the evidence.
 
-**NEVER** (adding to adapt.native.md's Avoid list):
+**NEVER**:
+- Stretch a layout made for another size class
+- Hide core functionality on the compact class
+- Port another platform's controls or navigation unchanged
 - Hard-code pixel layouts that assume scale 1
 - Trust headless captures alone for OS integration (dialogs, IME, window management)

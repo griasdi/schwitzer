@@ -70,13 +70,13 @@ flowchart LR
   iced["iced 0.14"]:::ext
   mcp["rmcp + axum"]:::ext
   sqlite["rusqlite (bundled)"]:::ext
-  impeccable["iced_impeccable"]:::ext
+  remote["iced_remote"]:::ext
   app --> client
   app --> proto
   app --> release
   app --> iced
   app --> mcp
-  app -.->|feature remote| impeccable
+  app -.->|feature remote| remote
   client --> proto
   client --> weida
   server --> proto
@@ -86,7 +86,7 @@ flowchart LR
   client -.->|flow test, dev only| server
 ```
 
-Pins (root `Cargo.toml`): weida `=0.1.0-alpha.9` from crates.io is an exact version, because weida is alpha and its wire protocol may break within 0.x; moving the version is its own change. iced_impeccable 0.3 from crates.io, iced 0.14, rmcp 3.9, axum 0.8, rusqlite 0.41 with bundled SQLite.
+Pins (root `Cargo.toml`): weida `=0.1.0-alpha.9` from crates.io is an exact version, because weida is alpha and its wire protocol may break within 0.x; moving the version is its own change. iced_remote 0.4 from crates.io, iced 0.14, rmcp 3.9, axum 0.8, rusqlite 0.41 with bundled SQLite.
 
 ## 4. Rooms, projects and tasks
 
@@ -373,7 +373,7 @@ A bad `settings.toml` loads as defaults with a notice and is not overwritten unt
 
 **Theme.** Colours, sizes and fonts are Daylight and Night tokens, read only by the style functions in `theme.rs`; the app follows the system mode. DESIGN.md is normative.
 
-**Headless.** Feature `remote` wraps the app in `iced_impeccable::Remote` (`--headless`, `--control <socket>`, `schwitzer ctl …`), so it can be clicked through and screenshotted without a window. See AGENTS.md, "Running headless".
+**Headless.** Feature `remote` wraps the app in `iced_remote::Remote` (`--headless`, `--control <socket>`, `schwitzer ctl …`), so it can be clicked through and screenshotted without a window. See AGENTS.md, "Running headless".
 
 ## 9. Agent harness integration (omp)
 

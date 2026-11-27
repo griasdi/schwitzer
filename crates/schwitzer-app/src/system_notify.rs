@@ -5,7 +5,7 @@
 /// logs it instead.
 pub async fn show(summary: String, body: String) {
     #[cfg(feature = "remote")]
-    if iced_impeccable::is_headless() {
+    if iced_remote::is_headless() {
         tracing::info!("headless: notification not shown: {summary}: {body}");
         return;
     }

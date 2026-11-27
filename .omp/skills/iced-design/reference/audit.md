@@ -1,6 +1,6 @@
 Run systematic **technical** quality checks on an iced desktop app and generate a comprehensive report. Don't fix issues; document them for other commands to address.
 
-This is a code-level audit plus a headless check, not a design critique. Audit from the Rust source (views, style functions, subscriptions, theme module) and confirm behaviour on a headless instance per [verify.md](verify.md). No browser tooling and no `impeccable detect` applies. Score against [iced.md](iced.md), including its slop test; read it first if Setup hasn't already. The report format is impeccable's `audit.native.md` "Generate Report", read with the overrides under Report below.
+This is a code-level audit plus a headless check, not a design critique. Audit from the Rust source (views, style functions, subscriptions, theme module) and confirm behaviour on a headless instance per [verify.md](verify.md). No browser tooling applies. Score against [iced.md](iced.md), including its slop test; read it first if you have not yet. The report format is under Report below; under impeccable use [impeccable.md](impeccable.md) "Audit report" instead.
 
 ## Diagnostic Scan
 
@@ -75,16 +75,64 @@ Score against [iced.md](iced.md), including its slop test. **Check for**:
 
 ## Report
 
-Generate the report exactly as `audit.native.md` "Generate Report" says (health score table and rating bands, verdict, executive summary, findings by P0-P3 severity, patterns, positives, recommended actions, closing message), with these overrides:
+The report lives in the chat; write it to a file only when the user asks. Sections in this order:
 
-- **Desktop Conformance** replaces "Platform Conformance" (row 4 of the score table and the verdict heading, "Desktop Conformance Verdict"). The verdict asks whether the app reads as a desktop app or a ported website / the stock iced example, and names the captures and `ctl` commands that are the evidence.
-- **Guideline** cites the [iced.md](iced.md) rule; **Location** is view, file, line.
-- Pattern examples: "Raw `Color::from_rgb` appears in 15+ views, should use `extended_palette()`"; "Icon-only buttons are below 24x24 and carry no tooltip or id throughout the toolbar".
-- Screen-reader support is out of scope (iced 0.14 has no accessibility tree): say so once and score what the app controls.
+### Desktop Conformance verdict
 
-After delivering it, save it as `audit.native.md` "Save the Report" says (`audit-storage write`).
+First in the report. Pass or fail: does the app read as a desktop app, or as a ported website or the stock iced example? Name the captures and `ctl` commands that are the evidence.
 
-**Avoid**, in addition to `audit.native.md`'s list:
+### Health score
+
+| # | Dimension | Score | Key finding |
+|---|---|---|---|
+| 1 | Accessibility | 0-4 | |
+| 2 | Performance | 0-4 | |
+| 3 | Appearance & Theming | 0-4 | |
+| 4 | Desktop Conformance | 0-4 | |
+| 5 | Adaptivity | 0-4 | |
+| | **Total** | **??/20** | band |
+
+Bands: 18-20 Excellent, 14-17 Good, 10-13 Acceptable, 6-9 Poor, 0-5 Critical.
+
+### Summary
+
+The score and band, issue counts per severity, the top 3-5 issues, next steps.
+
+### Findings
+
+Severity:
+- **P0 blocking**: a task cannot be completed.
+- **P1 major**: serious difficulty or a broken [iced.md](iced.md) rule; fix before release.
+- **P2 minor**: an annoyance with a workaround.
+- **P3 polish**: keep these few.
+
+Each finding, P0 first:
+
+```
+[P1] Short name
+Location: view, file, line
+Category: one of the five dimensions
+Impact: who is affected and how
+Rule: the iced.md section it breaks
+Fix: the concrete change
+```
+
+### Patterns
+
+Systemic issues, for example: "Raw `Color::from_rgb` appears in 15+ views, should use `extended_palette()`"; "Icon-only buttons are below 24x24 and carry no tooltip or id throughout the toolbar".
+
+### Positives
+
+What works and should stay.
+
+### Next steps
+
+Ordered from P0 down, each naming a skill argument (`adapt`, `variants`, `verify`) or the concrete code change.
+
+Screen-reader support is out of scope (iced 0.14 has no accessibility tree): say so once and score what the app controls.
+
+**Avoid**:
 - Driving the user's desktop or a browser to gather evidence
-- Running `impeccable detect` or hooks (not available on iced)
 - Scoring screen-reader support the toolkit cannot provide
+- Findings without their impact
+- Unverified findings

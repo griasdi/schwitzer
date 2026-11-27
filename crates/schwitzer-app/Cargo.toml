@@ -15,8 +15,8 @@ name = "licenses"
 test = true
 
 [features]
-# Headless remote control (iced_impeccable): `schwitzer --headless --control <sock>`.
-remote = ["dep:iced_impeccable"]
+# Headless remote control (iced_remote): `schwitzer --headless --control <sock>`.
+remote = ["dep:iced_remote"]
 # Installs new releases and restarts (release builds from CI).
 self-update = []
 
@@ -25,7 +25,7 @@ schwitzer-proto.workspace = true
 schwitzer-client.workspace = true
 schwitzer-release.workspace = true
 iced.workspace = true
-iced_impeccable = { workspace = true, optional = true }
+iced_remote = { workspace = true, optional = true }
 tokio.workspace = true
 futures.workspace = true
 serde.workspace = true

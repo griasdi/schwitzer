@@ -1,6 +1,6 @@
 # cargo-deny configuration, run as `cargo deny check` in the gate (AGENTS.md) and in CI.
 
-# Every feature: `remote` (iced_impeccable, headless control) is not shipped but built by
+# Every feature: `remote` (iced_remote, headless control) is not shipped but built by
 # everyone who drives the app headless, so its crates get the same checks.
 [graph]
 all-features = true

@@ -13,7 +13,7 @@ This document explains how to build and test Schwitzer and how to commit changes
 ```sh
 cargo run -p schwitzer-server -- --listen 0.0.0.0:7444 --public-host <name clients dial> --data-dir <dir>
 cargo run -p schwitzer-app                                 # the desktop app (binary `schwitzer`)
-cargo build --workspace --features schwitzer-app/remote    # app with headless remote control (iced_impeccable)
+cargo build --workspace --features schwitzer-app/remote    # app with headless remote control (iced_remote)
 RUST_LOG=debug cargo run -p schwitzer-app                  # verbose logging, to stderr
 ```
 

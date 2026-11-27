@@ -1,6 +1,6 @@
-> **Replaces** impeccable's `live` and `generate` on iced: there is no browser to pick elements in. Variants are built into one binary, rendered headless, compared on a contact sheet, and the user chooses one.
+> Variants are built into one binary, rendered headless, compared on a contact sheet, and the user chooses one. Under impeccable this replaces `live` and `generate` ([impeccable.md](impeccable.md)).
 
-Use for `live` and `generate [n] [action] [element]`. Verification mechanics are in [verify.md](verify.md); doctrine, modes and craft floor stay impeccable's.
+Use for `variants [n] [element]`. Verification mechanics are in [verify.md](verify.md); design rules are [iced.md](iced.md) and the leading design skill's.
 
 ## Flow
 
@@ -9,7 +9,7 @@ Use for `live` and `generate [n] [action] [element]`. Verification mechanics are
    ```rust
    fn variant() -> &'static str {
        static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-       V.get_or_init(|| std::env::var("IMPECCABLE_VARIANT").unwrap_or_else(|_| "a".into()))
+       V.get_or_init(|| std::env::var("UI_VARIANT").unwrap_or_else(|_| "a".into()))
    }
    // in the view or style fn:
    match variant() { "b" => header_b(state), "c" => header_c(state), _ => header_a(state) }
@@ -18,33 +18,33 @@ Use for `live` and `generate [n] [action] [element]`. Verification mechanics are
 3. **Build once**: `CARGO_TARGET_DIR=target/agent cargo build --features remote`.
 4. **One headless instance per variant**, each with its own socket and state dir, started like [verify.md](verify.md) "Start":
    ```sh
-   for v in a b c; do IMPECCABLE_VARIANT=$v setsid target/agent/debug/<app> --headless --control /tmp/<app>-agent-$v.sock --size 1280x800 </dev/null >/dev/null 2>/tmp/<app>-agent-$v.log & done
+   for v in a b c; do UI_VARIANT=$v setsid target/agent/debug/<app> --headless --control /tmp/<app>-agent-$v.sock --size 1280x800 </dev/null >/dev/null 2>/tmp/<app>-agent-$v.log & done
    ```
    Each instance gets its own state dir `/tmp/<app>-agent-$v/`.
 5. **Drive each to the same state** with an identical batch (only the socket differs), then capture:
    ```sh
    for v in a b c; do
-   iced-impeccable ctl --keep-going /tmp/<app>-agent-$v.sock - <<EOF
+   iced-remote ctl --keep-going /tmp/<app>-agent-$v.sock - <<EOF
    # ... same steps for every variant ...
    wait-idle
    screenshot /tmp/<app>-variants/$v.png
    quit
    EOF
    done
-   for v in a b c; do iced-impeccable ctl --wait 300 /tmp/<app>-agent-$v.sock quit >/dev/null 2>&1; done
+   for v in a b c; do iced-remote ctl --wait 300 /tmp/<app>-agent-$v.sock quit >/dev/null 2>&1; done
    ```
    The heredoc is unquoted so `$v` expands per variant; keep other `$` out of the batch lines. The second loop ends any instance the batch did not reach (a failed round). Any `err` in a variant's replies means rerun that variant.
 6. **Contact sheet**:
    ```sh
-   iced-impeccable sheet --labels a,b,c /tmp/<app>-variants/sheet.png /tmp/<app>-variants/a.png /tmp/<app>-variants/b.png /tmp/<app>-variants/c.png
+   iced-remote sheet --labels a,b,c /tmp/<app>-variants/sheet.png /tmp/<app>-variants/a.png /tmp/<app>-variants/b.png /tmp/<app>-variants/c.png
    ```
    Use `--crop X Y W H --zoom N` on `screenshot` when the varied element is small, so the sheet shows it large. Add a light-appearance row if the variants differ by colour logic.
-7. **Show the sheet to the user and ask which variant to keep** (impeccable's question tool). Say in one line what each variant explores. One round only; if none fits, ask what to change and run one more round, no more.
-8. **Keep the chosen code.** Delete the `IMPECCABLE_VARIANT` switch, the `variant()` helper and the unchosen variants' functions; the app builds and behaves as if the chosen design had always been the only one. Every instance has been `quit` (step 5's cleanup loop, also after a failed round). Delete the `/tmp` captures, logs, sockets and state dirs you created.
+7. **Show the sheet to the user and ask which variant to keep** (the harness's question tool). Say in one line what each variant explores. One round only; if none fits, ask what to change and run one more round, no more.
+8. **Keep the chosen code.** Delete the `UI_VARIANT` switch, the `variant()` helper and the unchosen variants' functions; the app builds and behaves as if the chosen design had always been the only one. Every instance has been `quit` (step 5's cleanup loop, also after a failed round). Delete the `/tmp` captures, logs, sockets and state dirs you created.
 
 ## Rules
 
-- Variants obey [iced.md](iced.md) and craft-floor like any other work; "variant" is not licence for the slop list.
+- Variants obey [iced.md](iced.md) and its Craft floor like any other work; "variant" is not licence for the slop list.
 - Do not leave the switch in committed code. No env lookup survives step 8.
 - Never drive the user's desktop or reuse their installed binary.
 - The sheet is a decision aid, not a review capture; final verification still uses the capture set in verify.md.

@@ -64,7 +64,7 @@ fn main() -> iced::Result {
 
     #[cfg(feature = "remote")]
     {
-        iced_impeccable::Remote::new(app)
+        iced_remote::Remote::new(app)
             // The clock, the session scan, the update check and the wait for a restored focus
             // mean "time passed", not activity, for `wait-idle`.
             .heartbeat(|m| {

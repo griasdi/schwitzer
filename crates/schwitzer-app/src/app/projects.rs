@@ -374,7 +374,7 @@ const PICK_FOLDER_ENV: &str = "SCHWITZER_PICK_FOLDER";
 /// instance opens no dialog: it answers with `$SCHWITZER_PICK_FOLDER`, or `None` when unset.
 async fn choose_folder(title: &'static str, start: Option<PathBuf>) -> Option<PathBuf> {
     #[cfg(feature = "remote")]
-    if iced_impeccable::is_headless() {
+    if iced_remote::is_headless() {
         return std::env::var_os(PICK_FOLDER_ENV)
             .filter(|p| !p.is_empty())
             .map(PathBuf::from);

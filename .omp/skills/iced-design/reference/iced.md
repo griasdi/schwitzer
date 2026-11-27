@@ -2,7 +2,7 @@
 
 For desktop apps built with iced 0.14 (Rust) shipping to Linux, Windows and macOS: `iced::application(..)`, `iced::daemon(..)`, and anything built on `iced::Program`.
 
-On desktop the visitor mode narrows what expression may override. Operability governs structure, navigation and interaction in every mode; brand expresses through the layer the toolkit leaves open (palette, type, spacing, motion, content). iced draws every pixel itself, so nothing is native "for free": platform conformance is something the code does, not something the toolkit supplies.
+On desktop, operability governs structure, navigation and interaction; brand expresses through the layer the toolkit leaves open (palette, type, spacing, motion, content). iced draws every pixel itself, so nothing is native "for free": platform conformance is something the code does, not something the toolkit supplies.
 
 ## The iced slop test
 
@@ -56,7 +56,7 @@ Default to plain built-in widgets styled consistently; depart only for a reason 
 
 - **Build a theme**, don't stay on a stock one: `Theme::custom("Brand", Palette { background, text, primary, success, warning, danger })` or `Theme::custom_with_fn(name, palette, |p| palette::Extended::generate(p))` when the generated extended palette needs overrides. Return it from `.theme(|_| ..)`; with no `.theme(..)` the app follows the system appearance.
 - **Colours only through the theme.** Inside style functions read `theme.extended_palette()` (`background.base.color`, `background.weak`, `primary.strong`, `secondary.base.text`, `danger.base`, ...). No `Color::from_rgb(..)` / `color!(..)` outside the one `theme` module.
-- **Light and dark are both first-class.** Follow the system unless the product pins one (write the pin into PRODUCT.md). Capture both (`appearance dark|light`).
+- **Light and dark are both first-class.** Follow the system unless the product pins one (record the pin in the project's design notes). Capture both (`appearance dark|light`).
 - **Contrast.** Body and placeholder text >= 4.5:1, large text >= 3:1, UI boundaries (input borders, focus) >= 3:1. Check disabled states too; "disabled" is not "invisible".
 - **Tinted neutrals.** Derive surfaces from the palette's `background.weak/strong` steps rather than hand-picked greys.
 - **One accent.** `primary` drives interactive emphasis; decoration is not its job.
@@ -89,18 +89,18 @@ iced 0.14 exposes no accessibility tree: screen readers cannot read the app. Sta
 - **No colour-only meaning**: pair status colours with an icon or word.
 - **Long and translated strings** wrap (`text` wraps by default; `Wrapping::None` must be deliberate) and do not push controls out of view.
 
-## Craft floor on iced
+## Craft floor
 
-Translation of impeccable's `craft-floor.md`:
+The floor every UI change meets:
 
-- CSS units become tokens: `rem`/`px`/`ch` → `Pixels` consts and `max_width`; `clamp()` → size-class switches with `responsive`.
-- Contrast numbers apply unchanged.
+- Web units become tokens: `rem`/`px`/`ch` → `Pixels` consts and `max_width`; `clamp()` → size-class switches with `responsive`.
+- Contrast as in Color & theme, in both appearances.
 - Depth: `Shadow { color, offset: Vector::new(0.0, 2.0), blur_radius: 8.0 }` carries an offset and a soft blur; a zero-offset coloured halo is decoration. Prefer tonal layering through `background.weak/strong`.
-- The bans on gradient text and on side-stripe accents apply to `Border` (a coloured border on one side is built from a thin `container` strip; do not) and `Background::Gradient` / `gradient::Linear`. Hard offset shadows only in a deliberately neobrutalist world.
+- No gradient text and no side-stripe accents: a coloured border on one side (a thin `container` strip) and `Background::Gradient` / `gradient::Linear` on text are out. Hard offset shadows only in a deliberately neobrutalist world.
 - Glass, `backdrop-filter` and blur are not available in iced; do not fake them with translucent stacks as decoration.
-- Nested cards remain wrong; a `container` with a border is a card.
-- Emoji or Unicode glyphs as icons remain banned; use a real icon set.
-- The browser-surface bullets (text selection, caret, custom scrollbars, underline offset) map to: `text_input::Style { selection, value, placeholder }`, `scrollable::Style` (rail, scroller), `text_editor::Style`, and `Font::MONOSPACE` numerals. Theme them from the palette; they are the cheapest signal that the app was built rather than assembled.
+- No nested cards; a `container` with a border is a card.
+- No emoji or Unicode glyphs as icons; use a real icon set.
+- Theme the text and scroll surfaces: `text_input::Style { selection, value, placeholder }`, `scrollable::Style` (rail, scroller), `text_editor::Style`, and `Font::MONOSPACE` numerals. Theme them from the palette; they are the cheapest signal that the app was built rather than assembled.
 - States to verify: hover, pressed, focused, disabled, loading, error, empty, plus real content and keyboard focus.
 
 ## Verifying the build

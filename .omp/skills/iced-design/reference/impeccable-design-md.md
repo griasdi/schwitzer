@@ -1,4 +1,4 @@
-# DESIGN.md and sidecar on iced
+# DESIGN.md and sidecar on iced (impeccable)
 
 Used together with impeccable's `document.md` (and `extract.md`) for `document` and `extract` on an iced app. Impeccable's structure is unchanged: the eight canonical sections, the YAML frontmatter, and `.impeccable/design.json` (schemaVersion 2). This file only maps what the web-flavoured instructions look for onto iced code.
 

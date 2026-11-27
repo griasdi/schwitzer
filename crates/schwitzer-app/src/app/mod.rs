@@ -1675,7 +1675,7 @@ impl App {
             return;
         }
         #[cfg(feature = "remote")]
-        if iced_impeccable::is_headless() {
+        if iced_remote::is_headless() {
             tracing::info!("headless: link not opened: {url}");
             self.notify("Link not opened (headless).");
             return;
