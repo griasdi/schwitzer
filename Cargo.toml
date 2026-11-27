@@ -44,7 +44,7 @@ rusqlite = { version = "0.41", features = ["bundled"] }
 toml = "1"
 clap = { version = "4", features = ["derive"] }
 directories = "6"
-rfd = "0.17"
+rfd = "0.18"
 open = "5"
 tempfile = "3"
 rmcp = { version = "3.9", default-features = false, features = ["server", "macros", "transport-streamable-http-server"] }
