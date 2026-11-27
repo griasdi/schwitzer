@@ -274,6 +274,15 @@ const POLL_TIMEOUT_MS = 10_000;
 const AWAIT_POLL_MS = 10_000; // how often a session that waits for proposals asks the app
 const AWAIT_ENTRY = "schwitzer-await-proposal";
 const AWAIT_END_ENTRY = "schwitzer-await-proposal-end";
+/** A /schwitzer propose that started a brainstorm (drafted: false) or drafted after one (drafted: true). */
+const BRAINSTORM_ENTRY = "schwitzer-brainstorm";
+interface BrainstormKey {
+  room: string;
+  project: string;
+  /** The idea's number; absent for a new proposal. */
+  idea?: number;
+}
+const BRAINSTORM_CHOICES = ["Brainstorm first", "Draft the proposal right away"];
 /** The repo this plugin lives in: <repo>/.omp/plugins/node_modules/schwitzer. */
 const OWN_ROOT = resolve(import.meta.dir, "../../../..");
 const STAGE: Record<Work, string> = { plan: "accepted", build: "ready" };
@@ -1344,7 +1353,7 @@ async function proposeTask(pi: Pi, ctx: Ctx, config: Config, text: string): Prom
       return;
     }
     const picked = await pickNumbered(ctx, ideas, "Write up which idea?");
-    if (picked) pi.sendUserMessage(writeUpPrompt(picked));
+    if (picked) await writeUpIdea(pi, ctx, picked);
     return;
   }
   if (text === "") {
@@ -1358,7 +1367,7 @@ async function proposeTask(pi: Pi, ctx: Ctx, config: Config, text: string): Prom
       const index = pickIndex(await ctx.ui.select("Write up an idea or propose something new", labels), labels);
       if (index < 0) return;
       if (index > 0) {
-        pi.sendUserMessage(writeUpPrompt(ideas[index - 1]));
+        await writeUpIdea(pi, ctx, ideas[index - 1]);
         return;
       }
     }
@@ -1372,7 +1381,74 @@ async function proposeTask(pi: Pi, ctx: Ctx, config: Config, text: string): Prom
   }
   const target = await pickProject(ctx, own, "Propose to which Schwitzer project?", others);
   if (!target) return;
-  pi.sendUserMessage(proposePrompt(target, text, (others as JoinedProject[]).includes(target) ? own : undefined));
+  const from = (others as JoinedProject[]).includes(target) ? own : undefined;
+  await startProposal(
+    pi,
+    ctx,
+    { room: target.room, project: target.projectName },
+    `New proposal for "${target.projectName}": brainstorm it first?`,
+    {
+      draft: (b) => proposePrompt(target, text, from, b),
+      brainstorm: brainstormNewPrompt(target, text, from),
+      hint: "Brainstorming. Run /schwitzer propose when you want the proposal drafted.",
+    },
+  );
+}
+
+/** Writes up an idea, after a brainstorm if the user wants one. */
+async function writeUpIdea(pi: Pi, ctx: Ctx, c: Candidate): Promise<void> {
+  const n = c.task.number;
+  await startProposal(
+    pi,
+    ctx,
+    { room: c.room, project: c.projectName, idea: n },
+    `Idea #${n} "${c.task.title}": brainstorm it first?`,
+    {
+      draft: (b) => writeUpPrompt(c, b),
+      brainstorm: brainstormIdeaPrompt(c),
+      hint: `Brainstorming idea #${n}. Run /schwitzer propose #${n} when you want the proposal drafted.`,
+    },
+  );
+}
+
+/** Asks whether to brainstorm before drafting and sends the matching prompt. A brainstorm of the
+ *  same target earlier in this session leads straight to the draft, based on it; without a UI
+ *  the draft starts at once, as before. */
+async function startProposal(
+  pi: Pi,
+  ctx: Ctx,
+  key: BrainstormKey,
+  title: string,
+  prompts: { draft: (brainstormed: boolean) => string; brainstorm: string; hint: string },
+): Promise<void> {
+  const last = lastEntry(ctx, (e) => {
+    const data = e.data as BrainstormKey | undefined;
+    return (
+      e.type === "custom" &&
+      e.customType === BRAINSTORM_ENTRY &&
+      data?.room === key.room &&
+      data.project === key.project &&
+      data.idea === key.idea
+    );
+  })?.data as (BrainstormKey & { drafted?: boolean }) | undefined;
+  if (last?.drafted === false) {
+    pi.appendEntry(BRAINSTORM_ENTRY, { ...key, drafted: true });
+    pi.sendUserMessage(prompts.draft(true));
+    return;
+  }
+  if (!ctx.hasUI) {
+    pi.sendUserMessage(prompts.draft(false));
+    return;
+  }
+  const index = pickIndex(await ctx.ui.select(title, BRAINSTORM_CHOICES), BRAINSTORM_CHOICES);
+  if (index < 0) return;
+  if (index === 1) {
+    pi.sendUserMessage(prompts.draft(false));
+    return;
+  }
+  pi.appendEntry(BRAINSTORM_ENTRY, { ...key, drafted: false });
+  pi.sendUserMessage(prompts.brainstorm);
+  ctx.ui.notify(prompts.hint, "info");
 }
 
 /** How a proposal is drafted and agreed on, shared by a new proposal and a written-up idea. */
@@ -1384,6 +1460,16 @@ const DRAFT_STEPS = [
   "Then ask me with the ask tool whether to send the proposal, change it or drop it. Keep the question short: name only the title, not the body.",
   "If I want a change, show the changed title and body in the chat again and ask again.",
 ];
+/** How the agent brainstorms before anything is drafted, shared by an idea and a new proposal. */
+const BRAINSTORM_STEPS = [
+  "Look into the repository where that helps, but change nothing and do not implement it.",
+  "First present it in a few lines: what it is, why it is wanted, where it touches the code, what the room already noted on it, and two to four open questions.",
+  "Then brainstorm it with me: variants, tradeoffs, counter-questions; push back where it is weak or wrong. Keep replies short and end each with what is still open.",
+  "Do not write a title or a proposal body and do not call `schwitzer_propose`: the proposal is drafted only when I run /schwitzer propose again.",
+];
+/** What a draft after a brainstorm adds. */
+const BRAINSTORMED_LINE =
+  "We brainstormed this earlier in this conversation: base the proposal on what we settled on there, not only on the first text.";
 /** For a proposal to another project: the task that waits for it, and how the session goes on. */
 const BLOCKS_STEP =
   "If the Schwitzer task you work on is in the same room as that project, also pass its number as `blocks`: that task then waits for the proposal.";
@@ -1422,14 +1508,18 @@ function fastSendLine(room: string, target: string): string {
   return `Show me the title and the whole body in the chat, then send it right away with the tool \`schwitzer_propose\` with room "${room}", ${target}, the title and the body; do not ask me first.`;
 }
 
+/** For a proposal to another project: says that this repo is not part of it. */
+function notPartLine(target: JoinedProject): string {
+  return `This repo is not part of "${target.projectName}": the proposal asks that project for a change this repo's project needs.`;
+}
+
 /** The prompt for a new proposal; `from` holds this repo's projects when `target` is another one. */
-function proposePrompt(target: JoinedProject, idea: string, from?: JoinedProject[]): string {
+function proposePrompt(target: JoinedProject, idea: string, from?: JoinedProject[], brainstormed = false): string {
   return [
     draftLine(target),
-    from
-      ? `This repo is not part of "${target.projectName}": the proposal asks that project for a change this repo's project needs.`
-      : "",
+    from ? notPartLine(target) : "",
     ideaLine(idea),
+    brainstormed ? BRAINSTORMED_LINE : "",
     ...DRAFT_STEPS,
     from ? `Start the body with ${fromLine(from)} and say why that project needs the change.` : "",
     `Only after I agree, call the tool \`schwitzer_propose\` with room "${target.room}", project "${target.projectName}", the title and the body.`,
@@ -1440,14 +1530,41 @@ function proposePrompt(target: JoinedProject, idea: string, from?: JoinedProject
     .join("\n");
 }
 
-function writeUpPrompt(c: Candidate): string {
+function writeUpPrompt(c: Candidate, brainstormed = false): string {
   const n = c.task.number;
   return [
     writeUpLine(c),
     readTaskLine(c),
+    brainstormed ? BRAINSTORMED_LINE : "",
     ...DRAFT_STEPS,
     `Only after I agree, call the tool \`schwitzer_propose\` with room "${c.room}", idea ${n}, the title and the body; the idea becomes the proposal.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** The prompt that brainstorms an idea before it is written up. */
+function brainstormIdeaPrompt(c: Candidate): string {
+  const n = c.task.number;
+  return [
+    `Brainstorm idea #${n} "${c.task.title}" of the project "${c.projectName}" in the Schwitzer room "${c.roomName}" with me before a proposal is drafted.`,
+    readTaskLine(c),
+    ...BRAINSTORM_STEPS,
+    `If I end the brainstorming without asking for the proposal, ask me with the ask tool whether to attach a short summary of what we settled on and what stays open to idea #${n} as a note. Only after I agree, call \`schwitzer_add_note\` with room "${c.room}", task ${n} and the summary.`,
   ].join("\n");
+}
+
+/** The prompt that brainstorms a new proposal before it is drafted. */
+function brainstormNewPrompt(target: JoinedProject, idea: string, from?: JoinedProject[]): string {
+  return [
+    `Brainstorm a task for the project "${target.projectName}" of the Schwitzer room "${target.roomName}" with me before a proposal is drafted.`,
+    from ? notPartLine(target) : "",
+    ideaLine(idea),
+    ...BRAINSTORM_STEPS,
+    `If I end the brainstorming without asking for the proposal, ask me with the ask tool whether to note the result as an idea in the project "${target.projectName}" so the room keeps it. Only after I agree, call \`schwitzer_add_idea\` with room "${target.room}", project "${target.projectName}", a one-line title and the summary as body.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** `/schwitzer revise #n [details|plan] [what to change]`: the agent rewrites the task's text

@@ -54,7 +54,7 @@ omp agents work through the omp plugin the app installs into linked repositories
 - `/schwitzer plan [#n… [now]]`: pick an accepted, unclaimed task (or take task `#n`), claim it for planning, start plan mode; `now` starts it without Enter. Several numbers (`/sw plan #1 #2 #4`), or several tasks checked in the picker, open one omp session per task in a new tab of herdr, tmux, zellij or Orca, each planning its task.
 - `/schwitzer build [#n [now]]`: pick an approved (`ready`), unclaimed task (or take task `#n`), claim it for building; `now` starts it without Enter.
 - `/schwitzer build new`: open a fresh session with `/schwitzer build` in its editor.
-- `/schwitzer propose [#n | text]`: the agent drafts a proposal (or writes up an open idea, or idea `#n`), asks, then sends it.
+- `/schwitzer propose [#n | text]`: the agent drafts a proposal (or writes up an open idea, or idea `#n`), asks, then sends it; it may first brainstorm it with you, and running the command again drafts from the brainstorm.
 - `/schwitzer idea <text>`: note an idea in a project right away, without an agent turn.
 - `/schwitzer debug [stop]`: start or join the room's debug session, or leave it (see below).
 - `/schwitzer revise #n [details|plan] [what to change]`: the agent rewrites the details or the plan of task `#n`, asks, then sends it as a suggestion that a human applies or discards.
