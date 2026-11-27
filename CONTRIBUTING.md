@@ -4,7 +4,7 @@ This document explains how to build and test Schwitzer and how to commit changes
 
 ## Prerequisites
 
-- Stable Rust, at least the `rust-version` in `Cargo.toml` (1.91), with rustfmt and clippy.
+- Stable Rust, at least the `rust-version` in `Cargo.toml` (1.92), with rustfmt and clippy.
 - A C compiler: `rusqlite` builds SQLite from source (`bundled`).
 - `cargo-deny` (`cargo install --locked cargo-deny`) for the dependency check.
 
