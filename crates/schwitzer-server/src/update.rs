@@ -16,6 +16,7 @@ fn platform() -> Option<&'static str> {
 }
 
 const MAX_ARCHIVE: u64 = 64 << 20;
+#[cfg(unix)]
 const BINARY: &str = "schwitzer-server";
 
 /// What a server asset's name starts with, before the version.
