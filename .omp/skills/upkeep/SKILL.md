@@ -55,7 +55,7 @@ In this order, each its own commit:
 1. **Hold-backs** whose lifting condition is met: requirement raised, comment removed or rewritten; constraints still needed keep a comment with the current reason (newest version named, what blocks it).
 2. **Incompatible majors** without a hold-back, one crate or one coupled group per commit (`iced` with `pulldown-cmark`, `resvg` and `iced_impeccable`; `axum` with `rmcp` when rmcp's transport needs it; `ureq` with the rustls it brings; `rand` with whatever shares its `rand_core`). Read the crate's changelog for the range first and adapt the code with a clean cutover, no compatibility shims. A move that brings a second copy of a crate into the graph is not made unless the other copy's user moves in the same commit; otherwise it becomes a hold-back with its comment.
 3. **iced_impeccable** to its newest release on Schwitzer's iced series: requirement raised, `cargo update -p iced_impeccable`, the version in `AGENTS.md` ("Running headless") raised, and the skill copy refreshed with the new binary (`cargo install iced_impeccable --version <v> --locked`, then `iced-impeccable install --agent omp --yes .`), all in one commit. Headless check (step 7) through the new `ctl`.
-4. **impeccable skill:** to its newest release when the `version:` moved, with impeccable's own CLI (`npx impeccable --help` shows how it installs into a repository); its own commit, without a Changelog trailer.
+4. **impeccable skill:** `npx impeccable update` in the repository root; when the `version:` of `.omp/skills/impeccable/SKILL.md` moved, its own commit (subject `Update the impeccable skill to <version>`), without a Changelog trailer.
 
 Every requirement change is followed by the license example of step 3 when `Cargo.lock` moved.
 
