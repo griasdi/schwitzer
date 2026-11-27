@@ -811,12 +811,12 @@ pub fn diff_lines(old: &str, new: &str) -> Vec<DiffLine> {
     };
     let (old, new) = (ended(old), ended(new));
     let diff = TextDiff::from_lines(&old, &new);
-    let old_slices = diff.old_slices();
+    let old_lines = diff.old_lookup();
     let trim = |line: &str| line.trim_end_matches(['\n', '\r']).to_owned();
     let mut out = Vec::new();
     let skip = |out: &mut Vec<DiffLine>, from: usize, to: usize| match to.saturating_sub(from) {
         0 => {}
-        1 => out.push(DiffLine::Same(trim(old_slices[from]))),
+        1 => out.push(DiffLine::Same(trim(&old_lines[from]))),
         _ => out.push(DiffLine::Gap),
     };
     let groups = diff.grouped_ops(2);
@@ -839,7 +839,7 @@ pub fn diff_lines(old: &str, new: &str) -> Vec<DiffLine> {
         shown_to = last.old_range().end;
     }
     if !groups.is_empty() {
-        skip(&mut out, shown_to, old_slices.len());
+        skip(&mut out, shown_to, diff.old_len());
     }
     out
 }

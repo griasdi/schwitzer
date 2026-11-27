@@ -1,5 +1,5 @@
 {
-  "lock": "cf9ee559fb8153886b414a99f536c1e1005fb9cca6396e40ab1bd2af3c223c74",
+  "lock": "4c6c01b0494f392dc2883eb9b028f9d4cf465930b97d5b91b1e470d485977cb9",
   "licenses": [
     {
       "id": "Apache-2.0",
@@ -136,8 +136,8 @@
         },
         {
           "name": "similar",
-          "version": "2.7.0",
-          "source": "https://crates.io/crates/similar/2.7.0"
+          "version": "3.2.1",
+          "source": "https://crates.io/crates/similar/3.2.1"
         }
       ]
     },
