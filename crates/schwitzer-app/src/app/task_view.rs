@@ -58,11 +58,14 @@ pub fn view<'a>(
         if editable {
             let on = app.settings.lanes.task(&state.id, n);
             let tip = if on {
-                "In the fast lane: omp accepts, plans and builds it; only the plan waits for \
-                 your approval. Press to take it out"
+                "In the fast lane: you can decide it from omp too (/schwitzer decide). To plan \
+                 and build it in omp, run /schwitzer fast with its number. Press to take it out"
+            } else if task.stage == Stage::Proposed {
+                "Put into the fast lane: accepts it now, and you can decide it from omp too. To \
+                 plan and build it in omp, run /schwitzer fast with its number"
             } else {
-                "Put into the fast lane: omp accepts, plans and builds it; only the plan waits \
-                 for your approval"
+                "Put into the fast lane: you can decide it from omp too. To plan and build it in \
+                 omp, run /schwitzer fast with its number"
             };
             icons = icons.push(icon_button(
                 "fast-lane-task",

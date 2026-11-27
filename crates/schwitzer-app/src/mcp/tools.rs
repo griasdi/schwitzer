@@ -1470,7 +1470,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "For the omp plugin, not for agents. Put a task into this member's fast lane or take it out: omp then accepts, plans and builds it without a stop; only the plan's approval waits for a human."
+        description = "For the omp plugin, not for agents. Put a task into this member's fast lane or take it out: the member may then make its decisions from omp too (decide, settle_suggestion). It starts nothing by itself."
     )]
     async fn set_fast_lane(&self, Parameters(args): Parameters<SetFastLaneArgs>) -> CallToolResult {
         Self::bounded(async {
